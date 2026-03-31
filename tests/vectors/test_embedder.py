@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from remi.infrastructure.vectors.embedder import NoopEmbedder
+from remi.vectors.embedder import NoopEmbedder
 
 
 @pytest.fixture

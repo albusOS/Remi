@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import abc
-from typing import TYPE_CHECKING, Any
+from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 
 class MemoryEntry(BaseModel, frozen=True):

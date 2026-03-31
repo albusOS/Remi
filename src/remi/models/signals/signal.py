@@ -5,14 +5,12 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from remi.models.ontology import KnowledgeProvenance as Provenance
-
-if TYPE_CHECKING:
-    from remi.models.signals.enums import Severity
+from remi.models.signals.enums import Severity
 
 
 def _utcnow() -> datetime:

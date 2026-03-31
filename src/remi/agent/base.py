@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -10,8 +11,6 @@ from pydantic import BaseModel, Field
 from remi.models.chat import Message
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from remi.agent.context import RuntimeContext
 
 __all__ = [

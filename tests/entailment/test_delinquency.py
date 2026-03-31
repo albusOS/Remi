@@ -7,12 +7,11 @@ from decimal import Decimal
 
 import pytest
 
-from remi.domain.properties.enums import LeaseStatus, TenantStatus
-from remi.domain.properties.models import Lease, Tenant, Unit
-from remi.domain.signals.types import Severity
-from remi.infrastructure.entailment.engine import EntailmentEngine
-from remi.infrastructure.entailment.in_memory_signal_store import InMemorySignalStore
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.models.properties import Lease, LeaseStatus, Tenant, Unit
+from remi.models.signals import Severity
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemorySignalStore
 from tests.conftest import seed_basic_portfolio
 
 

@@ -6,8 +6,8 @@ It creates its own Container in the lifespan and manages the full lifecycle.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,9 +28,6 @@ from remi.api.units.router import router as units_router
 from remi.config.container import Container
 from remi.config.settings import RemiSettings, load_settings
 from remi.observability.logging import configure_logging
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 def _attach_routers(application: FastAPI) -> None:

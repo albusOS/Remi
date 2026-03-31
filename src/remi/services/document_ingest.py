@@ -13,21 +13,19 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
 from remi.documents.parsers import parse_csv, parse_excel
+from remi.knowledge.composite import CompositeProducer
+from remi.knowledge.ingestion import IngestionService
+from remi.knowledge.pattern_detector import PatternDetector
 from remi.models.documents import Document, DocumentStore
 from remi.models.memory import Entity, KnowledgeStore, Relationship
-
-if TYPE_CHECKING:
-    from remi.knowledge.composite import CompositeProducer
-    from remi.knowledge.ingestion import IngestionService
-    from remi.knowledge.pattern_detector import PatternDetector
-    from remi.models.properties import PropertyStore
-    from remi.services.snapshots import SnapshotService
-    from remi.vectors.pipeline import EmbeddingPipeline
+from remi.models.properties import PropertyStore
+from remi.services.snapshots import SnapshotService
+from remi.vectors.pipeline import EmbeddingPipeline
 
 EnrichFn = Callable[
     [list[dict[str, Any]], Document, KnowledgeStore],

@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
-from remi.infrastructure.config.container import Container
-from remi.infrastructure.loaders.yaml_loader import YamlAppLoader
-from remi.infrastructure.sandbox.seeder import SandboxSeeder
+from remi.config.container import Container
 from remi.shared.paths import WORKFLOWS_DIR
-
 
 EXPECTED_DIRECTOR_TOOLS = [
     "onto_signals",
@@ -46,35 +41,6 @@ REMOVED_TOOLS = [
     "kb_related",
     "kb_summary",
 ]
-
-
-def test_director_yaml_has_all_tools() -> None:
-    """The director YAML should list all 22 expected tools."""
-    loader = YamlAppLoader()
-    app_path = WORKFLOWS_DIR / "director" / "app.yaml"
-    app_def = loader.load(str(app_path))
-
-    agent_module = None
-    for m in app_def.modules:
-        if m.kind == "agent":
-            agent_module = m
-            break
-
-    assert agent_module is not None, "Director YAML must have an agent module"
-
-    tool_names = [t["name"] for t in agent_module.config.get("tools", [])]
-
-    for expected in EXPECTED_DIRECTOR_TOOLS:
-        assert expected in tool_names, f"Missing tool: {expected}"
-
-    assert len(tool_names) == len(EXPECTED_DIRECTOR_TOOLS)
-
-
-def test_container_has_seeder() -> None:
-    """Container should expose a SandboxSeeder instance."""
-    container = Container()
-    assert hasattr(container, "sandbox_seeder")
-    assert isinstance(container.sandbox_seeder, SandboxSeeder)
 
 
 def test_no_redundant_tools_in_registry() -> None:

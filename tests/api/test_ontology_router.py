@@ -9,10 +9,10 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from remi.models.ontology import KnowledgeProvenance, ObjectTypeDef, PropertyDef
-from remi.config.container import Container
 from remi.api.dependencies import get_container
 from remi.api.main import create_app
+from remi.config.container import Container
+from remi.models.ontology import KnowledgeProvenance
 
 
 @pytest.fixture

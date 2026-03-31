@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from remi.domain.trace.types import SpanKind, SpanStatus
-from remi.infrastructure.trace.in_memory import InMemoryTraceStore
-from remi.infrastructure.trace.tracer import (
+from remi.models.trace import SpanKind, SpanStatus
+from remi.observability.tracer import (
     Tracer,
     get_current_span_id,
     get_current_trace_id,
 )
+from remi.stores.trace import InMemoryTraceStore
 
 
 @pytest.fixture
@@ -42,10 +42,9 @@ async def test_start_trace_creates_root_span(
 async def test_child_spans_form_tree(
     tracer: Tracer, store: InMemoryTraceStore,
 ) -> None:
-    async with tracer.start_trace("root") as root:
-        async with root.span(SpanKind.ENTAILMENT, "child1"):
-            async with root.span(SpanKind.LLM_CALL, "child2"):
-                pass
+    async with tracer.start_trace("root") as root, root.span(SpanKind.ENTAILMENT, "child1"):
+        async with root.span(SpanKind.LLM_CALL, "child2"):
+            pass
 
     spans = await store.list_spans(root.trace_id)
     assert len(spans) == 3

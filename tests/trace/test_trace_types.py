@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remi.domain.trace.types import Span, SpanKind, SpanStatus, new_span_id, new_trace_id
+from remi.models.trace import Span, SpanKind, SpanStatus, new_span_id, new_trace_id
 
 
 def test_new_trace_id_format() -> None:

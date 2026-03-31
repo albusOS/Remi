@@ -11,30 +11,26 @@ from decimal import Decimal
 
 import pytest
 
-from remi.application.snapshots.service import ManagerSnapshot, SnapshotService
-from remi.domain.properties.enums import (
-    LeaseStatus,
-    MaintenanceStatus,
-    OccupancyStatus,
-    Priority,
-    TenantStatus,
-    UnitStatus,
-)
-from remi.domain.properties.models import (
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.models.properties import (
     Address,
     Lease,
+    LeaseStatus,
     MaintenanceRequest,
+    MaintenanceStatus,
     Portfolio,
+    Priority,
     Property,
     PropertyManager,
     Tenant,
     Unit,
+    UnitStatus,
 )
-from remi.domain.signals.types import DomainOntology
-from remi.infrastructure.entailment.engine import EntailmentEngine
-from remi.infrastructure.entailment.in_memory_signal_store import InMemorySignalStore
-from remi.infrastructure.ontology.bootstrap import load_domain_yaml
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
+from remi.models.signals import DomainOntology
+from remi.services.snapshots import ManagerSnapshot, SnapshotService
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemorySignalStore
 
 _ADDR = Address(street="100 Main St", city="Portland", state="OR", zip_code="97201")
 

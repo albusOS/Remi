@@ -6,12 +6,11 @@ from decimal import Decimal
 
 import pytest
 
-from remi.domain.properties.enums import UnitStatus
-from remi.domain.properties.models import Unit
-from remi.domain.signals.types import Severity
-from remi.infrastructure.entailment.engine import EntailmentEngine
-from remi.infrastructure.entailment.in_memory_signal_store import InMemorySignalStore
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.models.properties import Unit, UnitStatus
+from remi.models.signals import Severity
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemorySignalStore
 from tests.conftest import seed_basic_portfolio
 
 

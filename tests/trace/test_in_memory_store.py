@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from remi.domain.trace.types import Span, SpanKind, SpanStatus, new_trace_id
-from remi.infrastructure.trace.in_memory import InMemoryTraceStore
+from remi.models.trace import Span, SpanKind, SpanStatus, new_trace_id
+from remi.stores.trace import InMemoryTraceStore
 
 
 @pytest.fixture

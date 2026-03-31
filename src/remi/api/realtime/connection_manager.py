@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
-
-if TYPE_CHECKING:
-    from fastapi import WebSocket
+from fastapi import WebSocket
 
 logger = structlog.get_logger("remi.ws.broadcast")
 

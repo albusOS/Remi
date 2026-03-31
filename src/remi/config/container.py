@@ -8,7 +8,7 @@ and document ingestion.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from remi.agent.retry import RetryPolicy
 from remi.agent.runner import ChatAgentService
@@ -23,7 +23,15 @@ from remi.knowledge.ontology_bridge import BridgedOntologyStore, CoreTypeBinding
 from remi.knowledge.pattern_detector import PatternDetector
 from remi.knowledge.statistical import StatisticalProducer
 from remi.llm.factory import LLMProviderFactory
+from remi.models.chat import ChatSessionStore
+from remi.models.documents import Document, DocumentStore
+from remi.models.memory import KnowledgeStore, MemoryStore
+from remi.models.properties import PropertyStore
+from remi.models.retrieval import Embedder, VectorStore
+from remi.models.sandbox import Sandbox
 from remi.models.signals import DomainOntology, FeedbackStore, MutableDomainOntology, SignalStore
+from remi.models.tools import ToolRegistry
+from remi.models.trace import TraceStore
 from remi.observability.tracer import Tracer
 from remi.sandbox.local import LocalSandbox
 from remi.shared.clock import Clock, SystemClock
@@ -35,16 +43,6 @@ from remi.stores.trace import InMemoryTraceStore
 from remi.stores.vectors import InMemoryVectorStore
 from remi.tools import register_all_tools
 from remi.tools.registry import InMemoryToolRegistry
-
-if TYPE_CHECKING:
-    from remi.models.chat import ChatSessionStore
-    from remi.models.documents import Document, DocumentStore
-    from remi.models.memory import KnowledgeStore, MemoryStore
-    from remi.models.properties import PropertyStore
-    from remi.models.retrieval import Embedder, VectorStore
-    from remi.models.sandbox import Sandbox
-    from remi.models.tools import ToolRegistry
-    from remi.models.trace import TraceStore
 
 
 class Container:

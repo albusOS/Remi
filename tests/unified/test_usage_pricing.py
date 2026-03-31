@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from remi.llm.pricing import PRICING, ModelPricing, estimate_cost
 from remi.llm.ports import TokenUsage
+from remi.llm.pricing import PRICING, estimate_cost
 
 
 class TestTokenUsage:

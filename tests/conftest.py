@@ -2,35 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
-
 import pytest
-import pytest_asyncio
 
-from remi.models.properties import (
-    LeaseStatus,
-    MaintenanceStatus,
-    OccupancyStatus,
-    Priority,
-    TenantStatus,
-    UnitStatus,
-)
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.knowledge.ontology.bootstrap import load_domain_yaml
 from remi.models.properties import (
     Address,
-    Lease,
-    MaintenanceRequest,
     Portfolio,
     Property,
     PropertyManager,
-    Tenant,
-    Unit,
 )
 from remi.models.signals import DomainOntology
-from remi.knowledge.entailment import EntailmentEngine
-from remi.stores.signals import InMemorySignalStore
-from remi.knowledge.ontology_bootstrap import load_domain_yaml
 from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemorySignalStore
 
 
 @pytest.fixture

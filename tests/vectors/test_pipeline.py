@@ -2,35 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
 
-from remi.domain.properties.enums import (
-    LeaseStatus,
-    MaintenanceCategory,
-    MaintenanceStatus,
-    OccupancyStatus,
-    Priority,
-    TenantStatus,
-    UnitStatus,
-)
-from remi.domain.properties.models import (
+from remi.models.properties import (
     Address,
     Lease,
+    LeaseStatus,
+    MaintenanceCategory,
     MaintenanceRequest,
+    MaintenanceStatus,
     Portfolio,
+    Priority,
     Property,
     PropertyManager,
     Tenant,
+    TenantStatus,
     Unit,
+    UnitStatus,
 )
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
-from remi.infrastructure.vectors.embedder import NoopEmbedder
-from remi.infrastructure.vectors.in_memory import InMemoryVectorStore
-from remi.infrastructure.vectors.pipeline import EmbeddingPipeline
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.vectors import InMemoryVectorStore
+from remi.vectors.embedder import NoopEmbedder
+from remi.vectors.pipeline import EmbeddingPipeline
 
 _ADDR = Address(street="100 Main St", city="Portland", state="OR", zip_code="97201")
 

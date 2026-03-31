@@ -13,11 +13,6 @@ router = APIRouter(tags=["ws"])
 logger = structlog.get_logger("remi.ws")
 
 
-def _container(ws: WebSocket):
-    """Extract the container from the app state (works for both HTTP and WS)."""
-    return ws.app.state.container
-
-
 @router.websocket("/ws/events")
 async def events_ws(ws: WebSocket) -> None:
     client = ws.client.host if ws.client else "unknown"
@@ -36,8 +31,8 @@ async def chat_ws(ws: WebSocket) -> None:
     client = ws.client.host if ws.client else "unknown"
     logger.info("ws_chat_connect", client=client)
     await ws.accept()
-    container = _container(ws)
-    dispatcher = build_chat_dispatcher(ws, container)
+    c = ws.app.state.container
+    dispatcher = build_chat_dispatcher(ws, c.chat_session_store, c.chat_agent)
 
     try:
         while True:

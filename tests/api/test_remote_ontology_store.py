@@ -10,11 +10,11 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from remi.domain.ontology.types import KnowledgeProvenance, ObjectTypeDef, PropertyDef
-from remi.infrastructure.config.container import Container
-from remi.infrastructure.ontology.remote import RemoteOntologyStore
-from remi.interfaces.api.dependencies import get_container
-from remi.interfaces.api.main import create_app
+from remi.api.dependencies import get_container
+from remi.api.main import create_app
+from remi.config.container import Container
+from remi.knowledge.ontology.remote import RemoteOntologyStore
+from remi.models.ontology import KnowledgeProvenance, ObjectTypeDef, PropertyDef
 
 
 @pytest.fixture

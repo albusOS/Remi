@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from remi.domain.signals.types import (
+from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.models.signals import (
     CausalChain,
     Deontic,
     DomainOntology,
@@ -14,8 +15,6 @@ from remi.domain.signals.types import (
     Severity,
     SignalDefinition,
 )
-from remi.infrastructure.ontology.bootstrap import load_domain_yaml
-
 
 EXPECTED_SIGNAL_NAMES = {
     "OccupancyDrift",

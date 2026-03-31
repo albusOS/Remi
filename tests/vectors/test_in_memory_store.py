@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
-from remi.domain.retrieval.types import EmbeddingRecord
-from remi.infrastructure.vectors.in_memory import InMemoryVectorStore, _cosine_similarity
+from remi.models.retrieval import EmbeddingRecord
+from remi.stores.vectors import InMemoryVectorStore, _cosine_similarity
 
 
 @pytest.fixture

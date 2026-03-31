@@ -9,23 +9,20 @@ from __future__ import annotations
 
 import pytest
 
-from remi.domain.signals.hypothesis import (
+from remi.knowledge.graduation import HypothesisGraduator
+from remi.knowledge.ontology.bridge import BridgedOntologyStore
+from remi.knowledge.pattern_detector import PatternDetector
+from remi.models.properties import Unit, UnitStatus
+from remi.models.signals import (
+    DomainOntology,
     Hypothesis,
     HypothesisKind,
     HypothesisStatus,
-)
-from remi.domain.signals.types import DomainOntology
-from remi.infrastructure.entailment.graduation import (
-    HypothesisGraduator,
     MutableDomainOntology,
 )
-from remi.infrastructure.entailment.in_memory_hypothesis_store import (
-    InMemoryHypothesisStore,
-)
-from remi.infrastructure.entailment.pattern_detector import PatternDetector
-from remi.infrastructure.memory.in_memory import InMemoryKnowledgeStore
-from remi.infrastructure.ontology.bridge import BridgedOntologyStore
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
+from remi.stores.memory import InMemoryKnowledgeStore
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemoryHypothesisStore
 
 # -- Fixtures -----------------------------------------------------------------
 
@@ -64,7 +61,7 @@ def hypothesis_store() -> InMemoryHypothesisStore:
 
 @pytest.fixture
 def domain() -> DomainOntology:
-    from remi.infrastructure.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.bootstrap import load_domain_yaml
 
     return DomainOntology.from_yaml(load_domain_yaml())
 
@@ -176,7 +173,7 @@ def test_mutable_domain_add_signal(
     mutable_domain: MutableDomainOntology,
     domain: DomainOntology,
 ) -> None:
-    from remi.domain.signals.types import (
+    from remi.models.signals import (
         EntityType,
         Horizon,
         InferenceRule,
@@ -213,7 +210,7 @@ def test_mutable_domain_add_signal(
 def test_mutable_domain_add_causal_chain(
     mutable_domain: MutableDomainOntology,
 ) -> None:
-    from remi.domain.signals.types import CausalChain
+    from remi.models.signals import CausalChain
 
     chain = CausalChain(
         cause="Unit.sqft",
@@ -247,9 +244,6 @@ async def test_pattern_detector_finds_outlier_threshold(
     hypothesis_store: InMemoryHypothesisStore,
 ) -> None:
     """Seed units with one extreme outlier, verify threshold hypothesis."""
-    from remi.domain.properties.enums import UnitStatus
-    from remi.domain.properties.models import Unit
-
     await _bootstrap(ontology_store)
 
     for i in range(10):
@@ -300,9 +294,6 @@ async def test_pattern_detector_finds_concentration(
     hypothesis_store: InMemoryHypothesisStore,
 ) -> None:
     """Seed units where 90% have the same status."""
-    from remi.domain.properties.enums import UnitStatus
-    from remi.domain.properties.models import Unit
-
     await _bootstrap(ontology_store)
 
     for i in range(9):
@@ -481,9 +472,6 @@ async def test_full_hypothesis_lifecycle(
     mutable_domain: MutableDomainOntology,
 ) -> None:
     """Full cycle: detect patterns → confirm → graduate → verify in TBox."""
-    from remi.domain.properties.enums import UnitStatus
-    from remi.domain.properties.models import Unit
-
     await _bootstrap(ontology_store)
 
     for i in range(10):
@@ -539,6 +527,6 @@ async def test_full_hypothesis_lifecycle(
 
 
 async def _bootstrap(ontology_store: BridgedOntologyStore) -> None:
-    from remi.infrastructure.ontology.bootstrap import bootstrap_ontology
+    from remi.knowledge.ontology.bootstrap import bootstrap_ontology
 
     await bootstrap_ontology(ontology_store)

@@ -5,20 +5,18 @@ Thin transport adapter: delegates agent execution to ChatAgentService.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
+from fastapi import WebSocket
 
+from remi.agent.runner import ChatAgentService
 from remi.api.realtime.jsonrpc import (
     Dispatcher,
     JsonRpcNotification,
     JsonRpcRequest,
 )
-
-if TYPE_CHECKING:
-    from fastapi import WebSocket
-
-    from remi.config.container import Container
+from remi.models.chat import ChatSessionStore
 
 logger = structlog.get_logger("remi.chat_runner")
 
@@ -28,7 +26,11 @@ async def send_notification(ws: WebSocket, method: str, params: dict[str, Any]) 
     await ws.send_text(notif.to_json())
 
 
-def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
+def build_chat_dispatcher(
+    ws: WebSocket,
+    chat_session_store: ChatSessionStore,
+    chat_agent: ChatAgentService,
+) -> Dispatcher:
     from remi.models.chat import Message
 
     dp = Dispatcher()
@@ -38,7 +40,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
         agent = req.params.get("agent", "director")
         provider = req.params.get("provider")
         model = req.params.get("model")
-        session = await container.chat_session_store.create(
+        session = await chat_session_store.create(
             agent,
             provider=provider,
             model=model,
@@ -72,7 +74,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
             model=req_model,
         )
 
-        session = await container.chat_session_store.get(session_id)
+        session = await chat_session_store.get(session_id)
         if session is None:
             raise ValueError(f"Session '{session_id}' not found")
 
@@ -80,9 +82,9 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
         model = req_model or session.model
 
         user_msg = Message(role="user", content=message_text)
-        await container.chat_session_store.append_message(session_id, user_msg)
+        await chat_session_store.append_message(session_id, user_msg)
 
-        session = await container.chat_session_store.get(session_id)
+        session = await chat_session_store.get(session_id)
         assert session is not None
 
         async def on_event(event_type: str, data: dict[str, Any]) -> None:
@@ -96,7 +98,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
             )
 
         try:
-            answer = await container.chat_agent.run_chat_agent(
+            answer = await chat_agent.run_chat_agent(
                 session.agent,
                 session.thread,
                 on_event,
@@ -118,7 +120,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
             raise
 
         assistant_msg = Message(role="assistant", content=answer)
-        await container.chat_session_store.append_message(session_id, assistant_msg)
+        await chat_session_store.append_message(session_id, assistant_msg)
 
         return {"status": "ok", "session_id": session_id}
 
@@ -127,7 +129,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
         session_id = req.params.get("session_id")
         if not session_id:
             raise ValueError("session_id is required")
-        session = await container.chat_session_store.get(session_id)
+        session = await chat_session_store.get(session_id)
         if session is None:
             raise ValueError(f"Session '{session_id}' not found")
         return {
@@ -142,7 +144,7 @@ def build_chat_dispatcher(ws: WebSocket, container: Container) -> Dispatcher:
 
     @dp.method("chat.list")
     async def chat_list(req: JsonRpcRequest) -> dict[str, Any]:
-        sessions = await container.chat_session_store.list_sessions()
+        sessions = await chat_session_store.list_sessions()
         return {
             "sessions": [
                 {

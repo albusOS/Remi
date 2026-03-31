@@ -6,15 +6,14 @@ from decimal import Decimal
 
 import pytest
 
-from remi.domain.properties.enums import UnitStatus
-from remi.domain.properties.models import Unit
-from remi.domain.signals.types import DomainOntology
-from remi.infrastructure.entailment.engine import EntailmentEngine
-from remi.infrastructure.entailment.in_memory_signal_store import InMemorySignalStore
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
-from remi.infrastructure.trace.in_memory import InMemoryTraceStore
-from remi.infrastructure.trace.tracer import Tracer
-from remi.infrastructure.ontology.bootstrap import load_domain_yaml
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.models.properties import Unit, UnitStatus
+from remi.models.signals import DomainOntology
+from remi.observability.tracer import Tracer
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemorySignalStore
+from remi.stores.trace import InMemoryTraceStore
 from tests.conftest import seed_basic_portfolio
 
 

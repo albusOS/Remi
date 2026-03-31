@@ -4,31 +4,26 @@ StatisticalProducer, and FeedbackStore.
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
-from remi.domain.signals.feedback import (
-    FeedbackStore,
-    SignalFeedback,
-    SignalOutcome,
-)
-from remi.domain.signals.producers import ProducerResult, SignalProducer
-from remi.domain.signals.types import (
+from remi.knowledge.composite import CompositeProducer
+from remi.knowledge.entailment.engine import EntailmentEngine
+from remi.knowledge.ontology.bridge import BridgedOntologyStore
+from remi.knowledge.statistical import StatisticalProducer
+from remi.models.properties import Unit, UnitStatus
+from remi.models.signals import (
     DomainOntology,
+    ProducerResult,
     Provenance,
     Severity,
     Signal,
+    SignalFeedback,
+    SignalOutcome,
+    SignalProducer,
 )
-from remi.infrastructure.entailment.composite import CompositeProducer
-from remi.infrastructure.entailment.engine import EntailmentEngine
-from remi.infrastructure.entailment.in_memory_feedback_store import InMemoryFeedbackStore
-from remi.infrastructure.entailment.in_memory_signal_store import InMemorySignalStore
-from remi.infrastructure.entailment.statistical import StatisticalProducer
-from remi.infrastructure.memory.in_memory import InMemoryKnowledgeStore
-from remi.infrastructure.ontology.bridge import BridgedOntologyStore
-from remi.infrastructure.properties.in_memory import InMemoryPropertyStore
-
+from remi.stores.memory import InMemoryKnowledgeStore
+from remi.stores.properties import InMemoryPropertyStore
+from remi.stores.signals import InMemoryFeedbackStore, InMemorySignalStore
 
 # -- Fixtures -----------------------------------------------------------------
 
@@ -236,7 +231,7 @@ async def test_entailment_engine_implements_signal_producer(
     property_store: InMemoryPropertyStore,
 ) -> None:
     """EntailmentEngine is a valid SignalProducer."""
-    from remi.infrastructure.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.bootstrap import load_domain_yaml
 
     domain = DomainOntology.from_yaml(load_domain_yaml())
     engine = EntailmentEngine(domain=domain, property_store=property_store)
@@ -267,9 +262,6 @@ async def test_statistical_outlier_detection(
     property_store: InMemoryPropertyStore,
 ) -> None:
     """Seed units with one outlier value, verify detection."""
-    from remi.domain.properties.enums import UnitStatus
-    from remi.domain.properties.models import Unit
-
     await _bootstrap(ontology_store)
 
     for i in range(10):
@@ -399,7 +391,7 @@ async def test_full_pipeline_integration(
     ontology_store: BridgedOntologyStore,
 ) -> None:
     """End-to-end: rules + stats produce signals, feedback records outcomes."""
-    from remi.infrastructure.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.bootstrap import load_domain_yaml
 
     await _bootstrap(ontology_store)
 
@@ -435,6 +427,6 @@ async def test_full_pipeline_integration(
 
 
 async def _bootstrap(ontology_store: BridgedOntologyStore) -> None:
-    from remi.infrastructure.ontology.bootstrap import bootstrap_ontology
+    from remi.knowledge.ontology.bootstrap import bootstrap_ontology
 
     await bootstrap_ontology(ontology_store)
