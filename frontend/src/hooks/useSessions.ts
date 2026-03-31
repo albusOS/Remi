@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, SessionSummary, ToolCall, UsageInfo } from "@/lib/types";
 
+let _msgSeq = 0;
+function msgId(): string {
+  return `msg-${Date.now()}-${++_msgSeq}`;
+}
+
 const WS_URL =
   process.env.NEXT_PUBLIC_CHAT_WS_URL || "ws://localhost:8000/ws/chat";
 
@@ -168,7 +173,6 @@ export function useSessions(agent: string) {
                   }
                 : t
             ),
-            liveContent: "",
           }));
           break;
         }
@@ -193,6 +197,7 @@ export function useSessions(agent: string) {
               messages: [
                 ...s.messages,
                 {
+                  id: msgId(),
                   role: "assistant" as const,
                   content: finalContent,
                   timestamp: Date.now(),
@@ -221,6 +226,17 @@ export function useSessions(agent: string) {
             error: message,
             streaming: false,
             liveContent: "",
+            liveTools: [],
+            messages: [
+              ...s.messages,
+              {
+                id: msgId(),
+                role: "assistant" as const,
+                content: "",
+                timestamp: Date.now(),
+                error: message,
+              },
+            ],
           }));
           setSessions((prev) =>
             prev.map((ss) =>
@@ -345,6 +361,7 @@ export function useSessions(agent: string) {
         const rawMessages =
           (r.result?.messages as Array<Record<string, unknown>>) ?? [];
         const messages: ChatMessage[] = rawMessages.map((m) => ({
+          id: msgId(),
           role: m.role as "user" | "assistant",
           content: (m.content as string) ?? "",
           timestamp: 0,
@@ -372,7 +389,7 @@ export function useSessions(agent: string) {
     async (
       text: string,
       mode: "ask" | "agent" = "ask",
-      opts?: { provider?: string; model?: string },
+      opts?: { provider?: string; model?: string; managerId?: string },
     ) => {
       let sid = activeSessionIdRef.current;
 
@@ -416,7 +433,7 @@ export function useSessions(agent: string) {
         liveContent: "",
         messages: [
           ...s.messages,
-          { role: "user" as const, content: text, timestamp: Date.now() },
+          { id: msgId(), role: "user" as const, content: text, timestamp: Date.now() },
         ],
       }));
 
@@ -440,6 +457,7 @@ export function useSessions(agent: string) {
           mode,
           ...(opts?.provider && { provider: opts.provider }),
           ...(opts?.model && { model: opts.model }),
+          ...(opts?.managerId && { manager_id: opts.managerId }),
         });
       } catch (e) {
         if (e instanceof Error && e.message !== "WebSocket disconnected") {
@@ -482,6 +500,22 @@ export function useSessions(agent: string) {
     }
   }, [updateState]);
 
+  const stopGenerating = useCallback(() => {
+    const sid = activeSessionIdRef.current;
+    if (!sid) return;
+    updateState(sid, (s) => ({
+      ...s,
+      streaming: false,
+      liveContent: "",
+      liveTools: [],
+    }));
+    setSessions((prev) =>
+      prev.map((ss) =>
+        ss.id === sid ? { ...ss, streaming: false } : ss
+      )
+    );
+  }, [updateState]);
+
   const activeSession = activeSessionId
     ? sessionStates.get(activeSessionId) ?? null
     : null;
@@ -496,5 +530,6 @@ export function useSessions(agent: string) {
     send,
     deleteSession,
     dismissError,
+    stopGenerating,
   };
 }

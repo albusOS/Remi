@@ -26,8 +26,6 @@ modules:
       Classifies ambiguous document rows into real-estate domain entities
       and relationships. Returns strict JSON output.
     config:
-      provider: openai
-      model: gpt-4o-mini
       temperature: 0.1
       max_tokens: 4096
       max_iterations: 2

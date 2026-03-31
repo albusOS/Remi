@@ -125,6 +125,9 @@ class Container:
 
         # -- RE-specific services ----------------------------------------------
 
+        import structlog as _structlog
+        _container_log = _structlog.get_logger("remi.container")
+
         async def _classify_document(doc: Document) -> str | None:
             if not self.settings.secrets.has_any_llm_key:
                 return None
@@ -151,6 +154,7 @@ class Container:
                     report_type = answer.get("report_type", "").strip().lower().replace(" ", "_")
                     return report_type if report_type else None
             except Exception:
+                _container_log.exception("classify_document_failed", doc_id=doc.id)
                 return None
             return None
 
@@ -250,6 +254,7 @@ class Container:
                         total_entities += e
                         total_rels += r
             except Exception:
+                _container_log.exception("enrich_rows_failed", doc_id=doc.id)
                 return total_entities, total_rels
             return total_entities, total_rels
 

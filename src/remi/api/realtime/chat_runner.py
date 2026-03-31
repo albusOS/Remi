@@ -21,6 +21,38 @@ from remi.models.chat import ChatSessionStore
 logger = structlog.get_logger("remi.chat_runner")
 
 
+async def _resolve_manager_scope(
+    property_store: Any,
+    manager_id: str | None,
+) -> dict[str, Any]:
+    """Build extras dict with manager scope info when a manager is selected."""
+    if not manager_id or property_store is None:
+        return {}
+    try:
+        mgr = await property_store.get_manager(manager_id)
+        if mgr is None:
+            return {}
+        portfolios = await property_store.list_portfolios(manager_id=manager_id)
+        property_names: list[str] = []
+        total_units = 0
+        for p in portfolios:
+            props = await property_store.list_properties(portfolio_id=p.id)
+            for prop in props:
+                property_names.append(prop.name)
+                units = await property_store.list_units(property_id=prop.id)
+                total_units += len(units)
+        return {
+            "manager_id": manager_id,
+            "manager_name": mgr.name,
+            "manager_property_count": len(property_names),
+            "manager_property_names": property_names,
+            "manager_unit_count": total_units,
+        }
+    except Exception:
+        logger.debug("manager_scope_resolve_failed", manager_id=manager_id, exc_info=True)
+        return {"manager_id": manager_id}
+
+
 async def send_notification(ws: WebSocket, method: str, params: dict[str, Any]) -> None:
     notif = JsonRpcNotification(method=method, params=params)
     await ws.send_text(notif.to_json())
@@ -30,6 +62,8 @@ def build_chat_dispatcher(
     ws: WebSocket,
     chat_session_store: ChatSessionStore,
     chat_agent: ChatAgentService,
+    *,
+    property_store: Any = None,
 ) -> Dispatcher:
     from remi.models.chat import Message
 
@@ -62,11 +96,12 @@ def build_chat_dispatcher(
 
         req_provider = req.params.get("provider")
         req_model = req.params.get("model")
+        manager_id = req.params.get("manager_id")
 
         if not session_id:
             raise ValueError("session_id is required")
 
-        log = logger.bind(session_id=session_id, mode=mode)
+        log = logger.bind(session_id=session_id, mode=mode, manager_id=manager_id)
         log.info(
             "chat_send",
             message_length=len(message_text),
@@ -80,6 +115,8 @@ def build_chat_dispatcher(
 
         provider = req_provider or session.provider
         model = req_model or session.model
+
+        manager_scope = await _resolve_manager_scope(property_store, manager_id)
 
         user_msg = Message(role="user", content=message_text)
         await chat_session_store.append_message(session_id, user_msg)
@@ -106,6 +143,7 @@ def build_chat_dispatcher(
                 sandbox_session_id=f"chat-{session_id}",
                 provider=provider,
                 model=model,
+                extra=manager_scope,
             )
         except Exception as exc:
             log.error("chat_send_error", error=str(exc), error_type=type(exc).__name__)

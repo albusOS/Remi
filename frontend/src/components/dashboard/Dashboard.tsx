@@ -27,7 +27,7 @@ function TrendArrow({ prev, curr, invert }: { prev: number; curr: number; invert
   if (Math.abs(diff) < 0.001) return null;
   const positive = invert ? diff < 0 : diff > 0;
   return (
-    <span className={`text-[8px] font-bold ml-0.5 ${positive ? "text-emerald-400" : "text-red-400"}`}>
+    <span className={`text-[8px] font-bold ml-0.5 ${positive ? "text-ok" : "text-error"}`}>
       {positive ? "▲" : "▼"}
     </span>
   );
@@ -41,19 +41,19 @@ function ManagerCard({ m, prev }: { m: ManagerListItem; prev?: ManagerSnapshot |
   return (
     <Link
       href={`/managers/${m.id}`}
-      className={`block rounded-xl border p-4 transition-all hover:border-zinc-600 ${
+      className={`block rounded-xl border p-4 transition-all hover:border-fg-ghost ${
         hasUrgent
-          ? "border-red-500/30 bg-red-500/5"
+          ? "border-error/30 bg-error-soft"
           : issueCount > 0
-          ? "border-amber-500/20 bg-amber-500/5"
-          : "border-zinc-800/60 bg-zinc-900/40"
+          ? "border-warn/20 bg-warn-soft"
+          : "border-border bg-surface"
       }`}
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-zinc-200 truncate">{m.name}</h3>
-          <p className="text-[10px] text-zinc-600 mt-0.5">
+          <h3 className="text-sm font-semibold text-fg truncate">{m.name}</h3>
+          <p className="text-[10px] text-fg-faint mt-0.5">
             {m.property_count} properties · {m.total_units} units
           </p>
         </div>
@@ -66,32 +66,32 @@ function ManagerCard({ m, prev }: { m: ManagerListItem; prev?: ManagerSnapshot |
 
       {/* Metrics grid */}
       <div className="grid grid-cols-4 gap-2 text-center">
-        <div className="rounded-lg bg-zinc-800/30 px-2 py-1.5">
-          <p className="text-[9px] text-zinc-600 uppercase">Occ</p>
-          <p className={`text-xs font-bold ${m.occupancy_rate < 0.9 ? "text-amber-400" : "text-zinc-200"}`}>
+        <div className="rounded-lg bg-surface-sunken px-2 py-1.5">
+          <p className="text-[9px] text-fg-faint uppercase">Occ</p>
+          <p className={`text-xs font-bold ${m.occupancy_rate < 0.9 ? "text-warn" : "text-fg"}`}>
             {pct(m.occupancy_rate)}
             {prev && <TrendArrow prev={prev.occupancy_rate} curr={m.occupancy_rate} />}
           </p>
         </div>
-        <div className="rounded-lg bg-zinc-800/30 px-2 py-1.5">
-          <p className="text-[9px] text-zinc-600 uppercase">Revenue</p>
-          <p className="text-xs font-bold text-zinc-200">
+        <div className="rounded-lg bg-surface-sunken px-2 py-1.5">
+          <p className="text-[9px] text-fg-faint uppercase">Revenue</p>
+          <p className="text-xs font-bold text-fg">
             {fmt$(m.total_actual_rent)}
             {prev && <TrendArrow prev={prev.total_rent} curr={m.total_actual_rent} />}
           </p>
         </div>
-        <div className="rounded-lg bg-zinc-800/30 px-2 py-1.5">
-          <p className="text-[9px] text-zinc-600 uppercase">LTL</p>
-          <p className={`text-xs font-bold ${m.total_loss_to_lease > 0 ? "text-amber-400" : "text-zinc-500"}`}>
+        <div className="rounded-lg bg-surface-sunken px-2 py-1.5">
+          <p className="text-[9px] text-fg-faint uppercase">LTL</p>
+          <p className={`text-xs font-bold ${m.total_loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>
             {m.total_loss_to_lease > 0 ? fmt$(m.total_loss_to_lease) : "—"}
             {prev && prev.loss_to_lease !== m.total_loss_to_lease && (
               <TrendArrow prev={prev.loss_to_lease} curr={m.total_loss_to_lease} invert />
             )}
           </p>
         </div>
-        <div className="rounded-lg bg-zinc-800/30 px-2 py-1.5">
-          <p className="text-[9px] text-zinc-600 uppercase">Vacant</p>
-          <p className={`text-xs font-bold ${m.vacant > 0 ? "text-red-400" : "text-zinc-500"}`}>
+        <div className="rounded-lg bg-surface-sunken px-2 py-1.5">
+          <p className="text-[9px] text-fg-faint uppercase">Vacant</p>
+          <p className={`text-xs font-bold ${m.vacant > 0 ? "text-error" : "text-fg-muted"}`}>
             {m.vacant > 0 ? m.vacant : "—"}
             {prev && <TrendArrow prev={prev.vacant} curr={m.vacant} invert />}
           </p>
@@ -100,11 +100,11 @@ function ManagerCard({ m, prev }: { m: ManagerListItem; prev?: ManagerSnapshot |
 
       {/* Issue tags */}
       {issueCount > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-zinc-800/30">
-          {m.vacant > 0 && <span className="text-[9px] text-red-400">{m.vacant} vacant</span>}
-          {m.expiring_leases_90d > 0 && <span className="text-[9px] text-yellow-400">{m.expiring_leases_90d} expiring</span>}
-          {m.expired_leases > 0 && <span className="text-[9px] text-red-400">{m.expired_leases} expired</span>}
-          {m.below_market_units > 0 && <span className="text-[9px] text-amber-400">{m.below_market_units} below mkt</span>}
+        <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-border-subtle">
+          {m.vacant > 0 && <span className="text-[9px] text-error">{m.vacant} vacant</span>}
+          {m.expiring_leases_90d > 0 && <span className="text-[9px] text-warn">{m.expiring_leases_90d} expiring</span>}
+          {m.expired_leases > 0 && <span className="text-[9px] text-error">{m.expired_leases} expired</span>}
+          {m.below_market_units > 0 && <span className="text-[9px] text-warn">{m.below_market_units} below mkt</span>}
           {m.open_maintenance > 0 && <span className="text-[9px] text-sky-400">{m.open_maintenance} maint</span>}
         </div>
       )}
@@ -202,7 +202,7 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-sm text-zinc-600 animate-pulse">Loading...</div>
+        <div className="text-sm text-fg-faint animate-pulse">Loading...</div>
       </div>
     );
   }
@@ -212,8 +212,8 @@ export function Dashboard() {
       <div className="max-w-7xl mx-auto px-8 py-8 space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-xl font-bold text-zinc-100">Portfolio Overview</h1>
-          <p className="text-xs text-zinc-500 mt-1">
+          <h1 className="text-xl font-bold text-fg">Portfolio Overview</h1>
+          <p className="text-xs text-fg-muted mt-1">
             {activeMgrs.length} active managers · {totalUnits.toLocaleString()} units
           </p>
         </div>
@@ -234,17 +234,17 @@ export function Dashboard() {
         {/* Attention strip */}
         <div className="flex gap-3 overflow-x-auto pb-1">
           {delinquency && delinquency.total_delinquent > 0 && (
-            <Link href="/delinquency" className="shrink-0 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-2.5 hover:border-red-500/40 transition-all">
-              <span className="text-lg font-bold text-red-400">{delinquency.total_delinquent}</span>
-              <span className="text-[10px] text-red-400/70 ml-1.5">delinquent</span>
-              <p className="text-[9px] text-red-400/50">{fmt$(delinquency.total_balance)} owed</p>
+            <Link href="/delinquency" className="shrink-0 rounded-lg border border-error/20 bg-error-soft px-4 py-2.5 hover:border-error/40 transition-all">
+              <span className="text-lg font-bold text-error">{delinquency.total_delinquent}</span>
+              <span className="text-[10px] text-error/70 ml-1.5">delinquent</span>
+              <p className="text-[9px] text-error/50">{fmt$(delinquency.total_balance)} owed</p>
             </Link>
           )}
           {leases && leases.total_expiring > 0 && (
-            <Link href="/leases" className="shrink-0 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2.5 hover:border-amber-500/40 transition-all">
-              <span className="text-lg font-bold text-amber-400">{leases.total_expiring}</span>
-              <span className="text-[10px] text-amber-400/70 ml-1.5">expiring (90d)</span>
-              <p className="text-[9px] text-amber-400/50">{leases.month_to_month_count} MTM</p>
+            <Link href="/leases" className="shrink-0 rounded-lg border border-warn/20 bg-warn-soft px-4 py-2.5 hover:border-warn/40 transition-all">
+              <span className="text-lg font-bold text-warn">{leases.total_expiring}</span>
+              <span className="text-[10px] text-warn/70 ml-1.5">expiring (90d)</span>
+              <p className="text-[9px] text-warn/50">{leases.month_to_month_count} MTM</p>
             </Link>
           )}
           {vacancies && vacancies.total_vacant > 0 && (
@@ -265,7 +265,7 @@ export function Dashboard() {
 
         {/* Manager section header with search + sort */}
         <div className="flex items-center gap-3">
-          <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide shrink-0">
+          <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide shrink-0">
             Property Managers
           </h2>
           <div className="flex-1" />
@@ -274,12 +274,12 @@ export function Dashboard() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search managers..."
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 w-48"
+            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary placeholder-fg-ghost focus:outline-none focus:border-fg-ghost w-48"
           />
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-600"
+            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary focus:outline-none focus:border-fg-ghost"
           >
             <option value="issues">Sort: Issues</option>
             <option value="revenue">Sort: Revenue</option>
@@ -297,7 +297,7 @@ export function Dashboard() {
         </div>
 
         {sorted.length === 0 && !loading && (
-          <p className="text-sm text-zinc-600 text-center py-12">
+          <p className="text-sm text-fg-faint text-center py-12">
             {search ? "No managers match your search" : "No property managers found — upload reports to get started"}
           </p>
         )}

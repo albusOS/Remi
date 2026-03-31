@@ -22,7 +22,7 @@ export function DataTable<T extends Record<string, unknown>>({
 }: Props<T>) {
   if (!rows.length) {
     return (
-      <div className="py-12 text-center text-sm text-zinc-600">{emptyMessage}</div>
+      <div className="py-12 text-center text-sm text-fg-faint">{emptyMessage}</div>
     );
   }
 
@@ -30,11 +30,11 @@ export function DataTable<T extends Record<string, unknown>>({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-zinc-800/60">
+          <tr className="border-b border-border">
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`text-left px-4 py-2.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wide ${col.className ?? ""}`}
+                className={`text-left px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide ${col.className ?? ""}`}
               >
                 {col.label}
               </th>
@@ -46,12 +46,12 @@ export function DataTable<T extends Record<string, unknown>>({
             <tr
               key={i}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={`border-b border-zinc-800/30 ${
-                onRowClick ? "cursor-pointer hover:bg-zinc-800/20" : ""
+              className={`border-b border-border-subtle ${
+                onRowClick ? "cursor-pointer hover:bg-surface-raised" : ""
               } transition-colors`}
             >
               {columns.map((col) => (
-                <td key={col.key} className={`px-4 py-2.5 text-zinc-300 ${col.className ?? ""}`}>
+                <td key={col.key} className={`px-4 py-2.5 text-fg-secondary ${col.className ?? ""}`}>
                   {col.render ? col.render(row) : (row[col.key] != null ? String(row[col.key]) : "—")}
                 </td>
               ))}

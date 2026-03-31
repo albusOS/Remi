@@ -1,4 +1,6 @@
 import type {
+  AgentMeta,
+  ModelsConfig,
   ManagerListItem,
   ManagerReview,
   PortfolioOverview,
@@ -107,6 +109,14 @@ export const api = {
 
   deleteDocument: (id: string) =>
     fetch(`${BASE}/api/v1/documents/${id}`, { method: "DELETE" }).then((r) => r.json()),
+
+  // --- Agents ---
+
+  listAgents: () =>
+    get<{ agents: AgentMeta[] }>("/api/v1/agents").then((r) => r.agents),
+
+  listModels: () =>
+    get<ModelsConfig>("/api/v1/agents/models"),
 
   autoAssign: async () => {
     const res = await fetch(`${BASE}/api/v1/dashboard/auto-assign`, { method: "POST" });

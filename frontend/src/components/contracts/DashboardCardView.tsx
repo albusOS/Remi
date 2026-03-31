@@ -3,9 +3,9 @@
 import type { DashboardCard } from "@/lib/types";
 
 const SEVERITY_COLORS: Record<string, string> = {
-  info: "border-blue-500/30 bg-blue-500/5",
-  warning: "border-amber-500/30 bg-amber-500/5",
-  critical: "border-red-500/30 bg-red-500/5",
+  info: "border-badge-blue-fg/30 bg-badge-blue",
+  warning: "border-warn/30 bg-warn-soft",
+  critical: "border-error/30 bg-error-soft",
 };
 
 const TREND_ICONS: Record<string, string> = {
@@ -23,24 +23,24 @@ export function DashboardCardView({ data }: { data: DashboardCard }) {
     <div
       className={`rounded-xl border p-6 ${colorClass} transition-all hover:scale-[1.02]`}
     >
-      <p className="text-sm font-medium text-zinc-400 uppercase tracking-wide">
+      <p className="text-sm font-medium text-fg-secondary uppercase tracking-wide">
         {data.title}
       </p>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-4xl font-bold text-zinc-100">
+        <span className="text-4xl font-bold text-fg">
           {typeof data.value === "number" ? data.value.toLocaleString() : data.value}
         </span>
         {data.unit && (
-          <span className="text-lg text-zinc-400">{data.unit}</span>
+          <span className="text-lg text-fg-secondary">{data.unit}</span>
         )}
         {trend && (
           <span
             className={`text-lg font-semibold ${
               data.trend_direction === "up"
-                ? "text-emerald-400"
+                ? "text-ok"
                 : data.trend_direction === "down"
-                ? "text-red-400"
-                : "text-zinc-400"
+                ? "text-error"
+                : "text-fg-secondary"
             }`}
           >
             {trend} {data.trend}

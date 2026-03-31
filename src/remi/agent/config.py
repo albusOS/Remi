@@ -36,6 +36,9 @@ class AgentConfig(BaseModel):
     agents like the knowledge enricher).
     """
 
+    # Identity
+    name: str = "unknown"
+
     # LLM — optional, resolved at runtime via caller > yaml > settings
     provider: str | None = None
     model: str | None = None
@@ -129,6 +132,7 @@ class AgentConfig(BaseModel):
         memory = MemoryConfig(**raw_memory) if isinstance(raw_memory, dict) else MemoryConfig()
 
         return cls(
+            name=data.get("name", "unknown"),
             provider=data.get("provider"),
             model=data.get("model"),
             ask_provider=data.get("ask_provider"),

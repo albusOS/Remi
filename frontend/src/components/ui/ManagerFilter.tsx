@@ -26,7 +26,7 @@ export function ManagerFilter({ value, onChange, managers: externalManagers }: P
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-600"
+      className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary focus:outline-none focus:border-fg-faint"
     >
       <option value="">All Managers</option>
       {managers.map((m) => (

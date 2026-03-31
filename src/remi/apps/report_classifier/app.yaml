@@ -26,8 +26,6 @@ modules:
       Identifies the type of a real-estate report from its columns and a
       small data sample. Returns strict JSON output — no prose.
     config:
-      provider: openai
-      model: gpt-4o-mini
       temperature: 0.0
       max_tokens: 512
       max_iterations: 1

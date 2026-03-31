@@ -45,25 +45,25 @@ class TestTokenUsage:
 
 class TestEstimateCost:
     def test_sonnet_cost(self) -> None:
-        cost = estimate_cost("claude-sonnet-4-6-20260320", 1_000_000, 1_000_000)
+        cost = estimate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000)
         assert cost is not None
         assert cost == pytest.approx(3.0 + 15.0)
 
     def test_opus_cost(self) -> None:
-        cost = estimate_cost("claude-opus-4-6-20260320", 1_000_000, 1_000_000)
+        cost = estimate_cost("claude-opus-4-6", 1_000_000, 1_000_000)
         assert cost is not None
-        assert cost == pytest.approx(15.0 + 75.0)
+        assert cost == pytest.approx(5.0 + 25.0)
 
     def test_unknown_model_returns_none(self) -> None:
         assert estimate_cost("unknown-model-xyz", 500, 200) is None
 
     def test_zero_tokens(self) -> None:
-        cost = estimate_cost("claude-sonnet-4-6-20260320", 0, 0)
+        cost = estimate_cost("claude-sonnet-4-6", 0, 0)
         assert cost is not None
         assert cost == 0.0
 
     def test_small_request(self) -> None:
-        cost = estimate_cost("claude-sonnet-4-6-20260320", 1000, 500)
+        cost = estimate_cost("claude-sonnet-4-6", 1000, 500)
         assert cost is not None
         expected = (1000 * 3.0 / 1_000_000) + (500 * 15.0 / 1_000_000)
         assert cost == pytest.approx(expected)

@@ -1,13 +1,13 @@
 "use client";
 
 const VARIANTS: Record<string, string> = {
-  default: "bg-zinc-800 text-zinc-400",
-  blue: "bg-blue-500/15 text-blue-400",
-  violet: "bg-violet-500/15 text-violet-400",
-  amber: "bg-amber-500/15 text-amber-400",
-  emerald: "bg-emerald-500/15 text-emerald-400",
-  red: "bg-red-500/15 text-red-400",
-  cyan: "bg-cyan-500/15 text-cyan-400",
+  default: "bg-badge-default text-badge-default-fg",
+  blue: "bg-badge-blue text-badge-blue-fg",
+  violet: "bg-badge-purple text-badge-purple-fg",
+  amber: "bg-badge-amber text-badge-amber-fg",
+  emerald: "bg-badge-emerald text-badge-emerald-fg",
+  red: "bg-badge-red text-badge-red-fg",
+  cyan: "bg-badge-cyan text-badge-cyan-fg",
 };
 
 export function Badge({

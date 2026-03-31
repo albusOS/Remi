@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import type { ModelsConfig } from "@/lib/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ManagerListItem } from "@/lib/types";
 
 function ModeToggle({
   mode,
@@ -11,110 +11,27 @@ function ModeToggle({
   onChange: (m: "ask" | "agent") => void;
 }) {
   return (
-    <div className="flex rounded-lg border border-zinc-800/60 overflow-hidden">
+    <div className="flex rounded-full bg-surface-sunken p-0.5">
       <button
         onClick={() => onChange("ask")}
-        className={`px-3 py-1 text-[10px] font-semibold transition-colors ${
+        className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
           mode === "ask"
-            ? "bg-zinc-800 text-zinc-200"
-            : "text-zinc-600 hover:text-zinc-400"
+            ? "bg-surface text-fg shadow-sm"
+            : "text-fg-faint hover:text-fg-secondary"
         }`}
       >
-        Quick question
+        Quick
       </button>
       <button
         onClick={() => onChange("agent")}
-        className={`px-3 py-1 text-[10px] font-semibold transition-colors ${
+        className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
           mode === "agent"
-            ? "bg-rose-800/80 text-rose-100"
-            : "text-zinc-600 hover:text-zinc-400"
+            ? "bg-surface text-fg shadow-sm"
+            : "text-fg-faint hover:text-fg-secondary"
         }`}
       >
         Deep dive
       </button>
-    </div>
-  );
-}
-
-function ModelPicker({
-  provider,
-  model,
-  modelsConfig,
-  onChange,
-}: {
-  provider: string;
-  model: string;
-  modelsConfig: ModelsConfig | null;
-  onChange: (provider: string, model: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  if (!modelsConfig) {
-    return (
-      <span className="text-[10px] text-zinc-700">
-        {provider}/{model}
-      </span>
-    );
-  }
-
-  const availableProviders = modelsConfig.providers.filter((p) => p.available);
-
-  const shortModel = (m: string) => {
-    const parts = m.split("-");
-    if (parts.length > 3) return parts.slice(0, 3).join("-");
-    return m;
-  };
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60 transition-colors"
-      >
-        <span className="text-zinc-600">{provider}</span>
-        <span className="text-zinc-700">/</span>
-        <span className="text-zinc-400 font-medium">{shortModel(model)}</span>
-        <svg
-          className={`w-3 h-3 text-zinc-600 transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full left-0 mb-1 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50">
-          {availableProviders.map((p) => (
-            <div key={p.name}>
-              <div className="px-3 py-1.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-wider bg-zinc-900/80">
-                {p.name}
-              </div>
-              {p.models.map((m) => {
-                const active = provider === p.name && model === m;
-                return (
-                  <button
-                    key={`${p.name}/${m}`}
-                    onClick={() => {
-                      onChange(p.name, m);
-                      setOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${
-                      active
-                        ? "bg-zinc-800 text-zinc-200"
-                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
-                    }`}
-                  >
-                    {m}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -125,26 +42,26 @@ export function SessionInput({
   connected,
   mode,
   onModeChange,
-  provider,
-  model,
-  modelsConfig,
-  onModelChange,
   hasMessages,
   showWorkDetails,
   onToggleWorkDetails,
+  onStop,
+  managers,
+  managerId,
+  onManagerChange,
 }: {
   onSend: (text: string, mode: "ask" | "agent") => void;
   streaming: boolean;
   connected: boolean;
   mode: "ask" | "agent";
   onModeChange: (m: "ask" | "agent") => void;
-  provider: string;
-  model: string;
-  modelsConfig: ModelsConfig | null;
-  onModelChange: (provider: string, model: string) => void;
   hasMessages: boolean;
   showWorkDetails: boolean;
   onToggleWorkDetails: () => void;
+  onStop?: () => void;
+  managers?: ManagerListItem[];
+  managerId?: string;
+  onManagerChange?: (id: string) => void;
 }) {
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -154,64 +71,103 @@ export function SessionInput({
     if (!msg || streaming || !connected) return;
     onSend(msg, mode);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
   };
 
+  const autoResize = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const maxHeight = 140;
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => { autoResize(); }, [input, autoResize]);
+
+  const selectedManager = managers?.find((m) => m.id === managerId);
+  const placeholders = connected
+    ? selectedManager
+      ? mode === "agent"
+        ? [`Deep dive into ${selectedManager.name}'s portfolio`, `What issues should I know about for ${selectedManager.name}?`, "Find patterns in their maintenance requests"]
+        : [`How is ${selectedManager.name} doing?`, `Any issues with ${selectedManager.name}'s properties?`, "What's their occupancy looking like?"]
+      : mode === "agent"
+        ? ["What's really going on with vacancies?", "Dig into Marcus's numbers this quarter", "Find me the patterns I'm missing"]
+        : ["How's my portfolio looking today?", "Anything I should worry about?", "Which managers are crushing it?"]
+    : ["Connecting..."];
+
+  const [placeholderIdx] = useState(() => Math.floor(Math.random() * placeholders.length));
+
   return (
-    <div className="shrink-0 border-t border-zinc-800/60">
-      <div className="max-w-3xl mx-auto px-6 py-4">
-        <div className="flex gap-3 items-end">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={
-              connected
-                ? mode === "agent"
-                  ? "Ask REMI to analyze something in depth..."
-                  : "Ask about your managers, properties, leases..."
-                : "Connecting..."
-            }
-            disabled={streaming || !connected}
-            rows={1}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-100 placeholder-zinc-700 focus:outline-none focus:ring-1 focus:ring-rose-800 text-sm resize-none disabled:opacity-40 transition-all"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || streaming || !connected}
-            className={`shrink-0 h-10 px-5 rounded-xl text-sm font-medium transition-all disabled:bg-zinc-800 disabled:text-zinc-600 ${
-              mode === "agent"
-                ? "bg-rose-800 hover:bg-rose-700 text-rose-100"
-                : "bg-zinc-700 hover:bg-zinc-600 text-zinc-200"
-            }`}
-          >
-            {mode === "agent" ? "Analyze" : "Ask"}
-          </button>
-        </div>
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center gap-2">
-            <ModeToggle mode={mode} onChange={onModeChange} />
-            <ModelPicker
-              provider={provider}
-              model={model}
-              modelsConfig={modelsConfig}
-              onChange={onModelChange}
+    <div className="shrink-0 pb-5 pt-2">
+      <div className="max-w-2xl mx-auto px-4">
+        <div className="rounded-2xl bg-surface border border-border shadow-sm transition-all focus-within:border-accent/30 focus-within:shadow-md">
+          <div className="flex items-end gap-2 p-3">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+              }}
+              placeholder={placeholders[placeholderIdx]}
+              disabled={streaming || !connected}
+              rows={1}
+              className="flex-1 py-1 bg-transparent text-fg placeholder-fg-faint focus:outline-none text-sm resize-none disabled:opacity-40 overflow-hidden"
             />
-          </div>
-          <div className="flex items-center gap-3">
-            {hasMessages && (
+            {streaming && onStop ? (
               <button
-                onClick={onToggleWorkDetails}
-                className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
+                onClick={onStop}
+                className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center bg-surface-sunken hover:bg-border text-fg-muted transition-all"
+                title="Stop"
               >
-                {showWorkDetails ? "Hide work details" : "Show work details"}
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || streaming || !connected}
+                className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all disabled:opacity-20 disabled:cursor-default bg-accent hover:bg-accent-hover text-accent-fg"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                </svg>
               </button>
             )}
+          </div>
+
+          <div className="flex items-center justify-between px-3 pb-2.5">
+            <div className="flex items-center gap-2">
+              <ModeToggle mode={mode} onChange={onModeChange} />
+              {managers && managers.length > 0 && onManagerChange && (
+                <select
+                  value={managerId ?? ""}
+                  onChange={(e) => onManagerChange(e.target.value)}
+                  className="bg-surface-sunken rounded-full px-3 py-1 text-xs font-medium text-fg-muted focus:outline-none focus:text-fg transition-all border-none cursor-pointer max-w-[180px] truncate"
+                >
+                  <option value="">All managers</option>
+                  {managers
+                    .filter((m) => m.total_units > 0 || m.property_count > 0)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {hasMessages && (
+                <button
+                  onClick={onToggleWorkDetails}
+                  className="text-[10px] text-fg-faint hover:text-fg-secondary transition-colors"
+                >
+                  {showWorkDetails ? "Hide work" : "Show work"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

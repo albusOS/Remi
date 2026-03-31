@@ -26,11 +26,11 @@ function fmt$(n: number) {
 }
 
 const ISSUE_LABELS: Record<UnitIssue, { label: string; color: string }> = {
-  vacant: { label: "Vacant", color: "bg-red-500/20 text-red-300 border-red-500/30" },
+  vacant: { label: "Vacant", color: "bg-error-soft text-error-fg border-error/30" },
   down_for_maintenance: { label: "Down", color: "bg-orange-500/20 text-orange-300 border-orange-500/30" },
-  below_market: { label: "Below Market", color: "bg-amber-500/20 text-amber-300 border-amber-500/30" },
-  expired_lease: { label: "Expired Lease", color: "bg-red-500/20 text-red-300 border-red-500/30" },
-  expiring_soon: { label: "Expiring", color: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30" },
+  below_market: { label: "Below Market", color: "bg-warn-soft text-warn-fg border-warn/30" },
+  expired_lease: { label: "Expired Lease", color: "bg-error-soft text-error-fg border-error/30" },
+  expiring_soon: { label: "Expiring", color: "bg-warn-soft text-warn-fg border-warn/30" },
   open_maintenance: { label: "Maint.", color: "bg-sky-500/20 text-sky-300 border-sky-500/30" },
 };
 
@@ -52,12 +52,12 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
     <>
       <tr
         onClick={onToggle}
-        className={`border-b border-zinc-800/30 cursor-pointer transition-colors ${
-          hasIssues ? "bg-zinc-800/10 hover:bg-zinc-800/30" : "hover:bg-zinc-800/20"
+        className={`border-b border-border-subtle cursor-pointer transition-colors ${
+          hasIssues ? "bg-surface-raised hover:bg-surface-raised" : "hover:bg-surface-raised"
         }`}
       >
         <td className="px-4 py-2.5">
-          <span className="font-mono text-zinc-200 text-sm">{row.unit_number}</span>
+          <span className="font-mono text-fg text-sm">{row.unit_number}</span>
         </td>
         <td className="px-4 py-2.5">
           <Badge
@@ -74,16 +74,16 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
             {row.status}
           </Badge>
         </td>
-        <td className="px-4 py-2.5 text-sm text-zinc-400">
-          {row.tenant?.name ?? <span className="text-zinc-600">—</span>}
+        <td className="px-4 py-2.5 text-sm text-fg-secondary">
+          {row.tenant?.name ?? <span className="text-fg-faint">—</span>}
         </td>
-        <td className="px-4 py-2.5 font-mono text-sm text-zinc-300">{fmt$(row.current_rent)}</td>
-        <td className="px-4 py-2.5 font-mono text-sm text-zinc-500">{fmt$(row.market_rent)}</td>
+        <td className="px-4 py-2.5 font-mono text-sm text-fg-secondary">{fmt$(row.current_rent)}</td>
+        <td className="px-4 py-2.5 font-mono text-sm text-fg-muted">{fmt$(row.market_rent)}</td>
         <td className="px-4 py-2.5 text-sm">
           {row.pct_below_market > 0 ? (
-            <span className="text-amber-400 font-medium">-{row.pct_below_market}%</span>
+            <span className="text-warn font-medium">-{row.pct_below_market}%</span>
           ) : (
-            <span className="text-zinc-600">—</span>
+            <span className="text-fg-faint">—</span>
           )}
         </td>
         <td className="px-4 py-2.5 text-sm">
@@ -91,23 +91,23 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
             <span
               className={
                 (row.lease.days_to_expiry ?? 999) <= 0
-                  ? "text-red-400"
+                  ? "text-error"
                   : (row.lease.days_to_expiry ?? 999) <= 90
-                  ? "text-yellow-400"
-                  : "text-zinc-400"
+                  ? "text-warn"
+                  : "text-fg-secondary"
               }
             >
               {row.lease.end_date}
             </span>
           ) : (
-            <span className="text-zinc-600">—</span>
+            <span className="text-fg-faint">—</span>
           )}
         </td>
         <td className="px-4 py-2.5 text-sm text-center">
           {row.open_maintenance > 0 ? (
             <span className="text-sky-400 font-medium">{row.open_maintenance}</span>
           ) : (
-            <span className="text-zinc-700">0</span>
+            <span className="text-fg-ghost">0</span>
           )}
         </td>
         <td className="px-4 py-2.5">
@@ -120,19 +120,19 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
       </tr>
 
       {expanded && (
-        <tr className="bg-zinc-800/20 border-b border-zinc-800/30">
+        <tr className="bg-surface-raised border-b border-border-subtle">
           <td colSpan={9} className="px-6 py-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
               {/* Unit details */}
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Unit</h4>
-                <div className="space-y-1 text-zinc-400">
+                <h4 className="text-xs font-semibold text-fg-muted uppercase tracking-wide">Unit</h4>
+                <div className="space-y-1 text-fg-secondary">
                   {row.bedrooms != null && <p>{row.bedrooms} bed / {row.bathrooms ?? "—"} bath</p>}
                   {row.sqft != null && <p>{row.sqft.toLocaleString()} sq ft</p>}
                   {row.floor != null && <p>Floor {row.floor}</p>}
                   <p>
                     Rent gap:{" "}
-                    <span className={row.rent_gap < 0 ? "text-amber-400 font-medium" : "text-emerald-400"}>
+                    <span className={row.rent_gap < 0 ? "text-warn font-medium" : "text-ok"}>
                       {fmt$(row.rent_gap)}/mo
                     </span>
                   </p>
@@ -141,12 +141,12 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
 
               {/* Lease + tenant */}
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Lease &amp; Tenant</h4>
+                <h4 className="text-xs font-semibold text-fg-muted uppercase tracking-wide">Lease &amp; Tenant</h4>
                 {row.lease && row.tenant ? (
-                  <div className="space-y-1 text-zinc-400">
-                    <p className="text-zinc-200 font-medium">{row.tenant.name}</p>
-                    <p className="text-zinc-500">{row.tenant.email}</p>
-                    {row.tenant.phone && <p className="text-zinc-500">{row.tenant.phone}</p>}
+                  <div className="space-y-1 text-fg-secondary">
+                    <p className="text-fg font-medium">{row.tenant.name}</p>
+                    <p className="text-fg-muted">{row.tenant.email}</p>
+                    {row.tenant.phone && <p className="text-fg-muted">{row.tenant.phone}</p>}
                     <p>
                       Lease {row.lease.start_date} → {row.lease.end_date}
                       <Badge variant={row.lease.status === "active" ? "emerald" : "red"} className="ml-2">
@@ -155,7 +155,7 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
                     </p>
                     <p>Deposit: {fmt$(row.lease.deposit)}</p>
                     {row.lease.days_to_expiry != null && (
-                      <p className={row.lease.days_to_expiry <= 30 ? "text-red-400 font-medium" : ""}>
+                      <p className={row.lease.days_to_expiry <= 30 ? "text-error font-medium" : ""}>
                         {row.lease.days_to_expiry > 0
                           ? `${row.lease.days_to_expiry} days until expiry`
                           : `Expired ${Math.abs(row.lease.days_to_expiry)} days ago`}
@@ -163,19 +163,19 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
                     )}
                   </div>
                 ) : (
-                  <p className="text-zinc-600">No active lease</p>
+                  <p className="text-fg-faint">No active lease</p>
                 )}
               </div>
 
               {/* Maintenance */}
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">
+                <h4 className="text-xs font-semibold text-fg-muted uppercase tracking-wide">
                   Open Maintenance ({row.maintenance_items.length})
                 </h4>
                 {row.maintenance_items.length > 0 ? (
                   <div className="space-y-2">
                     {row.maintenance_items.map((mr) => (
-                      <div key={mr.id} className="rounded-lg bg-zinc-900/60 border border-zinc-800/40 px-3 py-2">
+                      <div key={mr.id} className="rounded-lg bg-surface border border-border-subtle px-3 py-2">
                         <div className="flex items-center gap-2">
                           <Badge
                             variant={
@@ -188,9 +188,9 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
                           >
                             {mr.priority}
                           </Badge>
-                          <span className="text-zinc-300 text-sm">{mr.title}</span>
+                          <span className="text-fg-secondary text-sm">{mr.title}</span>
                         </div>
-                        <p className="text-xs text-zinc-500 mt-1">
+                        <p className="text-xs text-fg-muted mt-1">
                           {mr.category} · {mr.status}
                           {mr.cost != null && ` · est. ${fmt$(mr.cost)}`}
                         </p>
@@ -198,7 +198,7 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
                     ))}
                   </div>
                 ) : (
-                  <p className="text-zinc-600">None</p>
+                  <p className="text-fg-faint">None</p>
                 )}
               </div>
             </div>
@@ -233,7 +233,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-sm text-zinc-600 animate-pulse">Loading property...</div>
+        <div className="text-sm text-fg-faint animate-pulse">Loading property...</div>
       </div>
     );
   }
@@ -241,7 +241,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
   if (!property || !rentRoll) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-sm text-zinc-500">Property not found</div>
+        <div className="text-sm text-fg-muted">Property not found</div>
       </div>
     );
   }
@@ -273,16 +273,16 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
       <div className="max-w-6xl mx-auto px-8 py-8 space-y-6">
         {/* Breadcrumb + header */}
         <div>
-          <Link href="/" className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+          <Link href="/" className="text-xs text-fg-faint hover:text-fg-secondary transition-colors">
             &larr; Home
           </Link>
-          <h1 className="text-2xl font-bold text-zinc-100 mt-2">{property.name}</h1>
+          <h1 className="text-2xl font-bold text-fg mt-2">{property.name}</h1>
           <div className="flex items-center gap-3 mt-1">
             <Badge variant={property.property_type === "commercial" ? "cyan" : "blue"}>
               {property.property_type}
             </Badge>
             {property.address && (
-              <span className="text-sm text-zinc-500">
+              <span className="text-sm text-fg-muted">
                 {property.address.street}, {property.address.city}
                 {property.address.state ? `, ${property.address.state}` : ""}
               </span>
@@ -320,41 +320,41 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
 
         {/* Financial period (if available) */}
         {latestFin && (
-          <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5">
-            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-4">
-              Financial Period <span className="text-zinc-600 font-normal">&middot; {latestFin.period}</span>
+          <section className="rounded-xl border border-border bg-surface p-5">
+            <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide mb-4">
+              Financial Period <span className="text-fg-faint font-normal">&middot; {latestFin.period}</span>
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div>
-                <p className="text-[10px] text-zinc-600">Gross Revenue</p>
-                <p className="text-sm font-semibold text-zinc-200">{fmt$(latestFin.gross_revenue)}</p>
+                <p className="text-[10px] text-fg-faint">Gross Revenue</p>
+                <p className="text-sm font-semibold text-fg">{fmt$(latestFin.gross_revenue)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-zinc-600">Expenses</p>
-                <p className="text-sm font-semibold text-zinc-200">{fmt$(latestFin.operating_expenses)}</p>
+                <p className="text-[10px] text-fg-faint">Expenses</p>
+                <p className="text-sm font-semibold text-fg">{fmt$(latestFin.operating_expenses)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-zinc-600">Maintenance</p>
-                <p className="text-sm font-semibold text-zinc-200">{fmt$(latestFin.maintenance_costs)}</p>
+                <p className="text-[10px] text-fg-faint">Maintenance</p>
+                <p className="text-sm font-semibold text-fg">{fmt$(latestFin.maintenance_costs)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-zinc-600">Vacancy Loss</p>
-                <p className="text-sm font-semibold text-red-400">{fmt$(latestFin.vacancy_loss)}</p>
+                <p className="text-[10px] text-fg-faint">Vacancy Loss</p>
+                <p className="text-sm font-semibold text-error">{fmt$(latestFin.vacancy_loss)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-zinc-600">NOI</p>
-                <p className="text-sm font-bold text-emerald-400">{fmt$(latestFin.noi)}</p>
+                <p className="text-[10px] text-fg-faint">NOI</p>
+                <p className="text-sm font-bold text-ok">{fmt$(latestFin.noi)}</p>
               </div>
             </div>
           </section>
         )}
 
         {/* Issue filter bar */}
-        <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
-          <div className="px-5 py-3 border-b border-zinc-800/40 flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+        <section className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-5 py-3 border-b border-border-subtle flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide">
               Rent Roll{" "}
-              <span className="text-zinc-600 font-normal">
+              <span className="text-fg-faint font-normal">
                 &middot; {filteredRows.length} of {rentRoll.rows.length} units
                 {unitsWithIssues > 0 && ` · ${unitsWithIssues} with issues`}
               </span>
@@ -364,8 +364,8 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
                 onClick={() => setIssueFilter("all")}
                 className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
                   issueFilter === "all"
-                    ? "bg-zinc-700 border-zinc-600 text-zinc-200"
-                    : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
+                    ? "bg-accent border-fg-ghost text-fg"
+                    : "border-border text-fg-muted hover:text-fg-secondary"
                 }`}
               >
                 All
@@ -379,7 +379,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
                     className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
                       issueFilter === issue
                         ? ISSUE_LABELS[issue].color
-                        : "border-zinc-800 text-zinc-500 hover:text-zinc-300"
+                        : "border-border text-fg-muted hover:text-fg-secondary"
                     }`}
                   >
                     {ISSUE_LABELS[issue].label} ({count})
@@ -392,12 +392,12 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800/60">
+                <tr className="border-b border-border">
                   {["Unit", "Status", "Tenant", "Rent", "Market", "Gap", "Lease End", "Maint", "Issues"].map(
                     (h) => (
                       <th
                         key={h}
-                        className="text-left px-4 py-2.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wide"
+                        className="text-left px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide"
                       >
                         {h}
                       </th>
@@ -418,7 +418,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
                 ))}
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="text-center py-12 text-sm text-zinc-600">
+                    <td colSpan={9} className="text-center py-12 text-sm text-fg-faint">
                       No units match the selected filter
                     </td>
                   </tr>

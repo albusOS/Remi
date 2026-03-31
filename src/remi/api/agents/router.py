@@ -23,7 +23,7 @@ async def ask(
     agent: ChatAgentService = Depends(get_chat_agent),
 ) -> AskResponse:
     try:
-        answer, run_id = await agent.ask(req.agent, req.question)
+        answer, run_id = await agent.ask(req.agent, req.question, mode="ask")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
@@ -57,12 +57,11 @@ async def list_models(
             "o4-mini",
         ],
         "anthropic": [
-            "claude-opus-4-6-20260320",
-            "claude-sonnet-4-6-20260320",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5-20250929",
             "claude-sonnet-4-20250514",
-            "claude-haiku-4-20250414",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
+            "claude-haiku-4-5-20251001",
         ],
         "gemini": [
             "gemini-2.5-pro-preview-05-06",

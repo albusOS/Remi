@@ -1,13 +1,76 @@
 @import "tailwindcss";
 
-:root {
-  --background: #09090b;
-  --foreground: #fafafa;
+/*
+ * Design tokens — change these to retheme the entire app.
+ *
+ * Palette vibe: warm, minimal, confident.
+ * Accent is a dusty rose — intentional, not decorative.
+ */
+@theme {
+  /* Surface hierarchy */
+  --color-surface: #ffffff;
+  --color-surface-raised: #faf9f7;
+  --color-surface-sunken: #f3f1ee;
+
+  /* Border hierarchy */
+  --color-border: #e8e4df;
+  --color-border-subtle: #f3f1ee;
+
+  /* Foreground hierarchy */
+  --color-fg: #1a1614;
+  --color-fg-secondary: #3d3530;
+  --color-fg-muted: #7a6f66;
+  --color-fg-faint: #b0a89f;
+  --color-fg-ghost: #d9d3cc;
+
+  /* Primary accent — dusty rose */
+  --color-accent: #c4727a;
+  --color-accent-hover: #b5636b;
+  --color-accent-fg: #ffffff;
+  --color-accent-soft: #fdf0f1;
+
+  /* User chat bubble */
+  --color-user-bubble: #f3f1ee;
+  --color-user-bubble-fg: #3d3530;
+
+  /* Status — semantic only, never decorative */
+  --color-ok: #5cb589;
+  --color-warn: #d4974e;
+  --color-error: #c95c5c;
+  --color-ok-soft: #edf7f1;
+  --color-warn-soft: #fdf5ec;
+  --color-error-soft: #fdf0f0;
+  --color-ok-fg: #2d6b4a;
+  --color-warn-fg: #7a5520;
+  --color-error-fg: #8b3535;
+
+  /* Badge variants */
+  --color-badge-default: #f3f1ee;
+  --color-badge-default-fg: #7a6f66;
+  --color-badge-blue: #eef4fc;
+  --color-badge-blue-fg: #3b6fb5;
+  --color-badge-amber: #fdf5ec;
+  --color-badge-amber-fg: #7a5520;
+  --color-badge-emerald: #edf7f1;
+  --color-badge-emerald-fg: #2d6b4a;
+  --color-badge-red: #fdf0f0;
+  --color-badge-red-fg: #8b3535;
+  --color-badge-purple: #f4f0fc;
+  --color-badge-purple-fg: #6b4fa0;
+  --color-badge-cyan: #eef8fa;
+  --color-badge-cyan-fg: #2a7a8a;
+
+  /* Code blocks */
+  --color-code-bg: #faf9f7;
+  --color-code-fg: #3d3530;
+  --color-code-border: #e8e4df;
+  --color-code-inline-bg: #f3f1ee;
+  --color-code-inline-fg: #3d3530;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-surface);
+  color: var(--color-fg);
   font-family: system-ui, -apple-system, sans-serif;
 }
 
@@ -19,9 +82,19 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: var(--color-fg-ghost);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--color-fg-faint);
 }
+
+.prose-remi {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: var(--color-fg-secondary);
+}
+.prose-remi > *:first-child { margin-top: 0; }
+.prose-remi > *:last-child { margin-bottom: 0; }
+.prose-remi pre { margin: 0; }
+.prose-remi code { font-size: 0.8125rem; }

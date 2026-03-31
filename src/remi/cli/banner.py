@@ -23,7 +23,7 @@ def _key_status(env_var: str) -> Text:
 
 
 def _short_model(name: str) -> str:
-    """Shorten model IDs for display: claude-sonnet-4-6-20260320 -> sonnet-4.6"""
+    """Shorten model IDs for display: claude-sonnet-4-6 -> sonnet-4.6"""
     if name.startswith("claude-"):
         parts = name.replace("claude-", "").split("-")
         if len(parts) >= 3:

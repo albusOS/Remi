@@ -34,6 +34,7 @@ async def run_agent_loop(
     total_iterations = 0
     run_usage = TokenUsage()
     tool_defs = tool_executor.definitions
+    loop_exhausted = True
 
     for iteration in range(cfg.max_iterations):
         total_iterations = iteration + 1
@@ -64,6 +65,7 @@ async def run_agent_loop(
             if cfg.response_format == "json":
                 content = try_parse_json(content)
             thread.append(Message(role="assistant", content=content))
+            loop_exhausted = False
             break
 
         thread.append(
@@ -97,9 +99,9 @@ async def run_agent_loop(
                 },
             )
 
-    # Synthesis turn if loop exhausted without a text response
-    if total_iterations >= cfg.max_iterations:
-        log.info("loop_exhausted", iterations=total_iterations)
+    # Synthesis turn only when the loop exhausted via tool calls with no final text response
+    if loop_exhausted:
+        log.info("max_iterations_reached", iterations=total_iterations)
         synth_request = LLMRequest(
             model=cfg.model or "",
             messages=thread,

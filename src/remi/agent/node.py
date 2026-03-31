@@ -111,6 +111,29 @@ class AgentNode(BaseModule):
         tool_executor = ToolExecutor(tool_defs, tool_execute, tracer, log)
         thread = build_initial_thread(cfg, inputs)
 
+        mgr_id = context.extras.get("manager_id")
+        mgr_name = context.extras.get("manager_name")
+        if mgr_id and mgr_name:
+            prop_names = context.extras.get("manager_property_names", [])
+            unit_count = context.extras.get("manager_unit_count", 0)
+            prop_count = context.extras.get("manager_property_count", len(prop_names))
+            scope_parts = [
+                f"## Manager Focus: {mgr_name}\n",
+                f"The user has selected **{mgr_name}** (manager_id=`{mgr_id}`).",
+                f"This manager oversees {prop_count} properties with {unit_count} total units.",
+            ]
+            if prop_names:
+                scope_parts.append("Properties: " + ", ".join(prop_names[:20]))
+            scope_parts.append(
+                "\n**You MUST scope all tool calls to this manager.** "
+                f"Always pass `manager_id=\"{mgr_id}\"` to onto_signals, "
+                "onto_search, onto_aggregate, semantic_search, and any "
+                "remi_data function that accepts manager_id. "
+                "Only discuss data relevant to this manager's portfolio "
+                "unless the user explicitly asks about the broader portfolio."
+            )
+            thread.insert(1, Message(role="system", content="\n".join(scope_parts)))
+
         trace_cm = (
             tracer.start_trace(
                 f"agent_run/{cfg.name or 'unknown'}",
@@ -212,7 +235,7 @@ class AgentNode(BaseModule):
                 run_usage.completion_tokens,
             )
             done_payload: dict[str, Any] = {
-                "response": final if isinstance(final, str) else json.dumps(final, default=str),
+                "response": last_assistant_content(thread) or "",
                 "usage": run_usage.to_dict(),
                 "model": cfg.model,
                 "provider": cfg.provider,

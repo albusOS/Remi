@@ -13,7 +13,7 @@ export function Panel({
 }) {
   return (
     <div
-      className={`rounded-xl border border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm ${
+      className={`rounded-xl border border-border bg-surface ${
         padding ? "p-5" : ""
       } ${className}`}
     >
@@ -38,7 +38,7 @@ export function PanelHeader({
 
 export function PanelTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+    <h2 className="text-xs font-semibold uppercase tracking-widest text-fg-muted">
       {children}
     </h2>
   );

@@ -13,35 +13,35 @@ export function TableViewComponent({ data }: { data: TableView }) {
       }));
 
   return (
-    <div className="rounded-xl border border-zinc-700/50 overflow-hidden">
-      <div className="px-6 py-4 border-b border-zinc-700/50">
-        <h3 className="text-lg font-semibold text-zinc-100">{data.title}</h3>
-        <p className="text-sm text-zinc-400 mt-0.5">
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="px-6 py-4 border-b border-border">
+        <h3 className="text-lg font-semibold text-fg">{data.title}</h3>
+        <p className="text-sm text-fg-secondary mt-0.5">
           {data.total_count || data.rows.length} records
         </p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-zinc-700/50 bg-zinc-800/50">
+            <tr className="border-b border-border bg-surface-raised">
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className="px-6 py-3 text-left font-medium text-zinc-400 uppercase tracking-wide text-xs"
+                  className="px-6 py-3 text-left font-medium text-fg-secondary uppercase tracking-wide text-xs"
                 >
                   {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/50">
+          <tbody className="divide-y divide-border-subtle">
             {data.rows.map((row, i) => (
               <tr
                 key={i}
-                className="hover:bg-zinc-800/30 transition-colors"
+                className="hover:bg-surface-raised transition-colors"
               >
                 {columns.map((col) => (
-                  <td key={col.key} className="px-6 py-3 text-zinc-200">
+                  <td key={col.key} className="px-6 py-3 text-fg">
                     {String(row[col.key] ?? "")}
                   </td>
                 ))}

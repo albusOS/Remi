@@ -22,8 +22,8 @@ modules:
       writes code, investigates, and produces analytical deliverables.
     config:
       provider: anthropic
-      ask_model: claude-sonnet-4-6-20260320
-      agent_model: claude-opus-4-6-20260320
+      ask_model: claude-sonnet-4-6
+      agent_model: claude-opus-4-6
       temperature: 0.3
       max_tokens: 4096
       max_iterations: 5

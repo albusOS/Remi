@@ -1,17 +1,17 @@
 "use client";
 
 const COLORS: Record<string, string> = {
-  idle: "#52525b",
-  running: "#3b82f6",
-  done: "#22c55e",
-  completed: "#22c55e",
-  error: "#ef4444",
-  failed: "#ef4444",
-  pending: "#71717a",
-  skipped: "#71717a",
-  calling: "#f59e0b",
-  connected: "#22c55e",
-  disconnected: "#ef4444",
+  idle: "var(--color-fg-faint)",
+  running: "var(--color-warn)",
+  done: "var(--color-ok)",
+  completed: "var(--color-ok)",
+  error: "var(--color-error)",
+  failed: "var(--color-error)",
+  pending: "var(--color-fg-muted)",
+  skipped: "var(--color-fg-muted)",
+  calling: "var(--color-warn)",
+  connected: "var(--color-ok)",
+  disconnected: "var(--color-error)",
 };
 
 export function StatusDot({

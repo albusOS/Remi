@@ -20,6 +20,8 @@ dependencies = [
     "typer>=0.15,<1",
     "structlog>=24.4,<26",
     "textual>=8.2.1",
+    "anthropic>=0.86.0",
+    "openpyxl>=3.1,<4",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +43,7 @@ dev = [
 ]
 
 [project.scripts]
-remi = "remi.interfaces.cli.main:app"
+remi = "remi.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/remi"]

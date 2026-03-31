@@ -19,11 +19,11 @@ class ModelPricing:
 
 PRICING: dict[str, ModelPricing] = {
     # Anthropic
-    "claude-opus-4-6-20260320": ModelPricing(15.0, 75.0),
-    "claude-sonnet-4-6-20260320": ModelPricing(3.0, 15.0),
-    "claude-sonnet-4-5-20250514": ModelPricing(3.0, 15.0),
-    "claude-3-5-sonnet-20241022": ModelPricing(3.0, 15.0),
-    "claude-3-opus-20240229": ModelPricing(15.0, 75.0),
+    "claude-opus-4-6": ModelPricing(5.0, 25.0),
+    "claude-sonnet-4-6": ModelPricing(3.0, 15.0),
+    "claude-sonnet-4-5-20250929": ModelPricing(3.0, 15.0),
+    "claude-haiku-4-5-20251001": ModelPricing(1.0, 5.0),
+    "claude-sonnet-4-20250514": ModelPricing(3.0, 15.0),
     # OpenAI
     "gpt-4o": ModelPricing(2.5, 10.0),
     "gpt-4o-mini": ModelPricing(0.15, 0.6),

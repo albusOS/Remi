@@ -22,6 +22,7 @@ from remi.api.ontology.router import router as ontology_router
 from remi.api.portfolios.router import router as portfolios_router
 from remi.api.properties.router import router as properties_router
 from remi.api.realtime.router import router as realtime_router
+from remi.api.seed.router import router as seed_router
 from remi.api.signals.router import router as signals_router
 from remi.api.tenants.router import router as tenants_router
 from remi.api.units.router import router as units_router
@@ -43,6 +44,7 @@ def _attach_routers(application: FastAPI) -> None:
     application.include_router(tenants_router, prefix="/api/v1")
     application.include_router(units_router, prefix="/api/v1")
     application.include_router(ontology_router, prefix="/api/v1")
+    application.include_router(seed_router, prefix="/api/v1")
     application.include_router(realtime_router)
 
 

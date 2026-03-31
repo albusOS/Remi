@@ -32,7 +32,9 @@ async def chat_ws(ws: WebSocket) -> None:
     logger.info("ws_chat_connect", client=client)
     await ws.accept()
     c = ws.app.state.container
-    dispatcher = build_chat_dispatcher(ws, c.chat_session_store, c.chat_agent)
+    dispatcher = build_chat_dispatcher(
+        ws, c.chat_session_store, c.chat_agent, property_store=c.property_store,
+    )
 
     try:
         while True:

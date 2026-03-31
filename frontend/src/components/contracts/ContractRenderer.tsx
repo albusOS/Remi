@@ -7,14 +7,6 @@ import { ProfileViewComponent } from "./ProfileViewComponent";
 import { LLMResponseView } from "./LLMResponseView";
 import { RawOutputView } from "./RawOutputView";
 
-/**
- * The core mapping: contract string → React component.
- *
- * This is the "seamless" connection between backend and frontend.
- * The backend produces typed outputs with a `contract` label.
- * The frontend renders whatever the contract says it is.
- * Add new contracts here as you create new viewmodel modules.
- */
 export function ContractRenderer({ module }: { module: ModuleOutput }) {
   const { output, contract } = module;
 
@@ -51,15 +43,15 @@ export function ContractRenderer({ module }: { module: ModuleOutput }) {
 
 function ModuleStatusBadge({ module }: { module: ModuleOutput }) {
   const colors: Record<string, string> = {
-    pending: "bg-zinc-700 text-zinc-300",
-    running: "bg-blue-500/20 text-blue-300 animate-pulse",
-    completed: "bg-emerald-500/20 text-emerald-300",
-    failed: "bg-red-500/20 text-red-300",
-    skipped: "bg-zinc-700/50 text-zinc-500",
+    pending: "bg-surface-sunken text-fg-secondary",
+    running: "bg-badge-blue text-badge-blue-fg animate-pulse",
+    completed: "bg-badge-emerald text-badge-emerald-fg",
+    failed: "bg-badge-red text-badge-red-fg",
+    skipped: "bg-surface-sunken text-fg-muted",
   };
 
   return (
-    <div className="rounded-xl border border-zinc-700/50 p-4 flex items-center gap-3">
+    <div className="rounded-xl border border-border p-4 flex items-center gap-3">
       <div
         className={`px-2.5 py-1 rounded-full text-xs font-medium ${
           colors[module.status] || colors.pending
@@ -67,7 +59,7 @@ function ModuleStatusBadge({ module }: { module: ModuleOutput }) {
       >
         {module.status}
       </div>
-      <span className="text-sm text-zinc-400 font-mono">{module.module_id}</span>
+      <span className="text-sm text-fg-secondary font-mono">{module.module_id}</span>
     </div>
   );
 }

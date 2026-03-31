@@ -1,47 +1,91 @@
 "use client";
 
-const SUGGESTIONS = [
-  "How is Marcus doing this month?",
-  "Which properties have the most turnover?",
-  "Are any leases expiring soon that I should know about?",
-  "Compare my managers on occupancy",
-  "What's changed since my last upload?",
+const GREETINGS = [
+  "Hey there.",
+  "Good to see you.",
+  "Ready when you are.",
+  "Let's get into it.",
 ];
+
+const ASK_SUGGESTIONS = [
+  { text: "How is Marcus doing this month?", icon: "👤" },
+  { text: "Which properties have the most turnover?", icon: "🔄" },
+  { text: "Are any leases expiring soon?", icon: "📋" },
+  { text: "Compare my managers on occupancy", icon: "📊" },
+];
+
+const AGENT_SUGGESTIONS = [
+  { text: "Run a full portfolio health check", icon: "🩺" },
+  { text: "Find which properties are underperforming and why", icon: "🔍" },
+  { text: "Find patterns in maintenance requests", icon: "🔧" },
+  { text: "Build a manager comparison on key metrics", icon: "⚖️" },
+];
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning.";
+  if (hour < 17) return "Good afternoon.";
+  return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+}
 
 export function SessionEmptyState({
   onSend,
   connected,
   streaming,
   mode,
+  managerName,
 }: {
   onSend: (text: string) => void;
   connected: boolean;
   streaming: boolean;
   mode: "ask" | "agent";
+  managerName?: string;
 }) {
+  const suggestions = managerName
+    ? mode === "agent"
+      ? [
+          { text: `Run a health check on ${managerName}'s portfolio`, icon: "🩺" },
+          { text: `Find underperforming properties for ${managerName}`, icon: "🔍" },
+          { text: `Analyze ${managerName}'s maintenance patterns`, icon: "🔧" },
+          { text: `How does ${managerName} compare on key metrics?`, icon: "⚖️" },
+        ]
+      : [
+          { text: `How is ${managerName} doing this month?`, icon: "👤" },
+          { text: `Any issues with ${managerName}'s properties?`, icon: "🔄" },
+          { text: `What's ${managerName}'s occupancy rate?`, icon: "📊" },
+          { text: `Are any of ${managerName}'s leases expiring soon?`, icon: "📋" },
+        ]
+    : mode === "agent"
+      ? AGENT_SUGGESTIONS
+      : ASK_SUGGESTIONS;
+
   return (
     <div className="flex-1 flex items-center justify-center">
-      <div className="flex flex-col items-center space-y-8 py-16">
-        <div className="text-center space-y-2">
-          <h2 className="text-lg font-semibold text-zinc-200">
-            What would you like to know?
-          </h2>
-          <p className="text-sm text-zinc-500 max-w-md">
-            Ask about your managers, properties, leases, or finances.
-            {mode === "agent" &&
-              " In deep dive mode, REMI can run its own analysis and find patterns in your data."}
-          </p>
-        </div>
+      <div className="flex flex-col items-center max-w-md w-full px-4 py-16">
+        {/* Warm accent mark */}
+        <div className="w-10 h-1 rounded-full bg-accent/40 mb-6" />
 
-        <div className="w-full max-w-md space-y-1.5">
-          {SUGGESTIONS.map((q) => (
+        <h2 className="text-lg font-medium text-fg mb-1 tracking-tight">
+          {getGreeting()}
+        </h2>
+        <p className="text-sm text-fg-muted mb-10 text-center max-w-xs leading-relaxed">
+          {managerName
+            ? `Focused on ${managerName}'s portfolio.`
+            : mode === "agent"
+              ? "I'll dig into the numbers and tell you what matters."
+              : "Ask me anything about your portfolio."}
+        </p>
+
+        <div className="grid grid-cols-1 gap-2 w-full">
+          {suggestions.map((q) => (
             <button
-              key={q}
-              onClick={() => onSend(q)}
+              key={q.text}
+              onClick={() => onSend(q.text)}
               disabled={!connected || streaming}
-              className="w-full text-left px-4 py-2.5 rounded-xl border border-zinc-800/40 text-sm text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 hover:bg-zinc-800/30 transition-all disabled:opacity-40"
+              className="group text-left px-4 py-3 rounded-xl border border-border text-[13px] text-fg-muted hover:text-fg hover:border-accent/30 hover:bg-accent-soft transition-all disabled:opacity-30 leading-snug flex items-center gap-3"
             >
-              {q}
+              <span className="text-base opacity-60 group-hover:opacity-100 transition-opacity">{q.icon}</span>
+              <span>{q.text}</span>
             </button>
           ))}
         </div>

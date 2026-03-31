@@ -366,11 +366,45 @@ export interface DocumentMeta {
 
 // --- Chat ---
 
+export interface UsageInfo {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  model?: string;
+  provider?: string;
+  cost?: number;
+}
+
 export interface ChatMessage {
+  id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: number;
   tools?: ToolCall[];
+  usage?: UsageInfo;
+  error?: string;
+}
+
+export interface SessionSummary {
+  id: string;
+  agent: string;
+  messageCount: number;
+  preview: string;
+  createdAt: string;
+  updatedAt: string;
+  streaming: boolean;
+}
+
+export interface ModelsProvider {
+  name: string;
+  available: boolean;
+  models: string[];
+}
+
+export interface ModelsConfig {
+  default_provider: string;
+  default_model: string;
+  providers: ModelsProvider[];
 }
 
 export interface ToolCall {
@@ -434,6 +468,16 @@ export interface ProfileView {
   entity_type: string;
   entity_id: string;
   sections: ProfileSection[];
+}
+
+// --- Agents ---
+
+export interface AgentMeta {
+  name: string;
+  description: string;
+  version: string;
+  primary: boolean;
+  tags: string[];
 }
 
 // --- WebSocket ---

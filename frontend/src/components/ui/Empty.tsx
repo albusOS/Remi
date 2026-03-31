@@ -11,10 +11,10 @@ export function Empty({
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      {icon && <div className="mb-4 text-zinc-700">{icon}</div>}
-      <h3 className="text-sm font-medium text-zinc-400 mb-1">{title}</h3>
+      {icon && <div className="mb-4 text-fg-ghost">{icon}</div>}
+      <h3 className="text-sm font-medium text-fg-muted mb-1">{title}</h3>
       {description && (
-        <p className="text-xs text-zinc-600 max-w-xs">{description}</p>
+        <p className="text-xs text-fg-faint max-w-xs">{description}</p>
       )}
     </div>
   );

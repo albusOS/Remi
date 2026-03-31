@@ -47,30 +47,30 @@ function PropertyRow({ p }: { p: ManagerPropertySummary }) {
   return (
     <Link
       href={`/properties/${p.property_id}`}
-      className="flex items-center gap-4 px-5 py-3 border-b border-zinc-800/30 hover:bg-zinc-800/20 transition-colors"
+      className="flex items-center gap-4 px-5 py-3 border-b border-border-subtle hover:bg-surface-raised transition-colors"
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <StatusDot status={p.issue_count === 0 ? "done" : p.emergency_maintenance > 0 ? "error" : "calling"} size={6} />
-          <span className="text-sm font-medium text-zinc-200 truncate">{p.property_name}</span>
+          <span className="text-sm font-medium text-fg truncate">{p.property_name}</span>
         </div>
       </div>
       <div className="flex items-center gap-6 shrink-0 text-xs">
         <div className="text-right w-16">
-          <p className="text-zinc-500">Units</p>
-          <p className="text-zinc-200 font-medium">{p.occupied}/{p.total_units}</p>
+          <p className="text-fg-muted">Units</p>
+          <p className="text-fg font-medium">{p.occupied}/{p.total_units}</p>
         </div>
         <div className="text-right w-16">
-          <p className="text-zinc-500">Occ.</p>
-          <p className={`font-medium ${occ < 0.9 ? "text-amber-400" : "text-zinc-200"}`}>{pct(occ)}</p>
+          <p className="text-fg-muted">Occ.</p>
+          <p className={`font-medium ${occ < 0.9 ? "text-warn" : "text-fg"}`}>{pct(occ)}</p>
         </div>
         <div className="text-right w-20">
-          <p className="text-zinc-500">Revenue</p>
-          <p className="text-zinc-200 font-mono font-medium">{fmt$(p.monthly_actual)}</p>
+          <p className="text-fg-muted">Revenue</p>
+          <p className="text-fg font-mono font-medium">{fmt$(p.monthly_actual)}</p>
         </div>
         <div className="text-right w-20">
-          <p className="text-zinc-500">LTL</p>
-          <p className={`font-mono font-medium ${p.loss_to_lease > 0 ? "text-amber-400" : "text-zinc-500"}`}>{fmt$(p.loss_to_lease)}</p>
+          <p className="text-fg-muted">LTL</p>
+          <p className={`font-mono font-medium ${p.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>{fmt$(p.loss_to_lease)}</p>
         </div>
         <div className="flex flex-wrap gap-1 w-40 justify-end">
           {p.vacant > 0 && <Badge variant="red">{p.vacant} vac</Badge>}
@@ -102,9 +102,9 @@ function OverviewTab({ review }: { review: ManagerReview }) {
       </div>
 
       {/* Properties table */}
-      <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
-        <div className="px-5 py-3 border-b border-zinc-800/40">
-          <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+      <section className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-5 py-3 border-b border-border-subtle">
+          <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide">
             Properties ({review.properties.length})
           </h2>
         </div>
@@ -113,16 +113,16 @@ function OverviewTab({ review }: { review: ManagerReview }) {
             <PropertyRow key={p.property_id} p={p} />
           ))}
           {review.properties.length === 0 && (
-            <p className="text-sm text-zinc-600 text-center py-12">No properties</p>
+            <p className="text-sm text-fg-faint text-center py-12">No properties</p>
           )}
         </div>
       </section>
 
       {/* Top issues */}
       {review.top_issues.length > 0 && (
-        <section className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
-          <div className="px-5 py-3 border-b border-zinc-800/40">
-            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+        <section className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-5 py-3 border-b border-border-subtle">
+            <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide">
               Unit Issues ({review.top_issues.length})
             </h2>
           </div>
@@ -131,11 +131,11 @@ function OverviewTab({ review }: { review: ManagerReview }) {
               <Link
                 key={issue.unit_id}
                 href={`/properties/${issue.property_id}`}
-                className="flex items-center gap-4 px-5 py-2.5 border-b border-zinc-800/30 hover:bg-zinc-800/20 transition-colors"
+                className="flex items-center gap-4 px-5 py-2.5 border-b border-border-subtle hover:bg-surface-raised transition-colors"
               >
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm text-zinc-300 font-mono">{issue.unit_number}</span>
-                  <span className="text-[10px] text-zinc-600 ml-2">{issue.property_name}</span>
+                  <span className="text-sm text-fg-secondary font-mono">{issue.unit_number}</span>
+                  <span className="text-[10px] text-fg-faint ml-2">{issue.property_name}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {issue.issues.map((iss) => (
@@ -145,7 +145,7 @@ function OverviewTab({ review }: { review: ManagerReview }) {
                   ))}
                 </div>
                 {issue.monthly_impact > 0 && (
-                  <span className="text-xs text-amber-400 font-mono">-{fmt$(issue.monthly_impact)}/mo</span>
+                  <span className="text-xs text-warn font-mono">-{fmt$(issue.monthly_impact)}/mo</span>
                 )}
               </Link>
             ))}
@@ -158,7 +158,7 @@ function OverviewTab({ review }: { review: ManagerReview }) {
 
 function DelinquencyTab({ data }: { data: DelinquencyBoard | null }) {
   if (!data || data.total_delinquent === 0) {
-    return <p className="text-sm text-zinc-600 text-center py-12">No delinquent tenants</p>;
+    return <p className="text-sm text-fg-faint text-center py-12">No delinquent tenants</p>;
   }
 
   return (
@@ -167,36 +167,36 @@ function DelinquencyTab({ data }: { data: DelinquencyBoard | null }) {
         <MetricCard label="Delinquent Tenants" value={data.total_delinquent} alert />
         <MetricCard label="Total Balance Owed" value={fmt$(data.total_balance)} alert />
       </div>
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-zinc-800/60">
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Tenant</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Property</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Unit</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Status</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">0-30</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">30+</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Total</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Last Paid</th>
+              <tr className="border-b border-border">
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Tenant</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Property</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Unit</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Status</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">0-30</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">30+</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Total</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Last Paid</th>
               </tr>
             </thead>
             <tbody>
               {data.tenants.map((t) => (
-                <tr key={t.tenant_id} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
-                  <td className="px-4 py-2 text-zinc-200 font-medium">{t.tenant_name}</td>
-                  <td className="px-4 py-2 text-zinc-400">{t.property_name || "—"}</td>
-                  <td className="px-4 py-2 text-zinc-400 font-mono">{t.unit_number || "—"}</td>
+                <tr key={t.tenant_id} className="border-b border-border-subtle hover:bg-surface-raised">
+                  <td className="px-4 py-2 text-fg font-medium">{t.tenant_name}</td>
+                  <td className="px-4 py-2 text-fg-secondary">{t.property_name || "—"}</td>
+                  <td className="px-4 py-2 text-fg-secondary font-mono">{t.unit_number || "—"}</td>
                   <td className="px-4 py-2">
                     <Badge variant={t.status === "evict" ? "red" : t.status === "notice" ? "amber" : "blue"}>{t.status}</Badge>
                   </td>
-                  <td className="px-4 py-2 text-right text-zinc-300 font-mono">{fmt$(t.balance_0_30)}</td>
+                  <td className="px-4 py-2 text-right text-fg-secondary font-mono">{fmt$(t.balance_0_30)}</td>
                   <td className="px-4 py-2 text-right font-mono">
-                    <span className={t.balance_30_plus > 0 ? "text-red-400" : "text-zinc-500"}>{fmt$(t.balance_30_plus)}</span>
+                    <span className={t.balance_30_plus > 0 ? "text-error" : "text-fg-muted"}>{fmt$(t.balance_30_plus)}</span>
                   </td>
-                  <td className="px-4 py-2 text-right font-mono font-bold text-red-400">{fmt$(t.balance_owed)}</td>
-                  <td className="px-4 py-2 text-zinc-500">{t.last_payment_date ? fmtDate(t.last_payment_date) : "—"}</td>
+                  <td className="px-4 py-2 text-right font-mono font-bold text-error">{fmt$(t.balance_owed)}</td>
+                  <td className="px-4 py-2 text-fg-muted">{t.last_payment_date ? fmtDate(t.last_payment_date) : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -209,7 +209,7 @@ function DelinquencyTab({ data }: { data: DelinquencyBoard | null }) {
 
 function LeasesTab({ data }: { data: LeaseCalendar | null }) {
   if (!data || data.total_expiring === 0) {
-    return <p className="text-sm text-zinc-600 text-center py-12">No expiring leases in the next {data?.days_window || 90} days</p>;
+    return <p className="text-sm text-fg-faint text-center py-12">No expiring leases in the next {data?.days_window || 90} days</p>;
   }
 
   return (
@@ -219,34 +219,34 @@ function LeasesTab({ data }: { data: LeaseCalendar | null }) {
         <MetricCard label="Month-to-Month" value={data.month_to_month_count} alert={data.month_to_month_count > 0} />
         <MetricCard label="Window" value={`${data.days_window}d`} />
       </div>
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-zinc-800/60">
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Tenant</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Property</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Unit</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Rent</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Market</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Expires</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Days Left</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">MTM</th>
+              <tr className="border-b border-border">
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Tenant</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Property</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Unit</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Rent</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Market</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Expires</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Days Left</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">MTM</th>
               </tr>
             </thead>
             <tbody>
               {data.leases.map((l) => (
-                <tr key={l.lease_id} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
-                  <td className="px-4 py-2 text-zinc-200 font-medium">{l.tenant_name}</td>
-                  <td className="px-4 py-2 text-zinc-400">{l.property_name}</td>
-                  <td className="px-4 py-2 text-zinc-400 font-mono">{l.unit_number}</td>
-                  <td className="px-4 py-2 text-right text-zinc-300 font-mono">{fmt$(l.monthly_rent)}</td>
+                <tr key={l.lease_id} className="border-b border-border-subtle hover:bg-surface-raised">
+                  <td className="px-4 py-2 text-fg font-medium">{l.tenant_name}</td>
+                  <td className="px-4 py-2 text-fg-secondary">{l.property_name}</td>
+                  <td className="px-4 py-2 text-fg-secondary font-mono">{l.unit_number}</td>
+                  <td className="px-4 py-2 text-right text-fg-secondary font-mono">{fmt$(l.monthly_rent)}</td>
                   <td className="px-4 py-2 text-right font-mono">
-                    <span className={l.market_rent > l.monthly_rent ? "text-amber-400" : "text-zinc-400"}>{fmt$(l.market_rent)}</span>
+                    <span className={l.market_rent > l.monthly_rent ? "text-warn" : "text-fg-secondary"}>{fmt$(l.market_rent)}</span>
                   </td>
-                  <td className="px-4 py-2 text-zinc-400">{fmtDate(l.end_date)}</td>
+                  <td className="px-4 py-2 text-fg-secondary">{fmtDate(l.end_date)}</td>
                   <td className="px-4 py-2 text-right">
-                    <span className={l.days_left <= 30 ? "text-red-400 font-bold" : l.days_left <= 60 ? "text-amber-400" : "text-zinc-300"}>
+                    <span className={l.days_left <= 30 ? "text-error font-bold" : l.days_left <= 60 ? "text-warn" : "text-fg-secondary"}>
                       {l.days_left}
                     </span>
                   </td>
@@ -263,7 +263,7 @@ function LeasesTab({ data }: { data: LeaseCalendar | null }) {
 
 function VacanciesTab({ data }: { data: VacancyTracker | null }) {
   if (!data || (data.total_vacant === 0 && data.total_notice === 0)) {
-    return <p className="text-sm text-zinc-600 text-center py-12">No vacant or notice units</p>;
+    return <p className="text-sm text-fg-faint text-center py-12">No vacant or notice units</p>;
   }
 
   return (
@@ -274,40 +274,40 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
         <MetricCard label="Rent at Risk" value={fmt$(data.total_market_rent_at_risk)} alert />
         <MetricCard label="Avg Days Vacant" value={data.avg_days_vacant ?? "—"} />
       </div>
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-zinc-800/60">
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Property</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Unit</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Status</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Days Vacant</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Market Rent</th>
-                <th className="text-center px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Listed</th>
+              <tr className="border-b border-border">
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Property</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Unit</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Status</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Days Vacant</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Market Rent</th>
+                <th className="text-center px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Listed</th>
               </tr>
             </thead>
             <tbody>
               {data.units.map((u) => (
-                <tr key={u.unit_id} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
-                  <td className="px-4 py-2 text-zinc-200 font-medium">{u.property_name}</td>
-                  <td className="px-4 py-2 text-zinc-400 font-mono">{u.unit_number}</td>
+                <tr key={u.unit_id} className="border-b border-border-subtle hover:bg-surface-raised">
+                  <td className="px-4 py-2 text-fg font-medium">{u.property_name}</td>
+                  <td className="px-4 py-2 text-fg-secondary font-mono">{u.unit_number}</td>
                   <td className="px-4 py-2">
                     <Badge variant={u.occupancy_status?.includes("vacant") ? "red" : "amber"}>
                       {(u.occupancy_status || "vacant").replace(/_/g, " ")}
                     </Badge>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <span className={u.days_vacant && u.days_vacant > 30 ? "text-red-400 font-bold" : "text-zinc-300"}>
+                    <span className={u.days_vacant && u.days_vacant > 30 ? "text-error font-bold" : "text-fg-secondary"}>
                       {u.days_vacant ?? "—"}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-right text-zinc-300 font-mono">{u.market_rent > 0 ? fmt$(u.market_rent) : "—"}</td>
+                  <td className="px-4 py-2 text-right text-fg-secondary font-mono">{u.market_rent > 0 ? fmt$(u.market_rent) : "—"}</td>
                   <td className="px-4 py-2 text-center">
                     {u.listed_on_website || u.listed_on_internet ? (
-                      <span className="text-emerald-400">Yes</span>
+                      <span className="text-ok">Yes</span>
                     ) : (
-                      <span className="text-zinc-600">No</span>
+                      <span className="text-fg-faint">No</span>
                     )}
                   </td>
                 </tr>
@@ -324,8 +324,8 @@ function PerformanceTab({ snapshots, managerName }: { snapshots: ManagerSnapshot
   if (snapshots.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-sm text-zinc-600">No performance snapshots yet.</p>
-        <p className="text-xs text-zinc-700 mt-1">Snapshots are captured each time reports are uploaded.</p>
+        <p className="text-sm text-fg-faint">No performance snapshots yet.</p>
+        <p className="text-xs text-fg-ghost mt-1">Snapshots are captured each time reports are uploaded.</p>
       </div>
     );
   }
@@ -334,53 +334,53 @@ function PerformanceTab({ snapshots, managerName }: { snapshots: ManagerSnapshot
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-zinc-500">{sorted.length} snapshots for {managerName}</p>
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 overflow-hidden">
+      <p className="text-xs text-fg-muted">{sorted.length} snapshots for {managerName}</p>
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-zinc-800/60">
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Snapshot</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Props</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Units</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Occ</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Revenue</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">LTL</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Delinquent</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-500 uppercase">Vacant</th>
+              <tr className="border-b border-border">
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Snapshot</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Props</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Units</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Occ</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Revenue</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">LTL</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Delinquent</th>
+                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Vacant</th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((s, i) => {
                 const prev = i > 0 ? sorted[i - 1] : null;
                 return (
-                  <tr key={s.timestamp} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
-                    <td className="px-4 py-2 text-zinc-400 text-[10px]">{fmtDate(s.timestamp)}</td>
-                    <td className="px-4 py-2 text-right text-zinc-300">{s.property_count}</td>
-                    <td className="px-4 py-2 text-right text-zinc-300">
+                  <tr key={s.timestamp} className="border-b border-border-subtle hover:bg-surface-raised">
+                    <td className="px-4 py-2 text-fg-secondary text-[10px]">{fmtDate(s.timestamp)}</td>
+                    <td className="px-4 py-2 text-right text-fg-secondary">{s.property_count}</td>
+                    <td className="px-4 py-2 text-right text-fg-secondary">
                       {s.total_units}
                       {prev && s.total_units !== prev.total_units && (
                         <Delta prev={prev.total_units} curr={s.total_units} />
                       )}
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <span className={s.occupancy_rate < 0.9 ? "text-amber-400" : "text-zinc-300"}>{pct(s.occupancy_rate)}</span>
+                      <span className={s.occupancy_rate < 0.9 ? "text-warn" : "text-fg-secondary"}>{pct(s.occupancy_rate)}</span>
                       {prev && <Delta prev={prev.occupancy_rate} curr={s.occupancy_rate} fmt={pct} />}
                     </td>
-                    <td className="px-4 py-2 text-right text-zinc-300">
+                    <td className="px-4 py-2 text-right text-fg-secondary">
                       {fmt$(s.total_rent)}
                       {prev && <Delta prev={prev.total_rent} curr={s.total_rent} fmt={fmt$} />}
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <span className={s.loss_to_lease > 0 ? "text-amber-400" : "text-zinc-500"}>
+                      <span className={s.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}>
                         {s.loss_to_lease > 0 ? fmt$(s.loss_to_lease) : "—"}
                       </span>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <span className={s.delinquent_count > 0 ? "text-red-400" : "text-zinc-500"}>{s.delinquent_count || "—"}</span>
+                      <span className={s.delinquent_count > 0 ? "text-error" : "text-fg-muted"}>{s.delinquent_count || "—"}</span>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <span className={s.vacant > 0 ? "text-red-400" : "text-zinc-500"}>{s.vacant || "—"}</span>
+                      <span className={s.vacant > 0 ? "text-error" : "text-fg-muted"}>{s.vacant || "—"}</span>
                       {prev && <Delta prev={prev.vacant} curr={s.vacant} invert />}
                     </td>
                   </tr>
@@ -400,7 +400,7 @@ function Delta({ prev, curr, fmt: fmtFn, invert }: { prev: number; curr: number;
   const positive = invert ? diff < 0 : diff > 0;
   const display = fmtFn ? fmtFn(Math.abs(diff)) : String(Math.abs(diff));
   return (
-    <span className={`ml-1 text-[9px] font-bold ${positive ? "text-emerald-400" : "text-red-400"}`}>
+    <span className={`ml-1 text-[9px] font-bold ${positive ? "text-ok" : "text-error"}`}>
       {positive ? "+" : "-"}{display}
     </span>
   );
@@ -445,7 +445,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-sm text-zinc-600 animate-pulse">Loading...</div>
+        <div className="text-sm text-fg-faint animate-pulse">Loading...</div>
       </div>
     );
   }
@@ -453,7 +453,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   if (!review) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-sm text-zinc-500">Manager not found</div>
+        <div className="text-sm text-fg-muted">Manager not found</div>
       </div>
     );
   }
@@ -469,18 +469,18 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
       <div className="max-w-7xl mx-auto px-8 py-8 space-y-6">
         {/* Header */}
         <div>
-          <Link href="/" className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+          <Link href="/" className="text-xs text-fg-faint hover:text-fg-secondary transition-colors">
             &larr; All Managers
           </Link>
-          <h1 className="text-xl font-bold text-zinc-100 mt-2">{review.name}</h1>
+          <h1 className="text-xl font-bold text-fg mt-2">{review.name}</h1>
           <div className="flex items-center gap-3 mt-1">
-            {review.company && <span className="text-xs text-zinc-500">{review.company}</span>}
-            <span className="text-xs text-zinc-600">{review.property_count} properties · {review.total_units} units</span>
+            {review.company && <span className="text-xs text-fg-muted">{review.company}</span>}
+            <span className="text-xs text-fg-faint">{review.property_count} properties · {review.total_units} units</span>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 border-b border-zinc-800/60 -mx-8 px-8">
+        <div className="flex items-center gap-1 border-b border-border -mx-8 px-8">
           {TABS.map(({ key, label }) => {
             const count = key === "delinquency" ? delCount : key === "leases" ? leaseCount : key === "vacancies" ? vacCount : key === "performance" ? snapCount : 0;
             return (
@@ -489,14 +489,14 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
                 onClick={() => setTab(key)}
                 className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
                   tab === key
-                    ? "border-blue-500 text-zinc-100"
-                    : "border-transparent text-zinc-500 hover:text-zinc-300"
+                    ? "border-accent text-fg"
+                    : "border-transparent text-fg-muted hover:text-fg-secondary"
                 }`}
               >
                 {label}
                 {count > 0 && key !== "overview" && (
                   <span className={`ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full ${
-                    key === "delinquency" || key === "vacancies" ? "bg-red-500/20 text-red-400" : key === "leases" ? "bg-amber-500/20 text-amber-400" : "bg-zinc-800 text-zinc-400"
+                    key === "delinquency" || key === "vacancies" ? "bg-error-soft text-error" : key === "leases" ? "bg-warn-soft text-warn" : "bg-surface-sunken text-fg-faint"
                   }`}>
                     {count}
                   </span>

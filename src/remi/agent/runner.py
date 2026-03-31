@@ -134,6 +134,7 @@ class ChatAgentService:
     ) -> tuple[str | None, str]:
         """Single-shot agent invocation. Returns (answer, run_id)."""
         config_dict = self._load_agent_config(agent_name)
+        config_dict["name"] = agent_name
         run_id = new_run_id()
 
         log = logger.bind(run_id=run_id, agent=agent_name, mode=mode, method="ask")
@@ -171,9 +172,11 @@ class ChatAgentService:
         mode: Literal["ask", "agent"] = "agent",
         provider: str | None = None,
         model: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> str:
         """Multi-turn agent execution over a message thread."""
         config_dict = self._load_agent_config(agent_name)
+        config_dict["name"] = agent_name
         run_id = new_run_id()
 
         log = logger.bind(run_id=run_id, agent=agent_name, mode=mode, method="chat")
@@ -189,7 +192,7 @@ class ChatAgentService:
             provider_name=provider,
             model_name=model,
         )
-        ctx = self._build_context(run_id=run_id, params=params)
+        ctx = self._build_context(run_id=run_id, params=params, extra=extra)
 
         thread_msgs: list[dict[str, Any]] = []
         for msg in thread:

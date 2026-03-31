@@ -13,32 +13,32 @@ export function MetricCard({ label, value, sub, trend, alert }: Props) {
     <div
       className={`rounded-xl border px-5 py-4 ${
         alert
-          ? "border-amber-500/30 bg-amber-500/5"
-          : "border-zinc-800/60 bg-zinc-900/40"
+          ? "border-warn/30 bg-warn-soft"
+          : "border-border bg-surface"
       }`}
     >
-      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wide mb-1">
+      <p className="text-[11px] font-medium text-fg-muted uppercase tracking-wide mb-1">
         {label}
       </p>
       <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-bold text-zinc-100">
+        <span className="text-2xl font-bold text-fg">
           {typeof value === "number" ? value.toLocaleString() : value}
         </span>
         {trend && (
           <span
             className={`text-xs font-semibold ${
               trend === "up"
-                ? "text-emerald-400"
+                ? "text-ok"
                 : trend === "down"
-                ? "text-red-400"
-                : "text-zinc-500"
+                ? "text-error"
+                : "text-fg-muted"
             }`}
           >
             {trend === "up" ? "↑" : trend === "down" ? "↓" : "→"}
           </span>
         )}
       </div>
-      {sub && <p className="text-[11px] text-zinc-600 mt-1">{sub}</p>}
+      {sub && <p className="text-[11px] text-fg-faint mt-1">{sub}</p>}
     </div>
   );
 }
