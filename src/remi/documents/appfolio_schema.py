@@ -162,14 +162,14 @@ REPORT_TYPE_DEFINITIONS: list[ReportTypeDefinition] = [
             {"BD/BA", "Posted To Website", "Posted To Internet", "Revenue", "Description"}
         ),
     ),
-    # Property directory fingerprint is intentionally minimal until we have a real
-    # export to calibrate against. The LLM classifier acts as the reliable path for
-    # now; this entry provides a fast-path once columns are confirmed.
     ReportTypeDefinition(
         report_type=AppFolioReportType.PROPERTY_DIRECTORY,
         required_columns=frozenset({"Property"}),
-        signature_columns=frozenset({"Property Manager", "Type", "Address", "Status", "Units"}),
-        min_score=0.4,
+        signature_columns=frozenset({
+            "Site Manager Name", "Property Manager", "Units",
+            "Type", "Address", "Status",
+        }),
+        min_score=0.2,
     ),
 ]
 

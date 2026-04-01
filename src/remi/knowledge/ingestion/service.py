@@ -1,4 +1,4 @@
-"""IngestionService — structured entity extraction from uploaded documents.
+"""IngestionService — schema-driven entity extraction from uploaded documents.
 
 Report type detection uses a two-tier approach:
 
@@ -7,18 +7,16 @@ Report type detection uses a two-tier approach:
 
   2. Semantic (LLM fallback): when structural detection returns UNKNOWN or scores
      below the threshold, the optional report_classifier agent is asked to identify
-     the report type from column names and sample rows.  This path is skipped
-     gracefully when no LLM API key is configured.
+     the report type from column names and sample rows.
 
-Ingest routing uses a registry dict (_INGEST_HANDLERS) so new report types can
-be added by registering a handler function without touching this routing logic.
-Anything not in the registry falls back to ingest_generic.
+Ingestion is dispatched through the schema registry (REPORT_SCHEMAS). Each
+report type is a declarative ReportSchema — no per-type handler files. Unknown
+types fall back to a minimal generic ingest that stores raw rows as KB entities.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 import structlog
 
@@ -27,20 +25,14 @@ from remi.documents.appfolio_schema import (
     detect_report_type_scored,
 )
 from remi.knowledge.ingestion.base import IngestionResult
-from remi.knowledge.ingestion.delinquency import ingest_delinquency
 from remi.knowledge.ingestion.generic import ingest_generic
-from remi.knowledge.ingestion.lease_expiration import ingest_lease_expiration
-from remi.knowledge.ingestion.property_directory import ingest_property_directory
-from remi.knowledge.ingestion.rent_roll import ingest_rent_roll
+from remi.knowledge.ingestion.managers import ManagerResolver
+from remi.knowledge.ingestion.schema import REPORT_SCHEMAS, ingest_report
 from remi.models.documents import Document
 from remi.models.memory import Entity, KnowledgeStore
-from remi.models.properties import Address, Portfolio, Property, PropertyManager, PropertyStore
-from remi.shared.text import manager_name_from_tag, slugify
+from remi.models.properties import PropertyStore
 
 ClassifyFn = Callable[[Document], Awaitable[str | None]]
-
-# Minimum structural confidence to trust fingerprint detection without LLM.
-_STRUCTURAL_CONFIDENCE_THRESHOLD = 0.5
 
 logger = structlog.get_logger(__name__)
 
@@ -58,149 +50,10 @@ class IngestionService:
         self._kb = knowledge_store
         self._ps = property_store
         self._classify_fn = classify_fn
-
-    async def _ensure_manager(self, manager_tag: str) -> str:
-        """Create or retrieve a manager + portfolio for a given tag. Returns portfolio_id.
-
-        When the resolved name doesn't match an existing manager exactly, we
-        check for a first-name match (e.g. "Denise Shoemaker" matches existing
-        "Denise") and merge into that record rather than creating a duplicate.
-        The longer name wins so the record becomes more complete over time.
-        """
-        mgr_name = manager_name_from_tag(manager_tag)
-        manager_id = slugify(f"manager:{mgr_name}")
-
-        existing = await self._ps.get_manager(manager_id)
-        if existing:
-            await self._ps.upsert_manager(
-                PropertyManager(id=manager_id, name=mgr_name, manager_tag=manager_tag)
-            )
-        else:
-            resolved_id, resolved_name = await self._resolve_manager_alias(mgr_name)
-            if resolved_id:
-                manager_id = resolved_id
-                mgr_name = resolved_name  # type: ignore[assignment]
-            else:
-                await self._ps.upsert_manager(
-                    PropertyManager(id=manager_id, name=mgr_name, manager_tag=manager_tag)
-                )
-
-        portfolio_id = slugify(f"portfolio:{mgr_name}")
-        await self._ps.upsert_portfolio(
-            Portfolio(
-                id=portfolio_id,
-                manager_id=manager_id,
-                name=f"{mgr_name} Portfolio",
-            )
+        self._manager_resolver = ManagerResolver(
+            manager_repo=property_store,
+            portfolio_repo=property_store,
         )
-        return portfolio_id
-
-    async def _resolve_manager_alias(self, name: str) -> tuple[str | None, str | None]:
-        """Find an existing manager that matches the given name.
-
-        Returns (manager_id, canonical_name) if found, else (None, None).
-
-        Two-tier matching:
-          1. Normalized slug match — handles casing/whitespace variants like
-             "NIkki Smith" vs "Nikki  Smith" (both slug to the same ID).
-          2. First-name + prefix match — handles partial names like "Denise"
-             upgrading to "Denise Shoemaker". Only used when the slug didn't
-             match, and requires the first name to be identical to avoid
-             false-positives between e.g. "Ryan Steen" and "Ryan Other".
-
-        The longer name always wins so records become more complete over time.
-        """
-        if not name:
-            return None, None
-
-        target_slug = slugify(f"manager:{name}")
-        managers = await self._ps.list_managers()
-
-        for m in managers:
-            if m.id == target_slug:
-                canonical = name if len(name) > len(m.name) else m.name
-                if len(canonical) > len(m.name):
-                    await self._ps.upsert_manager(
-                        PropertyManager(id=m.id, name=canonical, manager_tag=m.manager_tag)
-                    )
-                return m.id, canonical
-
-        first_name = name.split()[0].lower()
-        for m in managers:
-            m_first = m.name.split()[0].lower() if m.name else ""
-            if m_first != first_name:
-                continue
-            if m.name.lower().startswith(name.lower()) or name.lower().startswith(m.name.lower()):
-                canonical = name if len(name) > len(m.name) else m.name
-                if len(canonical) > len(m.name):
-                    await self._ps.upsert_manager(
-                        PropertyManager(id=m.id, name=canonical, manager_tag=m.manager_tag)
-                    )
-                return m.id, canonical
-
-        return None, None
-
-    async def _upsert_property_safe(
-        self,
-        prop_id: str,
-        name: str,
-        addr: Address,
-        portfolio_id: str | None = None,
-        source_document_id: str | None = None,
-    ) -> None:
-        existing = await self._ps.get_property(prop_id)
-        if portfolio_id is not None:
-            effective_pid = portfolio_id
-        elif existing is not None and existing.portfolio_id:
-            effective_pid = existing.portfolio_id
-        else:
-            effective_pid = ""
-
-        await self._ps.upsert_property(
-            Property(
-                id=prop_id,
-                portfolio_id=effective_pid,
-                name=name,
-                address=addr,
-                source_document_id=source_document_id,
-            )
-        )
-
-    async def _upsert_entity(
-        self,
-        entity_id: str,
-        entity_type: str,
-        namespace: str,
-        props: dict[str, Any],
-        result: IngestionResult,
-    ) -> None:
-        existing = await self._kb.get_entity(namespace, entity_id)
-        if existing:
-            merged = {**existing.properties, **props}
-            await self._kb.put_entity(
-                Entity(
-                    entity_id=entity_id,
-                    entity_type=entity_type,
-                    namespace=namespace,
-                    properties=merged,
-                )
-            )
-        else:
-            await self._kb.put_entity(
-                Entity(
-                    entity_id=entity_id,
-                    entity_type=entity_type,
-                    namespace=namespace,
-                    properties=props,
-                )
-            )
-            result.entities_created += 1
-
-    async def _classify_with_llm(self, doc: Document) -> str | None:
-        """Delegate to the injected classify callback, if provided."""
-        if self._classify_fn is None:
-            return None
-        return await self._classify_fn(doc)
 
     async def ingest(
         self,
@@ -210,23 +63,19 @@ class IngestionService:
     ) -> IngestionResult:
         namespace = f"doc:{doc.id}"
 
-        # --- Two-tier report type detection ---
         structural_type, confidence = detect_report_type_scored(doc.column_names)
-        is_confident = (
-            structural_type != AppFolioReportType.UNKNOWN
-            and confidence >= _STRUCTURAL_CONFIDENCE_THRESHOLD
-        )
 
-        if is_confident:
+
+
+        if structural_type != AppFolioReportType.UNKNOWN:
             report_type = structural_type
         else:
             llm_type = await self._classify_with_llm(doc)
-            report_type = llm_type if llm_type else AppFolioReportType.UNKNOWN
-            if llm_type and llm_type != AppFolioReportType.UNKNOWN:
+            report_type = llm_type or AppFolioReportType.UNKNOWN
+            if report_type != AppFolioReportType.UNKNOWN:
                 logger.info(
                     "report_type_from_llm",
                     doc_id=doc.id,
-                    structural_type=structural_type,
                     structural_confidence=confidence,
                     llm_type=llm_type,
                 )
@@ -252,9 +101,28 @@ class IngestionService:
 
         upload_portfolio_id: str | None = None
         if manager:
-            upload_portfolio_id = await self._ensure_manager(manager)
+            upload_portfolio_id = await self._manager_resolver.ensure_manager(manager)
 
-        await self._route_ingest(report_type, doc, namespace, result, upload_portfolio_id)
+        schema = REPORT_SCHEMAS.get(report_type)
+        if schema:
+            await ingest_report(
+                doc_id=doc.id,
+                rows=doc.rows,
+                namespace=namespace,
+                schema=schema,
+                kb=self._kb,
+                ps=self._ps,
+                manager_resolver=self._manager_resolver,
+                result=result,
+                upload_portfolio_id=upload_portfolio_id,
+            )
+        else:
+            logger.info(
+                "ingest_fallback_to_generic",
+                doc_id=doc.id,
+                report_type=report_type,
+            )
+            await ingest_generic(doc, namespace, result, self._kb)
 
         logger.info(
             "ingestion_complete",
@@ -267,52 +135,7 @@ class IngestionService:
         )
         return result
 
-    async def _route_ingest(
-        self,
-        report_type: str,
-        doc: Document,
-        namespace: str,
-        result: IngestionResult,
-        upload_portfolio_id: str | None,
-    ) -> None:
-        """Dispatch to the appropriate ingest handler via registry lookup."""
-        _simple_handlers = {
-            AppFolioReportType.RENT_ROLL: ingest_rent_roll,
-        }
-        # Handlers that additionally need ensure_manager
-        _manager_aware_handlers = {
-            AppFolioReportType.DELINQUENCY: ingest_delinquency,
-            AppFolioReportType.LEASE_EXPIRATION: ingest_lease_expiration,
-            AppFolioReportType.PROPERTY_DIRECTORY: ingest_property_directory,
-        }
-
-        if report_type in _simple_handlers:
-            await _simple_handlers[report_type](
-                doc,
-                namespace,
-                result,
-                self._kb,
-                self._ps,
-                self._upsert_entity,
-                self._upsert_property_safe,
-                upload_portfolio_id,
-            )
-        elif report_type in _manager_aware_handlers:
-            await _manager_aware_handlers[report_type](
-                doc,
-                namespace,
-                result,
-                self._kb,
-                self._ps,
-                self._upsert_entity,
-                self._upsert_property_safe,
-                self._ensure_manager,
-                upload_portfolio_id,
-            )
-        else:
-            logger.info(
-                "ingest_fallback_to_generic",
-                doc_id=doc.id,
-                report_type=report_type,
-            )
-            await ingest_generic(doc, namespace, result, self._kb, self._upsert_entity)
+    async def _classify_with_llm(self, doc: Document) -> str | None:
+        if self._classify_fn is None:
+            return None
+        return await self._classify_fn(doc)

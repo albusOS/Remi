@@ -82,11 +82,30 @@ The LLM's job is abductive reasoning: explain, connect, recommend, codify.
 | `src/remi/agents/researcher/app.yaml` | Researcher agent — deep analysis, sandbox, phased protocol |
 | `src/remi/agent/node.py` | AgentNode — config-driven think-act-observe loop |
 | `src/remi/knowledge/entailment/engine.py` | Entailment engine — evaluates rules, produces signals |
+| `src/remi/knowledge/ingestion/schema.py` | Declarative report schemas + unified `ingest_report()` loop |
+| `src/remi/knowledge/ingestion/managers.py` | Manager classification (frequency-based) + `ManagerResolver` |
 | `src/remi/knowledge/context_builder.py` | Assembles agent context from knowledge graph + signals |
 | `src/remi/knowledge/graph_retriever.py` | Retrieves entities and relationships from the graph |
 | `src/remi/services/dashboard.py` | Computes director dashboard state from signals |
 | `src/remi/services/manager_review.py` | Manager performance review logic |
+| `src/remi/services/auto_assign.py` | Assigns unassigned properties to existing managers (never creates new ones) |
 | `src/remi/shared/errors.py` | Shared error types — use these, don't invent new ones |
+
+## Ingestion Pipeline
+
+Ingestion is **schema-driven**. Each AppFolio report type has a `ReportSchema` in
+`knowledge/ingestion/schema.py`. Adding a new report type = adding a schema definition,
+not a handler file.
+
+**Two categories:**
+- **Migration** (Property Directory): creates managers + properties. Uses frequency-based
+  classification to separate real manager names from operational tags (e.g. "Section 8").
+  Only report type that creates `PropertyManager` / `Portfolio` records.
+- **Recurring** (Delinquency, Rent Roll, Lease Expiration): creates/updates units, tenants,
+  leases. Never creates managers — consumes existing property-to-portfolio mappings.
+
+`AutoAssignService` assigns unassigned properties to *existing* managers only — it will
+never create a new manager from a KB tag.
 
 ## Module Map
 
@@ -100,6 +119,16 @@ src/remi/
   db/           Database engine and tables (Postgres)
   documents/    AppFolio report schema and parsers
   knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline, ontology
+    ingestion/
+      schema.py    ReportSchema definitions + unified ingest_report() loop
+      managers.py  Frequency-based manager classification + ManagerResolver
+      service.py   IngestionService — report type detection + schema dispatch
+      generic.py   Fallback for unrecognized report types
+      helpers.py   Address parsing, occupancy mapping
+    ontology/
+      bridge.py    BridgedKnowledgeGraph + build_knowledge_graph factory
+      schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph
+      remote.py    RemoteKnowledgeGraph (HTTP client for sandbox)
   llm/          LLM provider ports + adapters (Anthropic, OpenAI, Gemini)
   models/       Pydantic models (properties, signals, ontology, chat, documents, trace, memory, sandbox, tools)
   observability/ Structured logging (structlog), events, tracer

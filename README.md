@@ -257,6 +257,12 @@ src/remi/
   db/           Database engine and tables (Postgres support)
   documents/    AppFolio report schema and parsers
   knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline
+    ingestion/
+      schema.py    ReportSchema definitions + unified ingest_report() loop
+      managers.py  Frequency-based manager classification + ManagerResolver
+      service.py   IngestionService — report type detection + schema dispatch
+      generic.py   Fallback for unrecognized report types
+      helpers.py   Address parsing, occupancy mapping
     ontology/
       bridge.py    BridgedKnowledgeGraph + build_knowledge_graph() factory
       schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph()
@@ -276,16 +282,26 @@ src/remi/
 
 ## Data Ingestion
 
-REMI ingests AppFolio report exports (XLSX/CSV). The ingestion pipeline:
+REMI ingests AppFolio report exports (XLSX/CSV). Ingestion is **schema-driven** — each
+report type is a declarative `ReportSchema` in `knowledge/ingestion/schema.py`.
+
+### Pipeline
 
 1. Upload via `POST /api/v1/documents/upload` or `remi seed`
-2. Report classifier detects type (rent roll, delinquency, property directory, lease expiration)
-3. Column-aware parsers extract entities (properties, units, leases, tenants, maintenance)
+2. Report type detected via scored column fingerprinting (`appfolio_schema.py`), LLM fallback for unknowns
+3. Schema-driven `ingest_report()` extracts KB entities, relationships, and domain models
 4. Entities written to the knowledge graph
 5. Entailment engine runs — produces signals
 6. Embedding pipeline runs — enables semantic search
 
-Supported report types are defined in `src/remi/documents/appfolio_schema.py` with parsers in `src/remi/knowledge/ingestion/`.
+### Report categories
+
+| Category | Reports | Creates Managers? |
+|----------|---------|-------------------|
+| **Migration** | Property Directory | Yes — frequency-based classification separates real managers from operational tags |
+| **Recurring** | Delinquency, Rent Roll, Lease Expiration | No — consumes existing property-to-portfolio mappings |
+
+`AutoAssignService` assigns unassigned properties to *existing* managers only — it never creates new ones.
 
 ## LLM Providers
 

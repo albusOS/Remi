@@ -1,4 +1,10 @@
-"""AutoAssignService — assign unassigned properties to managers via knowledge graph tags."""
+"""AutoAssignService — assign unassigned properties to existing managers.
+
+Scans KB entities for manager_tag metadata and matches against managers
+that already exist in the PropertyStore (created by the property directory
+migration). Never creates new managers — if a tag doesn't match a known
+manager, the property stays unassigned for a human to resolve.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +13,7 @@ from dataclasses import dataclass
 import structlog
 
 from remi.models.memory import KnowledgeStore
-from remi.models.properties import Portfolio, PropertyManager, PropertyStore
+from remi.models.properties import PropertyStore
 from remi.services.snapshots import SnapshotService
 from remi.shared.text import manager_name_from_tag, slugify
 
@@ -51,6 +57,28 @@ class AutoAssignService:
                     prop_to_tag[entity.entity_id] = tag
         return prop_to_tag
 
+    async def _build_tag_to_portfolio(self) -> dict[str, str]:
+        """Map manager tags to portfolio IDs using only existing managers."""
+        managers = await self._ps.list_managers()
+        portfolios = await self._ps.list_portfolios()
+
+        manager_id_to_portfolio: dict[str, str] = {}
+        for p in portfolios:
+            manager_id_to_portfolio.setdefault(p.manager_id, p.id)
+
+        tag_to_portfolio: dict[str, str] = {}
+        for m in managers:
+            portfolio_id = manager_id_to_portfolio.get(m.id)
+            if not portfolio_id:
+                continue
+            if m.manager_tag:
+                tag_to_portfolio[m.manager_tag] = portfolio_id
+            tag_to_portfolio[m.name] = portfolio_id
+            mgr_name = manager_name_from_tag(m.manager_tag or m.name)
+            tag_to_portfolio[mgr_name] = portfolio_id
+
+        return tag_to_portfolio
+
     async def auto_assign(self) -> AutoAssignResult:
         all_props = await self._ps.list_properties()
         unassigned = [p for p in all_props if not p.portfolio_id]
@@ -65,26 +93,7 @@ class AutoAssignService:
                 message="Nothing to assign",
             )
 
-        portfolio_cache: dict[str, str] = {}
-
-        async def _ensure_manager_cached(tag: str) -> str:
-            if tag in portfolio_cache:
-                return portfolio_cache[tag]
-            mgr_name = manager_name_from_tag(tag)
-            manager_id = slugify(f"manager:{mgr_name}")
-            await self._ps.upsert_manager(
-                PropertyManager(id=manager_id, name=mgr_name, manager_tag=tag)
-            )
-            portfolio_id = slugify(f"portfolio:{mgr_name}")
-            await self._ps.upsert_portfolio(
-                Portfolio(
-                    id=portfolio_id,
-                    manager_id=manager_id,
-                    name=f"{mgr_name} Portfolio",
-                )
-            )
-            portfolio_cache[tag] = portfolio_id
-            return portfolio_id
+        tag_to_portfolio = await self._build_tag_to_portfolio()
 
         assigned = 0
         unresolved = 0
@@ -94,7 +103,23 @@ class AutoAssignService:
             if not tag:
                 unresolved += 1
                 continue
-            portfolio_id = await _ensure_manager_cached(tag)
+
+            portfolio_id = tag_to_portfolio.get(tag)
+            if not portfolio_id:
+                mgr_name = manager_name_from_tag(tag)
+                portfolio_id = tag_to_portfolio.get(mgr_name)
+
+            if not portfolio_id:
+                slug = slugify(f"portfolio:{manager_name_from_tag(tag)}")
+                for key, pid in tag_to_portfolio.items():
+                    if slugify(f"portfolio:{manager_name_from_tag(key)}") == slug:
+                        portfolio_id = pid
+                        break
+
+            if not portfolio_id:
+                unresolved += 1
+                continue
+
             updated = prop.model_copy(update={"portfolio_id": portfolio_id})
             await self._ps.upsert_property(updated)
             assigned += 1
@@ -102,11 +127,13 @@ class AutoAssignService:
         try:
             await self._snapshot.capture()
         except Exception:
-            logger.warning("snapshot_after_auto_assign_failed", exc_info=True)
+            logger.warning(
+                "snapshot_after_auto_assign_failed", exc_info=True,
+            )
 
         msg = (
-            f"Assigned {assigned} properties from knowledge store tags. "
-            f"{unresolved} had no tag and remain unassigned."
+            f"Assigned {assigned} properties to existing managers. "
+            f"{unresolved} had no tag or no matching manager."
         )
         return AutoAssignResult(
             assigned=assigned,

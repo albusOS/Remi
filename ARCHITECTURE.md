@@ -195,17 +195,32 @@ The researcher agent has access to an isolated Python sandbox for data analysis.
 
 ## Ingestion Pipeline
 
-Reports enter the system through `src/remi/knowledge/ingestion/`:
+Reports enter the system through `src/remi/knowledge/ingestion/`. Ingestion
+is **schema-driven**: each report type is a declarative `ReportSchema` in
+`schema.py` — adding a new report type means adding a schema definition,
+not a new handler file.
 
-| Parser | Report Type | Entities Created |
-|--------|------------|-----------------|
-| `property_directory.py` | Property Directory | Properties, Units |
-| `rent_roll.py` | Rent Roll | Leases, Tenants, rent data |
-| `delinquency.py` | Delinquency | Delinquent tenant records |
-| `lease_expiration.py` | Lease Expiration | Lease terms, renewal status |
-| `generic.py` | Unknown/other | Raw document rows |
+### Two categories of report
 
-Column mappings defined in `src/remi/documents/appfolio_schema.py`.
+| Category | Report Types | What It Does |
+|----------|-------------|--------------|
+| **Migration** | Property Directory | Creates managers and properties. Runs once (or rarely). Uses frequency-based classification to distinguish real manager names from operational tags. |
+| **Recurring** | Delinquency, Rent Roll, Lease Expiration | Creates/updates units, tenants, leases. Never creates managers — looks up existing property-to-portfolio mapping. |
+
+Unknown report types fall back to generic ingestion (raw rows stored as KB entities for later enrichment).
+
+### Key modules
+
+| Module | Role |
+|--------|------|
+| `schema.py` | `ReportSchema` definitions + unified `ingest_report()` loop |
+| `managers.py` | Frequency-based manager classification + `ManagerResolver` |
+| `service.py` | `IngestionService` — report type detection + schema dispatch |
+| `generic.py` | Fallback for unrecognized report types |
+| `helpers.py` | Address parsing, occupancy mapping |
+
+Report type detection uses scored column fingerprinting (`appfolio_schema.py`),
+with LLM classification as fallback for unknown layouts.
 
 ---
 

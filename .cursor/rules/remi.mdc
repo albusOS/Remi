@@ -140,6 +140,12 @@ api/          FastAPI routers
 cli/          Typer CLI
 config/       Settings, DI container, domain.yaml
 knowledge/    Context builder, graph retriever, entailment, ingestion
+  ingestion/
+    schema.py    ReportSchema definitions + unified ingest_report() loop
+    managers.py  Frequency-based manager classification + ManagerResolver
+    service.py   IngestionService — report type detection + schema dispatch
+    generic.py   Fallback for unrecognized report types
+    helpers.py   Address parsing, occupancy mapping
   ontology/
     bridge.py    BridgedKnowledgeGraph + build_knowledge_graph factory
     schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph

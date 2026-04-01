@@ -24,10 +24,12 @@ data/
 
 Reports are ingested in dependency order:
 
-1. **Property Directory** — creates PMs and properties (the spine)
-2. **Delinquency** — attaches tenants and balances
-3. **Lease Expiration** — attaches leases with real dates
-4. **Rent Roll** — fills in unit vacancy and listing status
+1. **Property Directory** (migration) — creates managers and properties. Uses frequency-based
+   classification to distinguish real manager names from operational tags in the "Site Manager Name"
+   column. Only report type that creates `PropertyManager` / `Portfolio` records.
+2. **Delinquency** (recurring) — attaches tenants and balances. Never creates managers.
+3. **Lease Expiration** (recurring) — attaches leases with real dates. Never creates managers.
+4. **Rent Roll** (recurring) — fills in unit vacancy and listing status. Never creates managers.
 
 ## Security
 
