@@ -12,9 +12,9 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
-_log = structlog.get_logger(__name__)
-
 from remi.vectors.ports import Embedder, SearchResult, VectorStore
+
+_log = structlog.get_logger(__name__)
 
 _KEYWORD_FIELDS = ["manager_name", "property_name", "tenant_name", "company"]
 

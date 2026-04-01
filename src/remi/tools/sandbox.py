@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.sandbox import Sandbox
 from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.sandbox.ports import Sandbox
 
 _DEFAULT_SESSION = "agent-default"
 
@@ -97,8 +97,8 @@ def register_sandbox_tools(
             name="sandbox_exec_python",
             description=(
                 "Write and execute Python code for data analysis. "
-                "pandas, numpy, scipy, statsmodels, and scikit-learn are available. "
-                "Use `import remi_data` to query live platform data "
+                "pandas, numpy, scipy, matplotlib, statsmodels, and scikit-learn "
+                "are available. Use `import remi_data` to query live platform data "
                 "(properties, units, leases, maintenance, signals). "
                 "Print results to stdout. Files written to the working directory "
                 "are preserved across calls."

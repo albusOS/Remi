@@ -276,14 +276,12 @@ class IngestionService:
         upload_portfolio_id: str | None,
     ) -> None:
         """Dispatch to the appropriate ingest handler via registry lookup."""
-        # Handlers that only need (doc, namespace, result, kb, ps, upsert_entity,
-        # upsert_property_safe, upload_portfolio_id)
         _simple_handlers = {
             AppFolioReportType.RENT_ROLL: ingest_rent_roll,
-            AppFolioReportType.DELINQUENCY: ingest_delinquency,
         }
         # Handlers that additionally need ensure_manager
         _manager_aware_handlers = {
+            AppFolioReportType.DELINQUENCY: ingest_delinquency,
             AppFolioReportType.LEASE_EXPIRATION: ingest_lease_expiration,
             AppFolioReportType.PROPERTY_DIRECTORY: ingest_property_directory,
         }

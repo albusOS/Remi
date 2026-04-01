@@ -210,7 +210,7 @@ function UnitRow({ row, expanded, onToggle }: { row: RentRollRow; expanded: bool
 }
 
 export function PropertyDetailView({ propertyId }: { propertyId: string }) {
-  const [financials, setFinancials] = useState<FinancialSummary[]>([]);
+  const [financials, _setFinancials] = useState<FinancialSummary[]>([]);
   const [expandedUnit, setExpandedUnit] = useState<string | null>(null);
   const [issueFilter, setIssueFilter] = useState<IssueFilter>("all");
 

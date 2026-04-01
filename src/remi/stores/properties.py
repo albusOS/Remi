@@ -113,6 +113,12 @@ class InMemoryPropertyStore(PropertyStore):
         existing = self._units.get(unit.id)
         self._units[unit.id] = _merge(existing, unit) if existing else unit  # type: ignore[assignment]
 
+    async def delete_units_by_property(self, property_id: str) -> int:
+        ids = [u.id for u in self._units.values() if u.property_id == property_id]
+        for uid in ids:
+            del self._units[uid]
+        return len(ids)
+
     # -- Lease --
     async def get_lease(self, lease_id: str) -> Lease | None:
         return self._leases.get(lease_id)
@@ -139,6 +145,12 @@ class InMemoryPropertyStore(PropertyStore):
     async def upsert_lease(self, lease: Lease) -> None:
         existing = self._leases.get(lease.id)
         self._leases[lease.id] = _merge(existing, lease) if existing else lease  # type: ignore[assignment]
+
+    async def delete_leases_by_property(self, property_id: str) -> int:
+        ids = [le.id for le in self._leases.values() if le.property_id == property_id]
+        for lid in ids:
+            del self._leases[lid]
+        return len(ids)
 
     # -- Tenant --
     async def get_tenant(self, tenant_id: str) -> Tenant | None:

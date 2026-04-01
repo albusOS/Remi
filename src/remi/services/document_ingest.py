@@ -114,7 +114,7 @@ class DocumentIngestService:
 
         if run_pipelines:
             try:
-                await self._snapshot_service.capture()
+                await self._snapshot_service.capture(effective_date=doc_with_meta.effective_date)
                 _log.info("performance_snapshot_captured")
             except Exception as exc:
                 pipeline_warnings.append(f"snapshot_capture: {exc}")

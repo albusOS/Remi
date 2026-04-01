@@ -140,6 +140,7 @@ class Property(BaseModel, frozen=True):
     address: Address
     property_type: PropertyType = PropertyType.RESIDENTIAL
     year_built: int | None = None
+    source_document_id: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -158,6 +159,7 @@ class Unit(BaseModel, frozen=True):
     listed_on_website: bool = False
     listed_on_internet: bool = False
     floor: int | None = None
+    source_document_id: str | None = None
 
 
 class Lease(BaseModel, frozen=True):
@@ -172,6 +174,7 @@ class Lease(BaseModel, frozen=True):
     status: LeaseStatus = LeaseStatus.ACTIVE
     market_rent: Decimal = Decimal("0")
     is_month_to_month: bool = False
+    source_document_id: str | None = None
 
 
 class Tenant(BaseModel, frozen=True):
@@ -186,6 +189,7 @@ class Tenant(BaseModel, frozen=True):
     last_payment_date: date | None = None
     tags: list[str] = Field(default_factory=list)
     lease_ids: list[str] = Field(default_factory=list)
+    source_document_id: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -281,6 +285,11 @@ class UnitRepository(abc.ABC):
     @abc.abstractmethod
     async def upsert_unit(self, unit: Unit) -> None: ...
 
+    @abc.abstractmethod
+    async def delete_units_by_property(self, property_id: str) -> int:
+        """Remove all units for a property. Returns count deleted."""
+        ...
+
 
 class LeaseRepository(abc.ABC):
     @abc.abstractmethod
@@ -298,6 +307,11 @@ class LeaseRepository(abc.ABC):
 
     @abc.abstractmethod
     async def upsert_lease(self, lease: Lease) -> None: ...
+
+    @abc.abstractmethod
+    async def delete_leases_by_property(self, property_id: str) -> int:
+        """Remove all leases for a property. Returns count deleted."""
+        ...
 
 
 class TenantRepository(abc.ABC):

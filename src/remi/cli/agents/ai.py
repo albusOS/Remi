@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import structlog
 import typer
 
 from remi.cli.shared import get_container_async, json_out, use_json
+
+logger = structlog.get_logger(__name__)
 
 cmd = typer.Typer(name="ai", help="Interact with REMI AI agents.", no_args_is_help=True)
 

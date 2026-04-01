@@ -70,4 +70,5 @@ class MetricsHistoryResponse(BaseModel, frozen=True):
 class AutoAssignResponse(BaseModel, frozen=True):
     assigned: int
     unresolved: int
+    tags_available: int
     message: str

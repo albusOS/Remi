@@ -12,7 +12,6 @@ truncates or drops sections that would exceed it.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -136,8 +135,10 @@ class ContextBuilder:
                 question=question,
                 embedder=self._embedder,
             )
-            with contextlib.suppress(Exception):
+            try:
                 frame.signals = await self._signal_store.list_signals()
+            except Exception:
+                _log.warning("signal_list_fetch_failed", exc_info=True)
             if tracer is not None:
                 severity_counts: dict[str, int] = {}
                 for s in frame.signals:
@@ -369,7 +370,9 @@ async def render_domain_context_semantic(
         scored: list[tuple[float, str, str]] = []
         for i, (section, label, _) in enumerate(items):
             item_vec = vectors[i + 1]
-            dot = sum(a * b for a, b in zip(question_vec, item_vec))
+            dot = sum(
+                a * b for a, b in zip(question_vec, item_vec, strict=True)
+            )
             norm_q = sum(a * a for a in question_vec) ** 0.5
             norm_s = sum(a * a for a in item_vec) ** 0.5
             sim = dot / (norm_q * norm_s) if norm_q and norm_s else 0.0
@@ -380,7 +383,7 @@ async def render_domain_context_semantic(
         # Group by section, keeping order, cap per section
         section_counts: dict[str, int] = {}
         selected: list[tuple[str, str]] = []
-        for sim, section, label in scored:
+        for _sim, section, label in scored:
             count = section_counts.get(section, 0)
             if count < max_items_per_section:
                 selected.append((section, label))
@@ -485,10 +488,15 @@ async def _rank_signals(
             question_vec = all_vectors[0]
             for i, s in enumerate(signals):
                 signal_vec = all_vectors[i + 1]
-                dot = sum(a * b for a, b in zip(question_vec, signal_vec))
+                dot = sum(
+                    a * b for a, b in zip(question_vec, signal_vec, strict=True)
+                )
                 norm_q = sum(a * a for a in question_vec) ** 0.5
                 norm_s = sum(a * a for a in signal_vec) ** 0.5
-                similarity_scores[s.signal_id] = dot / (norm_q * norm_s) if norm_q and norm_s else 0.0
+                denom = norm_q * norm_s
+                similarity_scores[s.signal_id] = (
+                    dot / denom if denom else 0.0
+                )
         except Exception:
             _log.debug("embedding_signal_rank_failed", exc_info=True)
 

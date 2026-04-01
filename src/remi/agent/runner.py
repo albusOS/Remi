@@ -21,10 +21,10 @@ from remi.knowledge.context_builder import ContextBuilder
 from remi.llm.factory import LLMProviderFactory
 from remi.models.chat import AgentEvent, ChatSessionStore
 from remi.models.memory import MemoryStore
-from remi.models.sandbox import Sandbox
 from remi.models.signals import DomainRulebook, SignalStore
 from remi.models.tools import ToolRegistry
 from remi.observability.tracer import Tracer
+from remi.sandbox.ports import Sandbox
 from remi.shared.ids import new_run_id
 from remi.shared.paths import AGENTS_DIR
 
@@ -147,21 +147,24 @@ class ChatAgentService:
         params = RunParams(mode=mode, sandbox_session_id=session_id, on_event=on_event)
         ctx = self._build_context(run_id=run_id, params=params)
 
-        node = AgentNode(config=config_dict)
-        output: ModuleOutput = await self._retry.execute(
-            node.run,
-            {"input": question},
-            ctx,
-        )
+        try:
+            node = AgentNode(config=config_dict)
+            output: ModuleOutput = await self._retry.execute(
+                node.run,
+                {"input": question},
+                ctx,
+            )
 
-        answer = _extract_answer(output.value)
-        log.info(
-            "ask_done",
-            answer_length=len(answer) if answer else 0,
-            usage=output.metadata.get("usage"),
-            cost=output.metadata.get("cost"),
-        )
-        return (answer, run_id)
+            answer = _extract_answer(output.value)
+            log.info(
+                "ask_done",
+                answer_length=len(answer) if answer else 0,
+                usage=output.metadata.get("usage"),
+                cost=output.metadata.get("cost"),
+            )
+            return (answer, run_id)
+        finally:
+            await self._sandbox.destroy_session(session_id)
 
     async def run_chat_agent(
         self,

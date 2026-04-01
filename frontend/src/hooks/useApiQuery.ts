@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useApiQuery<T>(
   fetcher: () => Promise<T>,
-  deps: ReadonlyArray<unknown> = []
+  deps: ReadonlyArray<unknown> = [],
 ) {
   const fetcherRef = useRef(fetcher);
 
@@ -22,6 +22,9 @@ export function useApiQuery<T>(
     setError(null);
     setRefreshKey((k) => k + 1);
   }, []);
+
+  // Serialize deps to a stable string key to avoid spread in dependency array
+  const depsKey = JSON.stringify(deps);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +46,7 @@ export function useApiQuery<T>(
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, ...deps]);
+  }, [refreshKey, depsKey]);
 
   return { data, loading, error, refetch, setData };
 }

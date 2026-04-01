@@ -15,13 +15,13 @@ from pydantic import BaseModel
 from remi.api.dependencies import get_knowledge_graph, get_property_store
 from remi.api.schemas import DeletedResponse
 from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
-from remi.shared.errors import NotFoundError
 from remi.models.properties import (
     ActionItem,
     ActionItemPriority,
     ActionItemStatus,
     PropertyStore,
 )
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 

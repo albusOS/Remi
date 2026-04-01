@@ -25,12 +25,12 @@ from remi.models.chat import ChatSessionStore
 from remi.models.documents import DocumentStore
 from remi.models.memory import KnowledgeStore
 from remi.models.properties import PropertyStore
-from remi.models.sandbox import Sandbox
 from remi.models.signals import DomainRulebook, FeedbackStore, MutableRulebook, SignalStore
 from remi.models.tools import ToolRegistry
 from remi.models.trace import TraceStore
 from remi.observability.tracer import Tracer
-from remi.sandbox.local import LocalSandbox
+from remi.sandbox.factory import build_sandbox
+from remi.sandbox.ports import Sandbox
 from remi.services.auto_assign import AutoAssignService
 from remi.services.dashboard import DashboardQueryService
 from remi.services.document_ingest import DocumentIngestService
@@ -111,9 +111,7 @@ class Container:
         )
 
         # -- Sandbox -----------------------------------------------------------
-        self.sandbox: Sandbox = LocalSandbox(
-            extra_env={"REMI_API_URL": f"http://127.0.0.1:{self.settings.api.port}"},
-        )
+        self.sandbox: Sandbox = build_sandbox(self.settings)
 
         # -- Vectors -----------------------------------------------------------
         self.vector_store: VectorStore = InMemoryVectorStore()
@@ -183,6 +181,7 @@ class Container:
             embedder=self.embedder,
             trace_store=self.trace_store,
             sandbox=self.sandbox,
+            search_service=self.search_service,
             api_base_url=_api_base,
         )
 

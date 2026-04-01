@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_property_query, get_property_store, get_rent_roll_service
-from remi.api.schemas import DeletedResponse, UpdatedResponse
 from remi.api.properties.schemas import (
     PropertyDetail,
     PropertyListItem,
@@ -15,10 +14,11 @@ from remi.api.properties.schemas import (
     UnitListResponse,
     UnitSummary,
 )
+from remi.api.schemas import DeletedResponse, UpdatedResponse
 from remi.models.properties import Address, PropertyStore, UnitStatus
 from remi.services.property_queries import PropertyQueryService
-from remi.shared.errors import NotFoundError
 from remi.services.rent_roll import RentRollService
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 

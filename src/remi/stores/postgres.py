@@ -437,6 +437,16 @@ class PostgresPropertyStore(PropertyStore):
                 session.add(_unit_to_row(unit))
             await session.commit()
 
+    async def delete_units_by_property(self, property_id: str) -> int:
+        async with self._session_factory() as session:
+            stmt = select(UnitRow).where(UnitRow.property_id == property_id)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            for row in rows:
+                await session.delete(row)
+            await session.commit()
+            return len(rows)
+
     # -- Lease --------------------------------------------------------------
 
     async def get_lease(self, lease_id: str) -> Lease | None:
@@ -474,6 +484,16 @@ class PostgresPropertyStore(PropertyStore):
             else:
                 session.add(_lease_to_row(lease))
             await session.commit()
+
+    async def delete_leases_by_property(self, property_id: str) -> int:
+        async with self._session_factory() as session:
+            stmt = select(LeaseRow).where(LeaseRow.property_id == property_id)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            for row in rows:
+                await session.delete(row)
+            await session.commit()
+            return len(rows)
 
     # -- Tenant -------------------------------------------------------------
 

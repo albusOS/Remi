@@ -20,6 +20,7 @@ from remi.api.realtime.jsonrpc import (
     JsonRpcRequest,
 )
 from remi.models.chat import ChatSessionStore
+from remi.sandbox.ports import Sandbox
 from remi.shared.errors import SessionNotFoundError, ValidationError
 
 logger = structlog.get_logger("remi.chat_runner")
@@ -69,18 +70,50 @@ async def send_notification(ws: WebSocket, method: str, params: dict[str, Any]) 
     await ws.send_text(notif.to_json())
 
 
+class ChatDispatcherHandle:
+    """Wraps a Dispatcher with a cleanup coroutine for sandbox sessions."""
+
+    def __init__(
+        self,
+        dispatcher: Dispatcher,
+        sandbox: Sandbox | None,
+    ) -> None:
+        self.dispatcher = dispatcher
+        self._sandbox = sandbox
+        self._sandbox_session_ids: set[str] = set()
+
+    def track_sandbox_session(self, session_id: str) -> None:
+        self._sandbox_session_ids.add(session_id)
+
+    async def dispatch(self, raw: str) -> Any:
+        return await self.dispatcher.dispatch(raw)
+
+    async def cleanup(self) -> None:
+        """Destroy all sandbox sessions created during this WebSocket connection."""
+        if not self._sandbox:
+            return
+        for sid in self._sandbox_session_ids:
+            try:
+                await self._sandbox.destroy_session(sid)
+            except Exception:
+                logger.warning("sandbox_cleanup_failed", session_id=sid, exc_info=True)
+        self._sandbox_session_ids.clear()
+
+
 def build_chat_dispatcher(
     ws: WebSocket,
     chat_session_store: ChatSessionStore,
     chat_agent: ChatAgentService,
     *,
     property_store: Any = None,
-) -> Dispatcher:
+    sandbox: Sandbox | None = None,
+) -> ChatDispatcherHandle:
     from remi.models.chat import Message
 
     dp = Dispatcher()
     running_tasks: dict[str, asyncio.Task[str]] = {}
     session_locks: dict[str, asyncio.Lock] = {}
+    handle = ChatDispatcherHandle(dp, sandbox)
 
     def _get_session_lock(session_id: str) -> asyncio.Lock:
         if session_id not in session_locks:
@@ -144,7 +177,11 @@ def build_chat_dispatcher(
             session = await chat_session_store.get(session_id)
             assert session is not None
 
+            consecutive_failures = 0
+            max_consecutive_failures = 3
+
             async def on_event(event_type: str, data: dict[str, Any]) -> None:
+                nonlocal consecutive_failures
                 try:
                     await asyncio.wait_for(
                         send_notification(
@@ -154,11 +191,35 @@ def build_chat_dispatcher(
                         ),
                         timeout=10.0,
                     )
-                except (TimeoutError, Exception):
-                    log.debug("notification_send_failed", event_type=event_type)
+                    consecutive_failures = 0
+                except TimeoutError:
+                    consecutive_failures += 1
+                    log.warning(
+                        "notification_send_timeout",
+                        event_type=event_type,
+                        session_id=session_id,
+                        consecutive_failures=consecutive_failures,
+                    )
+                except Exception:
+                    consecutive_failures += 1
+                    log.warning(
+                        "notification_send_failed",
+                        event_type=event_type,
+                        session_id=session_id,
+                        consecutive_failures=consecutive_failures,
+                        exc_info=True,
+                    )
+                if consecutive_failures >= max_consecutive_failures:
+                    raise ConnectionError(
+                        f"WebSocket unreachable after {consecutive_failures} consecutive "
+                        f"notification failures for session {session_id}"
+                    )
 
             run_agent_name = session.agent
             run_mode = mode
+
+            sandbox_sid = f"chat-{session_id}"
+            handle.track_sandbox_session(sandbox_sid)
 
             async def _run_agent() -> str:
                 return await chat_agent.run_chat_agent(
@@ -166,7 +227,7 @@ def build_chat_dispatcher(
                     session.thread,
                     on_event,
                     mode=run_mode,
-                    sandbox_session_id=f"chat-{session_id}",
+                    sandbox_session_id=sandbox_sid,
                     provider=provider,
                     model=model,
                     extra=manager_scope,
@@ -261,4 +322,4 @@ def build_chat_dispatcher(
             ],
         }
 
-    return dp
+    return handle

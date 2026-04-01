@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import abc
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ class Document(BaseModel):
         str  # text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, etc.
     )
     uploaded_at: datetime = Field(default_factory=_utcnow)
+    effective_date: date | None = None
     row_count: int = 0
     column_names: list[str] = Field(default_factory=list)
     rows: list[dict[str, Any]] = Field(default_factory=list)

@@ -8,7 +8,7 @@ abstract port that storage adapters implement.
 from __future__ import annotations
 
 import abc
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ class ManagerSnapshot(BaseModel, frozen=True):
     manager_id: str
     manager_name: str
     timestamp: datetime
+    effective_date: date | None = None
     property_count: int = 0
     total_units: int = 0
     occupied: int = 0
@@ -35,6 +36,7 @@ class PropertySnapshot(BaseModel, frozen=True):
     manager_id: str
     manager_name: str
     timestamp: datetime
+    effective_date: date | None = None
     total_units: int = 0
     occupied: int = 0
     vacant: int = 0

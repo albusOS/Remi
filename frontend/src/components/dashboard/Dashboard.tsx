@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmt$, pct } from "@/lib/format";
@@ -297,7 +297,10 @@ export function Dashboard() {
   const vacancies = dashboardData?.vacancies ?? null;
   const needsMgr = dashboardData?.needsMgr ?? null;
   const snapshots = dashboardData?.snapshots ?? [];
-  const metricsHistory = dashboardData?.metricsHistory ?? [];
+  const metricsHistory = useMemo(
+    () => dashboardData?.metricsHistory ?? [],
+    [dashboardData],
+  );
 
   const activeMgrs = managers.filter((m) => m.total_units > 0 || m.property_count > 0);
   const sorted = sortManagers(activeMgrs, sortBy);
@@ -319,22 +322,24 @@ export function Dashboard() {
 
   const totalUnits = activeMgrs.reduce((s, m) => s + m.total_units, 0);
   const totalOccupied = activeMgrs.reduce((s, m) => s + m.occupied, 0);
+  const totalVacant = totalUnits - totalOccupied;
   const totalRevenue = activeMgrs.reduce((s, m) => s + m.total_actual_rent, 0);
   const totalLTL = activeMgrs.reduce((s, m) => s + m.total_loss_to_lease, 0);
+  const totalMarketRent = totalRevenue + totalLTL;
   const totalVacLoss = activeMgrs.reduce((s, m) => s + m.total_vacancy_loss, 0);
   const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
+  const captureRate = totalMarketRent > 0 ? totalRevenue / totalMarketRent : 1;
 
   // Aggregate metrics history into portfolio-level sparkline data
-  const sparklineData = (() => {
+  const sparklineData = useMemo(() => {
     if (metricsHistory.length === 0) return [];
-    const byDay = new Map<string, { occ: number[]; rev: number; delBal: number; count: number }>();
+    const byDay = new Map<string, { occ: number[]; rev: number; delBal: number }>();
     for (const s of metricsHistory) {
       const day = s.timestamp.slice(0, 10);
-      const entry = byDay.get(day) || { occ: [], rev: 0, delBal: 0, count: 0 };
+      const entry = byDay.get(day) || { occ: [], rev: 0, delBal: 0 };
       entry.occ.push(s.occupancy_rate);
       entry.rev += s.total_rent;
       entry.delBal += s.delinquent_balance;
-      entry.count += 1;
       byDay.set(day, entry);
     }
     return [...byDay.entries()]
@@ -345,7 +350,7 @@ export function Dashboard() {
         revenue: v.rev,
         delinquency: v.delBal,
       }));
-  })();
+  }, [metricsHistory]);
 
   return (
     <PageContainer wide>
@@ -364,28 +369,16 @@ export function Dashboard() {
           <div className="text-sm text-fg-faint animate-pulse">Loading...</div>
         )}
 
-        {/* KPI strip */}
-        <MetricStrip>
-          <MetricCard label="Occupancy" value={pct(avgOcc)} trend={avgOcc >= 0.95 ? "up" : avgOcc >= 0.9 ? "flat" : "down"} />
-          <MetricCard label="Monthly Revenue" value={fmt$(totalRevenue)} />
-          <MetricCard label="Loss to Lease" value={fmt$(totalLTL)} alert={totalLTL > 0} />
-          <MetricCard label="Vacancy Loss" value={fmt$(totalVacLoss)} alert={totalVacLoss > 0} />
-          <MetricCard
-            label="Units"
-            value={totalOccupied.toLocaleString()}
-            sub={`of ${totalUnits.toLocaleString()} (${(totalUnits - totalOccupied).toLocaleString()} vacant)`}
-          />
-        </MetricStrip>
-
-        {/* Portfolio trend sparklines */}
+        {/* Portfolio KPIs */}
         {sparklineData.length >= 2 && (
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <SparklineChart
               data={sparklineData}
               dataKey="occupancy"
-              color="var(--color-ok)"
+              color={avgOcc >= 0.95 ? "var(--color-ok)" : avgOcc >= 0.9 ? "var(--color-warn)" : "var(--color-error)"}
               label="Occupancy"
               value={pct(avgOcc)}
+              valueFormatter={(v) => `${v.toFixed(1)}%`}
             />
             <SparklineChart
               data={sparklineData}
@@ -393,6 +386,7 @@ export function Dashboard() {
               color="var(--color-accent)"
               label="Revenue"
               value={fmt$(totalRevenue)}
+              valueFormatter={(v) => fmt$(v)}
             />
             <SparklineChart
               data={sparklineData}
@@ -400,8 +394,83 @@ export function Dashboard() {
               color="var(--color-error)"
               label="Delinquency"
               value={sparklineData.length > 0 ? fmt$(sparklineData[sparklineData.length - 1].delinquency) : "$0"}
+              valueFormatter={(v) => fmt$(v)}
+              invertTrend
             />
+            {/* Loss to Lease: proportion bar — how much of market rent are you capturing? */}
+            <div className="rounded-2xl border border-border bg-surface p-4 min-w-0 flex-1">
+              <p className="text-[10px] font-semibold text-fg-faint uppercase tracking-wide mb-1">
+                Loss to Lease
+              </p>
+              <p className="text-xl font-bold text-fg tabular-nums mb-2">{fmt$(totalLTL)}</p>
+              <div className="space-y-1.5">
+                <div className="h-2 rounded-full bg-surface-sunken overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(captureRate * 100, 100)}%`,
+                      background: captureRate >= 0.98 ? "var(--color-ok)" : captureRate >= 0.95 ? "var(--color-warn)" : "var(--color-error)",
+                    }}
+                  />
+                </div>
+                <div className="flex justify-between text-[9px]">
+                  <span className="text-fg-faint">
+                    {(captureRate * 100).toFixed(1)}% of market captured
+                  </span>
+                  <span className="text-fg-ghost">{fmt$(totalMarketRent)}</span>
+                </div>
+              </div>
+            </div>
+            {/* Units: composition ring — occupied vs vacant */}
+            <div className="rounded-2xl border border-border bg-surface p-4 min-w-0 flex-1">
+              <p className="text-[10px] font-semibold text-fg-faint uppercase tracking-wide mb-1">
+                Units
+              </p>
+              <p className="text-xl font-bold text-fg tabular-nums mb-2">
+                {totalOccupied.toLocaleString()}
+                <span className="text-sm font-normal text-fg-faint ml-1">
+                  / {totalUnits.toLocaleString()}
+                </span>
+              </p>
+              <div className="flex items-center gap-3">
+                <svg viewBox="0 0 36 36" className="w-12 h-12 shrink-0 -rotate-90">
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--color-error)" strokeWidth="3.5" strokeOpacity="0.15" />
+                  <circle
+                    cx="18" cy="18" r="15.9" fill="none"
+                    stroke={avgOcc >= 0.95 ? "var(--color-ok)" : avgOcc >= 0.9 ? "var(--color-warn)" : "var(--color-error)"}
+                    strokeWidth="3.5"
+                    strokeDasharray={`${avgOcc * 100} ${100 - avgOcc * 100}`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="text-[9px] space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-ok shrink-0" />
+                    <span className="text-fg-muted">{totalOccupied.toLocaleString()} occupied</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-error/30 shrink-0" />
+                    <span className="text-fg-muted">{totalVacant.toLocaleString()} vacant</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Fallback KPI strip when no sparkline data yet */}
+        {sparklineData.length < 2 && !loading && activeMgrs.length > 0 && (
+          <MetricStrip>
+            <MetricCard label="Occupancy" value={pct(avgOcc)} trend={avgOcc >= 0.95 ? "up" : avgOcc >= 0.9 ? "flat" : "down"} />
+            <MetricCard label="Monthly Revenue" value={fmt$(totalRevenue)} />
+            <MetricCard label="Loss to Lease" value={fmt$(totalLTL)} alert={totalLTL > 0} />
+            <MetricCard label="Vacancy Loss" value={fmt$(totalVacLoss)} alert={totalVacLoss > 0} />
+            <MetricCard
+              label="Units"
+              value={totalOccupied.toLocaleString()}
+              sub={`of ${totalUnits.toLocaleString()} (${(totalUnits - totalOccupied).toLocaleString()} vacant)`}
+            />
+          </MetricStrip>
         )}
 
         {/* Attention strip */}

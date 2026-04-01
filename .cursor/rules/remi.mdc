@@ -148,6 +148,13 @@ knowledge/    Context builder, graph retriever, entailment, ingestion
   context_builder.py  ContextBuilder + build_context_builder factory
 llm/          LLM provider ports + adapters
 models/       Pydantic DTOs + narrow repository protocols (ABCs)
+sandbox/      Isolated code execution (bounded context with own ports)
+  ports.py    Sandbox ABC, ExecResult, ExecStatus, SandboxSession
+  local.py    LocalSandbox — subprocess fallback
+  docker.py   DockerSandbox — container-based execution
+  policy.py   Subprocess env builder, dangerous-command blocklist
+  factory.py  build_sandbox(settings) — selects backend
+  data_bridge.py  remi_data.py source injected into each session
 services/     Domain services
 stores/       Storage adapters (implementations of model ABCs)
   factory.py  build_property_store, build_document_store, build_rollup_store

@@ -10,7 +10,7 @@ Both manager-level and property-level rollups are produced in each
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from remi.models.properties import PropertyStore
@@ -29,13 +29,22 @@ class SnapshotService:
         self._ps = property_store
         self._store = rollup_store
 
-    async def capture(self) -> list[ManagerSnapshot]:
+    async def capture(
+        self,
+        *,
+        effective_date: date | None = None,
+    ) -> list[ManagerSnapshot]:
         """Take a snapshot of all managers' current metrics.
 
         Produces both manager and property snapshot DTOs in a single
         portfolio walk and persists them via the rollup store.
+
+        *effective_date* — the business period the triggering document
+        covers. Falls back to today when not provided so that
+        trend analysis tracks report periods, not upload cadence.
         """
         now = datetime.now(UTC)
+        eff_date = effective_date or now.date()
         managers = await self._ps.list_managers()
         manager_batch: list[ManagerSnapshot] = []
         property_batch: list[PropertySnapshot] = []
@@ -102,6 +111,7 @@ class SnapshotService:
                             manager_id=mgr.id,
                             manager_name=mgr.name,
                             timestamp=now,
+                            effective_date=eff_date,
                             total_units=len(units),
                             occupied=p_occ,
                             vacant=p_vac,
@@ -127,6 +137,7 @@ class SnapshotService:
                     manager_id=mgr.id,
                     manager_name=mgr.name,
                     timestamp=now,
+                    effective_date=eff_date,
                     property_count=prop_count,
                     total_units=total_u,
                     occupied=occ,

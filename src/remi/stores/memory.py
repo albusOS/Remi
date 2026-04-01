@@ -174,6 +174,9 @@ class InMemoryKnowledgeStore(KnowledgeStore):
 
         return result
 
+    async def list_namespaces(self) -> list[str]:
+        return list(self._entities.keys())
+
     async def delete_entity(self, namespace: str, entity_id: str) -> bool:
         if entity_id in self._entities.get(namespace, {}):
             del self._entities[namespace][entity_id]

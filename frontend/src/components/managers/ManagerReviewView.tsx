@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -17,11 +17,8 @@ import type {
   ManagerReview,
   ManagerPropertySummary,
   DelinquencyBoard,
-  DelinquentTenant,
   LeaseCalendar,
-  ExpiringLease,
   VacancyTracker,
-  VacantUnit,
   ManagerSnapshot,
 } from "@/lib/types";
 
@@ -337,19 +334,63 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
   );
 }
 
-function PerformanceTab({ snapshots, managerName, managerId }: { snapshots: ManagerSnapshot[]; managerName: string; managerId: string }) {
+function computeTrend(
+  data: Record<string, unknown>[],
+  key: string,
+  invert = false,
+): { delta: number; pctChange: number; direction: "up" | "down" | "flat" } {
+  if (data.length < 2) return { delta: 0, pctChange: 0, direction: "flat" };
+  const first = Number(data[0][key]) || 0;
+  const last = Number(data[data.length - 1][key]) || 0;
+  const delta = last - first;
+  const pctChange = first !== 0 ? (delta / first) * 100 : 0;
+  const raw = delta > 0.01 ? "up" : delta < -0.01 ? "down" : "flat";
+  const direction = invert ? (raw === "up" ? "down" : raw === "down" ? "up" : "flat") : raw;
+  return { delta, pctChange, direction };
+}
+
+function proseSummary(
+  label: string,
+  current: string,
+  trend: { direction: "up" | "down" | "flat"; pctChange: number },
+): string {
+  const dir = trend.direction;
+  const pct = Math.abs(trend.pctChange).toFixed(0);
+  if (dir === "flat") return `${label} is steady at ${current}`;
+  const verb = dir === "up" ? "improved" : "declined";
+  return `${label} ${verb} ${pct}% to ${current} over this period`;
+}
+
+function PerformanceTab({ snapshots, managerId }: { snapshots: ManagerSnapshot[]; managerId: string }) {
   const { data: historyData } = useApiQuery(
     () => api.metricsHistory("manager", managerId, 180).catch(() => ({ entity_type: "manager", total: 0, snapshots: [] })),
     [managerId],
   );
 
-  const chartData = (historyData?.snapshots ?? [])
-    .map((s) => ({ ...s }))
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    .map((s) => ({
-      ...s,
-      occupancy_pct: Math.round(((s as ManagerSnapshot).occupancy_rate ?? 0) * 1000) / 10,
-    }));
+  const chartData = useMemo(
+    () =>
+      (historyData?.snapshots ?? [])
+        .map((s) => s as ManagerSnapshot)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .map((s) => ({
+          ...s,
+          occupancy_pct: Math.round((s.occupancy_rate ?? 0) * 1000) / 10,
+        })),
+    [historyData],
+  );
+
+  const last = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+  const latestOcc = last ? last.occupancy_pct : 0;
+  const latestRev = last ? last.total_rent : 0;
+  const latestMkt = last ? last.total_market_rent : 0;
+  const latestLtl = last ? last.loss_to_lease : 0;
+  const latestDel = last ? last.delinquent_balance : 0;
+
+  const occTrend = computeTrend(chartData, "occupancy_pct");
+  const ltlTrend = computeTrend(chartData, "loss_to_lease", true);
+  const delTrend = computeTrend(chartData, "delinquent_balance", true);
+
+  const gapPct = latestMkt > 0 ? ((latestMkt - latestRev) / latestMkt * 100) : 0;
 
   if (snapshots.length === 0 && chartData.length === 0) {
     return (
@@ -361,42 +402,99 @@ function PerformanceTab({ snapshots, managerName, managerId }: { snapshots: Mana
   }
 
   return (
-    <div className="space-y-6">
-      <p className="text-xs text-fg-muted">{chartData.length} snapshots for {managerName} (last 180 days)</p>
-
+    <div className="space-y-5">
       {chartData.length >= 2 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <>
+          {/* --- Occupancy: the big one, full-width --- */}
           <TimeSeriesChart
             title="Occupancy"
+            heroValue={`${latestOcc.toFixed(1)}%`}
+            heroColor={latestOcc >= 95 ? "var(--color-ok)" : latestOcc >= 90 ? "var(--color-warn)" : "var(--color-error)"}
+            summary={proseSummary("Occupancy", `${latestOcc.toFixed(1)}%`, occTrend)}
+            summaryColor={occTrend.direction === "up" ? "var(--color-ok)" : occTrend.direction === "down" ? "var(--color-error)" : undefined}
             data={chartData}
-            series={[{ dataKey: "occupancy_pct", color: "var(--color-ok)", label: "Occupancy %" }]}
-            yDomain={[0, 100]}
+            height={200}
+            series={[
+              { dataKey: "occupancy_pct", color: "var(--color-ok)", label: "Occupancy %" },
+            ]}
+            yDomain={[
+              Math.min(80, ...chartData.map((d) => (Number(d.occupancy_pct) || 100) - 2)),
+              100,
+            ]}
             yTickFormatter={(v) => `${v}%`}
-          />
-          <TimeSeriesChart
-            title="Revenue vs Market"
-            data={chartData}
-            series={[
-              { dataKey: "total_rent", color: "var(--color-accent)", label: "Revenue", type: "area" },
-              { dataKey: "total_market_rent", color: "var(--color-fg-faint)", label: "Market Rent", type: "line" },
+            zones={[
+              { y1: 95, y2: 100, color: "var(--color-ok)", label: "Healthy" },
+              { y1: 90, y2: 95, color: "var(--color-warn)", label: "Watch" },
+              { y1: 0, y2: 90, color: "var(--color-error)", label: "Critical" },
             ]}
-            yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-          />
-          <TimeSeriesChart
-            title="Loss to Lease"
-            data={chartData}
-            series={[{ dataKey: "loss_to_lease", color: "var(--color-warn)", label: "LTL" }]}
-            yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-          />
-          <TimeSeriesChart
-            title="Delinquency"
-            data={chartData}
-            series={[
-              { dataKey: "delinquent_balance", color: "var(--color-error)", label: "Balance", type: "area" },
-              { dataKey: "delinquent_count", color: "var(--color-error)", label: "Count", type: "line" },
+            referenceLines={[
+              { y: 95, label: "Target", color: "var(--color-ok)", dashed: true },
             ]}
           />
-        </div>
+
+          {/* --- Revenue + Loss to Lease side-by-side --- */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <TimeSeriesChart
+              title="Revenue vs Market Potential"
+              heroValue={`$${(latestRev / 1000).toFixed(0)}k`}
+              heroColor="var(--color-accent)"
+              summary={
+                gapPct > 1
+                  ? `Capturing ${(100 - gapPct).toFixed(0)}% of market rent — ${fmt$((latestMkt - latestRev))} gap`
+                  : "Rents aligned with market"
+              }
+              summaryColor={gapPct > 5 ? "var(--color-warn)" : "var(--color-fg-faint)"}
+              data={chartData}
+              series={[
+                { dataKey: "total_market_rent", color: "var(--color-fg-ghost)", label: "Market Rent", type: "area", fillOpacity: 0.04 },
+                { dataKey: "total_rent", color: "var(--color-accent)", label: "Actual Revenue" },
+              ]}
+              yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+              gradient={true}
+            />
+            <TimeSeriesChart
+              title="Loss to Lease"
+              heroValue={latestLtl > 0 ? fmt$(latestLtl) : "$0"}
+              heroColor={latestLtl > 0 ? "var(--color-warn)" : "var(--color-ok)"}
+              summary={
+                latestLtl > 0
+                  ? proseSummary("Loss to lease", fmt$(latestLtl), ltlTrend)
+                  : "No loss to lease — rents at or above market"
+              }
+              summaryColor={ltlTrend.direction === "up" ? "var(--color-ok)" : ltlTrend.direction === "down" ? "var(--color-warn)" : undefined}
+              data={chartData}
+              series={[
+                { dataKey: "loss_to_lease", color: "var(--color-warn)", label: "Monthly LTL" },
+              ]}
+              yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+              referenceLines={[
+                { y: 0, color: "var(--color-ok)", dashed: true },
+              ]}
+            />
+          </div>
+
+          {/* --- Delinquency: full width, red severity shading --- */}
+          <TimeSeriesChart
+            title="Delinquency Exposure"
+            heroValue={latestDel > 0 ? fmt$(latestDel) : "$0"}
+            heroColor={latestDel > 0 ? "var(--color-error)" : "var(--color-ok)"}
+            summary={
+              latestDel > 0
+                ? proseSummary("Delinquent balance", fmt$(latestDel), delTrend)
+                : "No outstanding delinquent balances"
+            }
+            summaryColor={delTrend.direction === "up" ? "var(--color-ok)" : delTrend.direction === "down" ? "var(--color-error)" : undefined}
+            data={chartData}
+            height={180}
+            series={[
+              { dataKey: "delinquent_balance", color: "var(--color-error)", label: "Balance" },
+            ]}
+            yTickFormatter={(v) => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`}
+            referenceLines={[
+              { y: 0, color: "var(--color-ok)", dashed: true },
+            ]}
+          />
+        </>
       )}
 
       {/* Snapshot detail table */}
@@ -680,7 +778,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
         {tab === "delinquency" && <DelinquencyTab data={delinquency} />}
         {tab === "leases" && <LeasesTab data={leases} />}
         {tab === "vacancies" && <VacanciesTab data={vacancies} />}
-        {tab === "performance" && <PerformanceTab snapshots={snapshots} managerName={review.name} managerId={managerId} />}
+        {tab === "performance" && <PerformanceTab snapshots={snapshots} managerId={managerId} />}
         {tab === "review" && <ReviewPrepTab managerId={managerId} />}
     </PageContainer>
   );

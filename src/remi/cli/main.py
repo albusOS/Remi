@@ -18,6 +18,7 @@ from remi.cli.properties import (
     units_cmd,
 )
 from remi.cli.research import cmd as research_cmd
+from remi.cli.search import cmd as search_cmd
 from remi.cli.seed import cmd as seed_cmd
 from remi.cli.trace import cmd as trace_cmd
 from remi.cli.vectors import cmd as vectors_cmd
@@ -42,6 +43,7 @@ cli.add_typer(tenants_cmd)
 cli.add_typer(report_cmd)
 cli.add_typer(documents_cmd)
 cli.add_typer(onto_cmd)
+cli.add_typer(search_cmd)
 cli.add_typer(seed_cmd)
 cli.add_typer(trace_cmd)
 cli.add_typer(vectors_cmd)

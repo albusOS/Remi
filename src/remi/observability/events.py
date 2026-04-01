@@ -42,6 +42,7 @@ class Event:
     WS_EVENTS_DISCONNECT = "ws_events_disconnect"
     WS_RPC_CANCELLED = "background_rpc_cancelled"
     WS_RPC_SEND_FAILED = "background_rpc_send_failed"
+    WS_PING_FAILED = "ws_ping_failed"
 
     # -- Knowledge / Signals ------------------------------------------------
     GRAPH_RETRIEVAL_FAILED = "graph_retrieval_failed"
@@ -73,10 +74,6 @@ class Event:
     EMBEDDING_BATCH_FAILED = "embedding_batch_failed"
     EMBEDDING_PIPELINE_FAILED = "embedding_pipeline_failed"
     MANAGER_SIGNAL_AGG_FAILED = "manager_signal_aggregation_failed"
-
-    # -- Sandbox ------------------------------------------------------------
-    SANDBOX_SESSION_CREATED = "sandbox_session_created"
-    SANDBOX_SESSION_DESTROYED = "sandbox_session_destroyed"
 
     # -- Server lifecycle ---------------------------------------------------
     SERVER_READY = "server_ready"

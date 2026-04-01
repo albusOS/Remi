@@ -11,7 +11,6 @@ doesn't need to *be* every agent — it invokes them.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Protocol
 
 import structlog

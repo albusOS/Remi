@@ -34,6 +34,7 @@ class ConnectionManager:
                 logger.warning(
                     "broadcast_send_failed",
                     client=getattr(conn.client, "host", "unknown"),
+                    exc_info=True,
                 )
                 stale.append(conn)
         for s in stale:

@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from remi.api.dependencies import get_manager_review, get_property_store
-from remi.api.schemas import DeletedResponse
 from remi.api.managers.schemas import (
     AssignPropertiesRequest,
     AssignPropertiesResponse,
@@ -19,6 +18,7 @@ from remi.api.managers.schemas import (
     MergeManagersResponse,
     UpdateManagerRequest,
 )
+from remi.api.schemas import DeletedResponse
 from remi.models.properties import Portfolio, PropertyManager, PropertyStore
 from remi.services.manager_review import ManagerReviewService
 from remi.shared.errors import ConflictError, DomainError, NotFoundError

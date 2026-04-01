@@ -14,6 +14,8 @@ const WS_URL =
 const RPC_TIMEOUT_MS = 120_000;
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
 
 interface JsonRpc {
   jsonrpc: "2.0";
@@ -67,12 +69,6 @@ export function useSessions(agent: string) {
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
 
-  const getState = useCallback(
-    (sid: string): SessionState =>
-      sessionStatesRef.current.get(sid) ?? emptySessionState(),
-    []
-  );
-
   const updateState = useCallback(
     (sid: string, updater: (prev: SessionState) => SessionState) => {
       setSessionStates((map) => {
@@ -86,10 +82,20 @@ export function useSessions(agent: string) {
 
   // --- WebSocket plumbing ---------------------------------------------------
 
+  const lastServerActivity = useRef(0);
+  const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimer.current !== null) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
+    }
+  }, []);
+
+  const clearHeartbeat = useCallback(() => {
+    if (heartbeatTimer.current !== null) {
+      clearInterval(heartbeatTimer.current);
+      heartbeatTimer.current = null;
     }
   }, []);
 
@@ -98,9 +104,53 @@ export function useSessions(agent: string) {
     pending.current.clear();
   }, []);
 
+  const resetStreamingState = useCallback(() => {
+    setSessionStates((map) => {
+      let changed = false;
+      const next = new Map(map);
+      for (const [sid, state] of map) {
+        if (state.streaming) {
+          changed = true;
+          next.set(sid, {
+            ...state,
+            streaming: false,
+            error: "Connection lost — response may be incomplete",
+            liveContent: "",
+            liveTools: [],
+          });
+        }
+      }
+      return changed ? next : map;
+    });
+    setSessions((prev) =>
+      prev.map((ss) => (ss.streaming ? { ...ss, streaming: false } : ss))
+    );
+  }, []);
+
+  /** Kill the old socket cleanly so we never have two alive at once. */
+  const teardownSocket = useCallback(() => {
+    clearHeartbeat();
+    const prev = wsRef.current;
+    if (prev) {
+      prev.onopen = null;
+      prev.onmessage = null;
+      prev.onclose = null;
+      prev.onerror = null;
+      if (prev.readyState === WebSocket.OPEN || prev.readyState === WebSocket.CONNECTING) {
+        prev.close();
+      }
+      wsRef.current = null;
+    }
+  }, [clearHeartbeat]);
+
   const rpc = useCallback(
     (method: string, params: Record<string, unknown>) =>
       new Promise<JsonRpc>((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error("WebSocket not connected"));
+          return;
+        }
         const id = ++idCounter.current;
         const timer = setTimeout(() => {
           pending.current.delete(id);
@@ -116,9 +166,7 @@ export function useSessions(agent: string) {
             reject(e);
           },
         });
-        wsRef.current?.send(
-          JSON.stringify({ jsonrpc: "2.0", id, method, params })
-        );
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
       }),
     []
   );
@@ -271,28 +319,81 @@ export function useSessions(agent: string) {
         }));
         setSessions(summaries);
         return summaries;
-      } catch {
+      } catch (err) {
+        console.warn("[useSessions] loadSessionList failed:", err);
         return [];
       }
     },
     []
   );
 
+  const scheduleReconnect = useCallback(() => {
+    clearReconnectTimer();
+    const delay = reconnectDelay.current;
+    const jitter = delay * 0.3 * Math.random();
+    reconnectDelay.current = Math.min(delay * 2, RECONNECT_MAX_MS);
+    reconnectTimer.current = setTimeout(() => {
+      // connect is referenced via the ref-stable pattern below
+      connectRef.current();
+    }, delay + jitter);
+  }, [clearReconnectTimer]);
+
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    clearReconnectTimer();
+    teardownSocket();
 
     const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
+
     ws.onopen = () => {
       setConnected(true);
       reconnectDelay.current = RECONNECT_BASE_MS;
+      lastServerActivity.current = Date.now();
+
+      clearHeartbeat();
+      heartbeatTimer.current = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          clearHeartbeat();
+          return;
+        }
+        const silentMs = Date.now() - lastServerActivity.current;
+        if (silentMs > HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS) {
+          console.warn(`[useSessions] no server activity for ${silentMs}ms — closing stale connection`);
+          ws.close(4000, "heartbeat timeout");
+          return;
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+
       loadSessionList(rpc);
     };
+
     ws.onmessage = (e) => {
+      lastServerActivity.current = Date.now();
+
+      let parsed: Record<string, unknown>;
       try {
-        const msg: JsonRpc = JSON.parse(e.data);
-        if (msg.id != null && pending.current.has(Number(msg.id))) {
-          const entry = pending.current.get(Number(msg.id))!;
-          pending.current.delete(Number(msg.id));
+        parsed = JSON.parse(e.data);
+      } catch {
+        console.warn("[useSessions] received malformed JSON from server");
+        return;
+      }
+
+      if (parsed.type === "ping") {
+        try {
+          ws.send(JSON.stringify({ type: "pong" }));
+        } catch {
+          // socket closing — onclose will handle reconnect
+        }
+        return;
+      }
+
+      const msg = parsed as unknown as JsonRpc;
+
+      if (msg.id != null) {
+        const key = Number(msg.id);
+        const entry = pending.current.get(key);
+        if (entry) {
+          pending.current.delete(key);
           if (msg.error) {
             entry.reject(new Error(msg.error.message));
           } else {
@@ -300,30 +401,37 @@ export function useSessions(agent: string) {
           }
           return;
         }
-        if (msg.method) handleNotification(msg);
-      } catch {
-        /* malformed JSON */
       }
+      if (msg.method) handleNotification(msg);
     };
+
     ws.onclose = () => {
       setConnected(false);
+      clearHeartbeat();
       flushPending(new Error("WebSocket disconnected"));
-      const delay = reconnectDelay.current;
-      reconnectDelay.current = Math.min(delay * 2, RECONNECT_MAX_MS);
-      reconnectTimer.current = setTimeout(connect, delay);
+      resetStreamingState();
+      scheduleReconnect();
     };
-    ws.onerror = () => ws.close();
-    wsRef.current = ws;
+
+    ws.onerror = () => {
+      // onerror is always followed by onclose; avoid double-close
+      if (ws.readyState !== WebSocket.CLOSED) {
+        ws.close();
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const connectRef = useRef(connect);
+  connectRef.current = connect;
 
   useEffect(() => {
     connect();
     return () => {
       clearReconnectTimer();
-      wsRef.current?.close();
+      teardownSocket();
     };
-  }, [connect, clearReconnectTimer]);
+  }, [connect, clearReconnectTimer, teardownSocket]);
 
   // --- Public API -----------------------------------------------------------
 
@@ -348,8 +456,8 @@ export function useSessions(agent: string) {
         return next;
       });
       setActiveSessionId(sid);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.warn("[useSessions] createSession failed:", err);
     }
   }, [rpc, agent]);
 
@@ -381,7 +489,8 @@ export function useSessions(agent: string) {
             )
           );
         }
-      } catch {
+      } catch (err) {
+        console.warn("[useSessions] selectSession/history failed:", err);
         updateState(sid, (s) => ({ ...s, loaded: true }));
       }
     },
@@ -421,7 +530,8 @@ export function useSessions(agent: string) {
             return next;
           });
           setActiveSessionId(sid);
-        } catch (e) {
+        } catch (err) {
+          console.warn("[useSessions] send: session creation failed:", err);
           return;
         }
       }
@@ -453,47 +563,36 @@ export function useSessions(agent: string) {
         })
       );
 
-      try {
-        await rpc("chat.send", {
-          session_id: sessionId,
-          message: text,
-          mode,
-          ...(opts?.provider && { provider: opts.provider }),
-          ...(opts?.model && { model: opts.model }),
-          ...(opts?.managerId && { manager_id: opts.managerId }),
-        });
-      } catch (e) {
-        if (e instanceof Error && e.message !== "WebSocket disconnected") {
-          updateState(sessionId, (s) => ({
-            ...s,
-            error: e instanceof Error ? e.message : "Send failed",
-            streaming: false,
-            liveContent: "",
-          }));
-        }
+      // Fire-and-forget: all streaming data arrives via chat.delta/done/error
+      // notifications.  The RPC response for chat.send is just {status:"ok"}
+      // and carries nothing the notifications don't already deliver.
+      // Awaiting it would leave the promise stuck for 120s if the socket
+      // breaks between the last notification and the response frame.
+      rpc("chat.send", {
+        session_id: sessionId,
+        message: text,
+        mode,
+        ...(opts?.provider && { provider: opts.provider }),
+        ...(opts?.model && { model: opts.model }),
+        ...(opts?.managerId && { manager_id: opts.managerId }),
+      }).catch((e) => {
+        if (e instanceof Error && e.message === "WebSocket disconnected") return;
+        if (e instanceof Error && e.message === "WebSocket not connected") return;
+        console.warn("[useSessions] chat.send RPC failed:", e);
+        updateState(sessionId, (s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : "Send failed",
+          streaming: false,
+          liveContent: "",
+        }));
         setSessions((prev) =>
           prev.map((ss) =>
             ss.id === sessionId ? { ...ss, streaming: false } : ss
           )
         );
-      }
+      });
     },
     [rpc, agent, updateState]
-  );
-
-  const deleteSession = useCallback(
-    async (sid: string) => {
-      setSessions((prev) => prev.filter((s) => s.id !== sid));
-      setSessionStates((map) => {
-        const next = new Map(map);
-        next.delete(sid);
-        return next;
-      });
-      if (activeSessionIdRef.current === sid) {
-        setActiveSessionId(null);
-      }
-    },
-    []
   );
 
   const dismissError = useCallback(() => {
@@ -507,7 +606,9 @@ export function useSessions(agent: string) {
     const sid = activeSessionIdRef.current;
     if (!sid) return;
 
-    rpc("chat.stop", { session_id: sid }).catch(() => {});
+    rpc("chat.stop", { session_id: sid }).catch((err) => {
+      console.warn("[useSessions] stopGenerating RPC failed:", err);
+    });
 
     updateState(sid, (s) => ({
       ...s,
@@ -534,7 +635,6 @@ export function useSessions(agent: string) {
     createSession,
     selectSession,
     send,
-    deleteSession,
     dismissError,
     stopGenerating,
   };

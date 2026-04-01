@@ -66,7 +66,8 @@ def register_search_tools(
             args=[
                 ToolArg(
                     name="query",
-                    description="Search query — a name, address, description, or natural language phrase",
+                    description="Search query — a name, address, "
+                    "description, or natural language phrase",
                     required=True,
                 ),
                 ToolArg(

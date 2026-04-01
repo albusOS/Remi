@@ -1,4 +1,5 @@
-"""Tool implementations — ontology, documents, memory, sandbox, trace, vectors, actions, http, delegation."""
+"""Tool implementations — ontology, documents, memory, sandbox, trace,
+vectors, search, actions, http, delegation."""
 
 from __future__ import annotations
 
@@ -6,19 +7,20 @@ from remi.models.documents import DocumentStore
 from remi.models.memory import MemoryStore
 from remi.models.ontology import KnowledgeGraph
 from remi.models.properties import PropertyStore
-from remi.models.sandbox import Sandbox
 from remi.models.signals import SignalStore
 from remi.models.tools import ToolRegistry
 from remi.models.trace import TraceStore
+from remi.sandbox.ports import Sandbox
 from remi.services.dashboard import DashboardQueryService
 from remi.services.manager_review import ManagerReviewService
+from remi.services.search import SearchService
 from remi.tools.actions import register_action_tools
-from remi.tools.delegation import AgentInvoker, register_delegation_tools
 from remi.tools.documents import register_document_tools
 from remi.tools.http import register_http_tools
 from remi.tools.memory import register_memory_tools
 from remi.tools.ontology import register_knowledge_graph_tools
 from remi.tools.sandbox import register_sandbox_tools
+from remi.tools.search import register_search_tools
 from remi.tools.trace import register_trace_tools
 from remi.tools.vectors import register_vector_tools
 from remi.tools.workflows import SubAgentInvoker, register_workflow_tools
@@ -37,6 +39,7 @@ def register_all_tools(
     embedder: Embedder | None = None,
     trace_store: TraceStore | None = None,
     sandbox: Sandbox | None = None,
+    search_service: SearchService | None = None,
     manager_review: ManagerReviewService | None = None,
     dashboard_service: DashboardQueryService | None = None,
     sub_agent: SubAgentInvoker | None = None,
@@ -54,6 +57,8 @@ def register_all_tools(
     register_http_tools(registry, api_base_url=api_base_url)
     if vector_store is not None and embedder is not None:
         register_vector_tools(registry, vector_store=vector_store, embedder=embedder)
+    if search_service is not None:
+        register_search_tools(registry, search_service=search_service)
     if property_store is not None:
         register_action_tools(
             registry,

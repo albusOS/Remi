@@ -6,6 +6,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+import structlog
+
 from remi.documents.appfolio_schema import parse_delinquency_rows
 from remi.knowledge.ingestion.base import IngestionResult
 from remi.knowledge.ingestion.helpers import parse_address
@@ -22,6 +24,8 @@ from remi.models.properties import (
 )
 from remi.shared.text import slugify
 
+_log = structlog.get_logger(__name__)
+
 _TENANT_STATUS_MAP: dict[str, TenantStatus] = {
     "current": TenantStatus.CURRENT,
     "notice": TenantStatus.NOTICE,
@@ -37,20 +41,57 @@ async def ingest_delinquency(
     ps: PropertyStore,
     upsert_entity: Any,
     upsert_property_safe: Any,
+    ensure_manager: Any,
     upload_portfolio_id: str | None = None,
 ) -> None:
     parsed_rows = parse_delinquency_rows(doc.rows)
+
+    # Scoped replace: clear stale units/leases for affected properties
+    # before re-inserting from the fresh delinquency report.
+    affected_property_ids: set[str] = set()
+    for row in parsed_rows:
+        affected_property_ids.add(slugify(f"property:{row.property_name}"))
+
+    for prop_id in affected_property_ids:
+        deleted_units = await ps.delete_units_by_property(prop_id)
+        deleted_leases = await ps.delete_leases_by_property(prop_id)
+        if deleted_units or deleted_leases:
+            _log.info(
+                "scoped_replace_cleared",
+                property_id=prop_id,
+                units_removed=deleted_units,
+                leases_removed=deleted_leases,
+                source_doc=doc.id,
+            )
+
+    # Collect the first non-empty manager tag per property so we can set
+    # manager_tag on the KB entity and resolve portfolio during ingestion.
+    prop_tag: dict[str, str] = {}
+    for row in parsed_rows:
+        pid = slugify(f"property:{row.property_name}")
+        if pid not in prop_tag and row.tags:
+            tag = row.tags.strip().split(",")[0].strip()
+            if tag and tag.lower() != "month-to-month":
+                prop_tag[pid] = tag
 
     for row in parsed_rows:
         prop_id = slugify(f"property:{row.property_name}")
         unit_id = slugify(f"unit:{row.property_name}:{row.unit_number or 'main'}")
         tenant_id = slugify(f"tenant:{row.tenant_name}:{row.property_name}")
 
+        prop_props: dict[str, Any] = {
+            "address": row.property_address,
+            "name": row.property_name,
+            "source_doc": doc.id,
+        }
+        if prop_id in prop_tag:
+            prop_props["manager_tag"] = prop_tag[prop_id]
+
         await upsert_entity(
             prop_id,
             "appfolio_property",
             namespace,
-            {"address": row.property_address, "name": row.property_name, "source_doc": doc.id},
+            prop_props,
             result,
         )
         await upsert_entity(
@@ -96,12 +137,18 @@ async def ingest_delinquency(
             )
             result.relationships_created += 1
 
+        portfolio_id: str | None = upload_portfolio_id
+        if portfolio_id is None:
+            manager_tag = prop_tag.get(prop_id)
+            if manager_tag:
+                portfolio_id = await ensure_manager(manager_tag)
+
         addr = parse_address(row.property_address)
         await upsert_property_safe(
             prop_id,
             row.property_name,
             addr,
-            portfolio_id=upload_portfolio_id,
+            portfolio_id=portfolio_id,
             source_document_id=doc.id,
         )
 

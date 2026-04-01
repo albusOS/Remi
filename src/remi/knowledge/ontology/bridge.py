@@ -18,8 +18,6 @@ from typing import Any
 
 import structlog
 
-_log = structlog.get_logger(__name__)
-
 from remi.models.memory import Entity, KnowledgeStore, Relationship
 from remi.models.ontology import (
     KnowledgeGraph,
@@ -28,6 +26,8 @@ from remi.models.ontology import (
     ObjectTypeDef,
 )
 from remi.models.properties import PropertyStore
+
+_log = structlog.get_logger(__name__)
 
 _NS = "ontology"
 

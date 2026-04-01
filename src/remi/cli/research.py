@@ -12,9 +12,9 @@ from typing import Any
 import structlog
 import typer
 
-logger = structlog.get_logger(__name__)
-
 from remi.cli.shared import get_container_async, json_out, use_json
+
+logger = structlog.get_logger(__name__)
 
 cmd = typer.Typer(
     name="research",

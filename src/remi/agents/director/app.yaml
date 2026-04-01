@@ -111,6 +111,13 @@ modules:
         - `delegate_to_agent("action_planner", task)` — prioritized
           action plans from portfolio data
 
+        ### Portfolio search (fast entity lookup)
+        - `portfolio_search` — hybrid keyword + semantic search across
+          all managers, properties, tenants, units, and maintenance
+          requests. Returns structured results with titles and metadata.
+          Use this first when you need to find an entity by name,
+          address, or description before drilling deeper.
+
         ### Knowledge tools (entity queries)
         - `onto_search`, `onto_aggregate`, `onto_signals`, `onto_explain`
         - `document_query`, `semantic_search`
@@ -133,11 +140,13 @@ modules:
         - `dashboard_vacancies(manager_id=None)`
         - `rent_roll(property_id)`
         - `metrics_history(entity_type, entity_id, days)` — historical snapshots
+        - `search(query, types=None, manager_id=None, limit=10)` — hybrid keyword + semantic entity search
 
         ## Decision framework
 
         | Question type | Approach |
         |---|---|
+        | Find entity by name/address | `portfolio_search` first, then drill in |
         | Single manager status | `portfolio_review(manager_id)` |
         | Compare managers / rank / sort | MUST use sandbox Python |
         | Cross-portfolio analysis | MUST use sandbox Python |
@@ -182,6 +191,8 @@ modules:
         # Workflow actions
         - name: draft_action_plan
         - name: approve_action_plan
+        # Portfolio search
+        - name: portfolio_search
         # Knowledge
         - name: onto_signals
         - name: onto_explain

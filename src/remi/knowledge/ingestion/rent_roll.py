@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import structlog
+
 from remi.documents.appfolio_schema import parse_rent_roll_rows
 from remi.knowledge.ingestion.base import IngestionResult
 from remi.knowledge.ingestion.helpers import occupancy_to_unit_status, parse_address
@@ -11,6 +13,8 @@ from remi.models.documents import Document
 from remi.models.memory import KnowledgeStore, Relationship
 from remi.models.properties import OccupancyStatus, PropertyStore, Unit
 from remi.shared.text import slugify
+
+_log = structlog.get_logger(__name__)
 
 _OCCUPANCY_MAP: dict[str, OccupancyStatus] = {
     "occupied": OccupancyStatus.OCCUPIED,
@@ -32,6 +36,24 @@ async def ingest_rent_roll(
     upload_portfolio_id: str | None = None,
 ) -> None:
     parsed_rows = parse_rent_roll_rows(doc.rows)
+
+    # Scoped replace: clear stale units/leases before re-inserting from
+    # the fresh report so that removed units don't persist as ghosts.
+    affected_property_ids: set[str] = set()
+    for row in parsed_rows:
+        affected_property_ids.add(slugify(f"property:{row.property_name}"))
+
+    for prop_id in affected_property_ids:
+        deleted_units = await ps.delete_units_by_property(prop_id)
+        deleted_leases = await ps.delete_leases_by_property(prop_id)
+        if deleted_units or deleted_leases:
+            _log.info(
+                "scoped_replace_cleared",
+                property_id=prop_id,
+                units_removed=deleted_units,
+                leases_removed=deleted_leases,
+                source_doc=doc.id,
+            )
 
     for row in parsed_rows:
         prop_id = slugify(f"property:{row.property_name}")

@@ -87,7 +87,10 @@ def register_http_tools(
                     }
 
         except Exception as exc:
-            logger.error("http_request_error", url=url, method=method, error=str(exc), exc_info=True)
+            logger.error(
+                "http_request_error", url=url, method=method,
+                error=str(exc), exc_info=True,
+            )
             return {"error": str(exc), "url": url, "method": method}
 
     registry.register(

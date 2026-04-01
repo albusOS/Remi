@@ -107,6 +107,18 @@ class LLMSettings(BaseModel):
     default_model: str = "claude-sonnet-4-20250514"
 
 
+class SandboxSettings(BaseModel):
+    """Sandbox execution backend configuration."""
+
+    backend: str = "auto"  # "auto", "docker", or "local"
+    image: str = "remi-sandbox:latest"
+    memory_limit: str = "512m"
+    cpu_limit: float = 1.0
+    network: str = ""  # empty = auto-detect; "host" (Linux only), "bridge"
+    default_timeout: int = 30
+    max_output_bytes: int = 100_000
+
+
 class EmbeddingsSettings(BaseModel):
     """Embedding provider config — separate from LLM inference config.
 
@@ -128,6 +140,7 @@ class RemiSettings(BaseModel):
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings)
 
 
@@ -185,7 +198,17 @@ def load_settings(
         if llm_model:
             llm_data["default_model"] = llm_model
 
-    # 6. Embeddings defaults from env vars
+    # 6. Sandbox defaults from env vars
+    _sandbox_env_prefix = "REMI_SANDBOX__"
+    sandbox_overrides: dict[str, Any] = {}
+    for key, value in os.environ.items():
+        if key.startswith(_sandbox_env_prefix) and value:
+            field_name = key[len(_sandbox_env_prefix) :].lower()
+            sandbox_overrides[field_name] = value
+    if sandbox_overrides:
+        data.setdefault("sandbox", {}).update(sandbox_overrides)
+
+    # 7. Embeddings defaults from env vars
     emb_provider = os.environ.get("REMI_EMBEDDINGS_PROVIDER")
     emb_model = os.environ.get("REMI_EMBEDDINGS_MODEL")
     emb_dimensions = os.environ.get("REMI_EMBEDDINGS_DIMENSIONS")

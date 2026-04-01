@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass
+
+import structlog
 
 from remi.models.memory import KnowledgeStore
 from remi.models.properties import Portfolio, PropertyManager, PropertyStore
 from remi.services.snapshots import SnapshotService
 from remi.shared.text import manager_name_from_tag, slugify
 
+logger = structlog.get_logger(__name__)
+
 
 @dataclass
 class AutoAssignResult:
     assigned: int
     unresolved: int
+    tags_available: int
     message: str
 
 
@@ -29,25 +33,37 @@ class AutoAssignService:
         self._ks = knowledge_store
         self._snapshot = snapshot_service
 
+    async def _collect_property_tags(self) -> dict[str, str]:
+        """Scan all KB namespaces for appfolio_property entities with a manager_tag."""
+        prop_to_tag: dict[str, str] = {}
+        namespaces = await self._ks.list_namespaces()
+        for ns in namespaces:
+            entities = await self._ks.find_entities(
+                ns, entity_type="appfolio_property", limit=5000
+            )
+            for entity in entities:
+                tag = entity.properties.get("manager_tag", "")
+                if (
+                    tag
+                    and tag.lower() != "month-to-month"
+                    and entity.entity_id not in prop_to_tag
+                ):
+                    prop_to_tag[entity.entity_id] = tag
+        return prop_to_tag
+
     async def auto_assign(self) -> AutoAssignResult:
         all_props = await self._ps.list_properties()
         unassigned = [p for p in all_props if not p.portfolio_id]
 
-        if not unassigned:
-            return AutoAssignResult(assigned=0, unresolved=0, message="Nothing to assign")
+        prop_to_tag = await self._collect_property_tags()
 
-        prop_to_tag: dict[str, str] = {}
-        kb_entities = getattr(self._ks, "_entities", {})
-        for _ns, entities in kb_entities.items():
-            for entity_id, entity in entities.items():
-                if entity.entity_type == "appfolio_property":
-                    tag = entity.properties.get("manager_tag", "")
-                    if (
-                        tag
-                        and tag.lower() not in ("month-to-month", "")
-                        and entity_id not in prop_to_tag
-                    ):
-                        prop_to_tag[entity_id] = tag
+        if not unassigned:
+            return AutoAssignResult(
+                assigned=0,
+                unresolved=0,
+                tags_available=len(prop_to_tag),
+                message="Nothing to assign",
+            )
 
         portfolio_cache: dict[str, str] = {}
 
@@ -83,11 +99,18 @@ class AutoAssignService:
             await self._ps.upsert_property(updated)
             assigned += 1
 
-        with contextlib.suppress(Exception):
+        try:
             await self._snapshot.capture()
+        except Exception:
+            logger.warning("snapshot_after_auto_assign_failed", exc_info=True)
 
         msg = (
             f"Assigned {assigned} properties from knowledge store tags. "
             f"{unresolved} had no tag and remain unassigned."
         )
-        return AutoAssignResult(assigned=assigned, unresolved=unresolved, message=msg)
+        return AutoAssignResult(
+            assigned=assigned,
+            unresolved=unresolved,
+            tags_available=len(prop_to_tag),
+            message=msg,
+        )

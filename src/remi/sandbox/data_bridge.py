@@ -267,7 +267,10 @@ def _post(path, body=None):
         raise ConnectionError(f"Cannot reach REMI API at {url}: {exc}") from exc
 
 
-def create_action(manager_id, title, description="", priority="medium", due_date=None, entity_type=None, entity_id=None):
+def create_action(
+    manager_id, title, description="", priority="medium",
+    due_date=None, entity_type=None, entity_id=None,
+):
     """Create an action item for a manager's portfolio.
 
     Parameters
@@ -324,6 +327,44 @@ def create_note(content, entity_type=None, entity_id=None, tags=None):
     if tags:
         body["tags"] = tags
     return _post("/notes", body)
+
+
+def search(query, types=None, manager_id=None, limit=10, as_df=False):
+    """Hybrid keyword + semantic search across all portfolio entities.
+
+    Fast, deterministic — no LLM involved. Useful for finding managers,
+    properties, tenants, units, or maintenance requests by name, address,
+    or natural language description.
+
+    Parameters
+    ----------
+    query : str
+        Search query — a name, address, description, or natural language phrase.
+    types : str or list, optional
+        Comma-separated (or list) of entity types to filter:
+        PropertyManager, Property, Tenant, Unit, MaintenanceRequest, DocumentRow.
+    manager_id : str, optional
+        Scope results to a specific manager's entities.
+    limit : int
+        Max results to return (default 10, max 50).
+    as_df : bool
+        Return a pandas DataFrame instead of a list of dicts.
+
+    Returns
+    -------
+    list[dict] or DataFrame
+        Each hit has: entity_id, entity_type, label, title, subtitle, score, metadata.
+    """
+    params = {"q": query, "limit": limit}
+    if types:
+        if isinstance(types, list):
+            types = ",".join(types)
+        params["types"] = types
+    if manager_id:
+        params["manager_id"] = manager_id
+    data = _get(f"/search{_qs(**params)}")
+    results = data.get("results", data)
+    return _maybe_df(results, as_df)
 
 
 def trigger_signal_inference():

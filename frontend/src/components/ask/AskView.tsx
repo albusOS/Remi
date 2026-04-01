@@ -37,7 +37,6 @@ export function AskView() {
     createSession,
     selectSession,
     send,
-    deleteSession: _deleteSession,
     dismissError,
     stopGenerating,
   } = useSessions("director");

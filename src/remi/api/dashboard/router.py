@@ -150,5 +150,6 @@ async def auto_assign(
     return AutoAssignResponse(
         assigned=result.assigned,
         unresolved=result.unresolved,
+        tags_available=result.tags_available,
         message=result.message,
     )

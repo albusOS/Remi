@@ -6,8 +6,9 @@ import { Badge } from "@/components/ui/Badge";
 import { Empty } from "@/components/ui/Empty";
 import type { DocumentMeta, ManagerListItem, NeedsManagerResponse } from "@/lib/types";
 
-// Report types that embed per-row manager tags — no manager selection needed.
-const SELF_TAGGING_TYPES = ["lease_expiration", "rent_roll", "delinquency"];
+// Report types that embed per-row manager tags (Tags column) so auto-assign
+// can resolve properties without explicit manager selection.
+const SELF_TAGGING_TYPES = ["lease_expiration", "delinquency"];
 
 export function DocumentsView() {
   const [documents, setDocuments] = useState<DocumentMeta[]>([]);
@@ -53,31 +54,27 @@ export function DocumentsView() {
     setUploadMsg(null);
 
     try {
-      // Manager is optional — if omitted, the backend extracts manager tags
-      // from each row and auto-assign will wire them up.
       const result = await api.uploadDocument(file, selectedManager || undefined);
       const isSelfTagging = SELF_TAGGING_TYPES.includes(result.report_type);
       const noManager = !selectedManager;
 
-      let mgrNote = selectedManager ? ` → ${selectedManager}` : "";
-      if (isSelfTagging || noManager) {
-        mgrNote = " · manager tags extracted — auto-assigning…";
-      }
+      const mgrNote = selectedManager ? ` → ${selectedManager}` : "";
 
       setUploadMsg(
         `${result.filename}: ${result.row_count} rows · ${result.report_type.replace(/_/g, " ")} · ${result.knowledge.entities_extracted} entities extracted${mgrNote}`
       );
 
-      // If no manager was selected, run auto-assign immediately so properties
-      // get wired to the right managers from the embedded tags.
-      if (noManager) {
+      // Auto-assign only makes sense for self-tagging report types (those
+      // with a Tags column) when no manager was explicitly selected.
+      if (noManager && isSelfTagging) {
+        setUploadMsg((prev) => (prev ?? "") + " · auto-assigning from tags…");
         try {
           const assigned = await api.autoAssign();
           setUploadMsg((prev) =>
-            (prev ?? "") + ` ${assigned.assigned} properties assigned.`
+            (prev ?? "") + ` ${assigned.assigned} assigned.`
           );
         } catch {
-          // auto-assign failure is non-fatal — user can retry via the banner
+          // non-fatal — user can retry via the banner
         }
       }
 
@@ -189,7 +186,7 @@ export function DocumentsView() {
                   {needsMgr.total} {needsMgr.total === 1 ? "property" : "properties"} unassigned
                 </p>
                 <p className="text-[9px] text-warn/60 mt-0.5 leading-relaxed">
-                  Detected manager tags in the knowledge store. Click to auto-assign.
+                  Upload a report with manager tags or select a manager above, then try auto-assign.
                 </p>
               </div>
 
@@ -225,10 +222,13 @@ export function DocumentsView() {
           )}
 
           {documents.map((doc) => (
-            <button
+            <div
               key={doc.id}
+              role="button"
+              tabIndex={0}
               onClick={() => selectDoc(doc.id)}
-              className={`w-full text-left rounded-lg px-3 py-2.5 transition-all group ${
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectDoc(doc.id); } }}
+              className={`w-full text-left rounded-lg px-3 py-2.5 transition-all group cursor-pointer ${
                 selected === doc.id ? "bg-surface-sunken" : "hover:bg-surface-raised"
               }`}
             >
@@ -237,6 +237,7 @@ export function DocumentsView() {
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(doc.id); }}
                   className="opacity-0 group-hover:opacity-100 text-fg-faint hover:text-error transition-all"
+                  aria-label={`Delete ${doc.filename}`}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -249,7 +250,7 @@ export function DocumentsView() {
                   <Badge variant="blue">{doc.report_type.replace(/_/g, " ")}</Badge>
                 )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>
