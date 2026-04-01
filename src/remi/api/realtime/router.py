@@ -14,7 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from remi.api.realtime.chat_runner import build_chat_dispatcher
 from remi.api.realtime.connection_manager import manager
-from remi.api.realtime.jsonrpc import JsonRpcError, JsonRpcRequest, JsonRpcResponse
+from remi.api.realtime.jsonrpc import JsonRpcError, JsonRpcResponse
 from remi.observability.events import Event
 
 router = APIRouter(tags=["ws"])

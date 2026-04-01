@@ -1,25 +1,25 @@
-# REMI Data Directory
+# Data Directory
 
-This directory contains sample reports and reference data used for development and testing.
+Sample AppFolio report exports for development and testing.
 
-## Structure
+## Expected Structure
 
 ```
 data/
-  sample_reports/     # Real AppFolio exports from the director of PM
-    rent_roll.*       # Rent Roll report
-    delinquencies.*   # Delinquency report
-    vacancies.*       # Vacancy report
+  sample_reports/
+    Alex_Budavich_Reports/
+      property_directory-*.xlsx
+      rent_roll-*.xlsx
+      delinquencies-*.xlsx
+      lease_expiration-*.xlsx
 ```
 
 ## Usage
 
-Drop weekly AppFolio exports here during development. These files are used to:
-1. Derive accurate column mappings in `infrastructure/documents/report_schema.py`
-2. Validate ingestion logic against real data shapes
-3. Seed the demo environment with realistic data
+- `uv run remi serve --seed` seeds demo data at startup
+- `POST /api/v1/seed/reports` ingests sample reports from this directory
+- `scripts/dry_run.py` runs the full ingestion pipeline against these files
 
 ## Security
 
-Do NOT commit reports containing real tenant PII. Anonymize before committing,
-or add `data/sample_reports/*.xlsx` / `data/sample_reports/*.csv` to `.gitignore`.
+Do NOT commit reports containing real tenant PII. Add `data/sample_reports/**/*.xlsx` and `data/sample_reports/**/*.csv` to `.gitignore` before committing real data.

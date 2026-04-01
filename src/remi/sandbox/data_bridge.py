@@ -194,4 +194,46 @@ def dashboard_delinquency(manager_id=None, as_df=False):
     data = _get(f"/dashboard/delinquency{_qs(manager_id=manager_id)}")
     result = data.get("tenants", data)
     return _maybe_df(result, as_df)
+
+
+# ---------------------------------------------------------------------------
+# Metrics history (snapshots over time)
+# ---------------------------------------------------------------------------
+
+def metrics_history(entity_type="manager", entity_id=None, manager_id=None, days=90, as_df=False):
+    """Return historical performance snapshots for trend analysis.
+
+    Parameters
+    ----------
+    entity_type : str
+        "manager" (default) or "property".
+    entity_id : str, optional
+        Filter to a specific manager_id (when entity_type="manager") or
+        property_id (when entity_type="property").
+    manager_id : str, optional
+        When entity_type="property", also filter by manager.
+    days : int
+        How many days of history to return (default 90, max 3650).
+    as_df : bool
+        Return a pandas DataFrame instead of a list of dicts.
+
+    Examples
+    --------
+    # All manager snapshots for the last 90 days
+    history = remi_data.metrics_history(as_df=True)
+    history["timestamp"] = pd.to_datetime(history["timestamp"])
+    history = history.sort_values("timestamp")
+
+    # Trend for a specific manager
+    mgr_history = remi_data.metrics_history(entity_id="mgr-123", as_df=True)
+
+    # Property-level history
+    prop_history = remi_data.metrics_history(entity_type="property", as_df=True)
+    """
+    data = _get(
+        f"/dashboard/metrics-history"
+        f"{_qs(entity_type=entity_type, entity_id=entity_id, manager_id=manager_id, days=days)}"
+    )
+    result = data.get("snapshots", data)
+    return _maybe_df(result, as_df)
 '''

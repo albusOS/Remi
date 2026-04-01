@@ -40,7 +40,7 @@ class EventCallback(Protocol):
 
 
 class ChatAgentService:
-    """Runs the director agent for single-shot /ask and multi-turn chat."""
+    """Runs any named agent for single-shot /ask and multi-turn chat."""
 
     def __init__(
         self,
@@ -131,6 +131,7 @@ class ChatAgentService:
         question: str,
         *,
         mode: Literal["ask", "agent"] = "agent",
+        on_event: EventCallback | None = None,
     ) -> tuple[str | None, str]:
         """Single-shot agent invocation. Returns (answer, run_id)."""
         config_dict = self._load_agent_config(agent_name)
@@ -143,7 +144,7 @@ class ChatAgentService:
         session_id = f"ask-{run_id}"
         await self._ensure_sandbox_session(session_id, mode=mode)
 
-        params = RunParams(mode=mode, sandbox_session_id=session_id)
+        params = RunParams(mode=mode, sandbox_session_id=session_id, on_event=on_event)
         ctx = self._build_context(run_id=run_id, params=params)
 
         node = AgentNode(config=config_dict)

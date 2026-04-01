@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from remi.knowledge.ontology_bridge import BridgedKnowledgeGraph
+from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
 from remi.models.properties import (
     ActionItem,
     ActionItemPriority,

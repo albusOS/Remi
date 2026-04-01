@@ -87,9 +87,7 @@ def _is_type_checking_guard(node: ast.AST) -> bool:
     test = node.test
     if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
         return True
-    if isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
-        return True
-    return False
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
 
 
 def _collect_imports(

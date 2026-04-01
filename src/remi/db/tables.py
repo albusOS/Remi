@@ -15,7 +15,6 @@ from typing import Any
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
 
-
 _TZDateTime = sa.DateTime(timezone=True)
 
 

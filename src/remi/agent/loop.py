@@ -98,7 +98,7 @@ async def run_agent_loop(
             produced_answer = True
             break
 
-        tool_rounds_used += 1
+        tool_rounds_used += 1  # noqa: SIM113 — only incremented on tool-using iterations
         thread.append(
             Message(
                 role="assistant",

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_knowledge_graph, get_property_store
-from remi.knowledge.ontology_bridge import BridgedKnowledgeGraph
+from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
 from remi.models.properties import (
     ActionItem,
     ActionItemPriority,

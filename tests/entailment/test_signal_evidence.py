@@ -17,7 +17,9 @@ from tests.conftest import seed_basic_portfolio
 REQUIRED_EVIDENCE_FIELDS: dict[str, set[str]] = {
     "VacancyDuration": {"days_vacant", "threshold", "property_id", "unit_number"},
     "LeaseExpirationCliff": {"expiring_count", "total_active", "expiring_pct", "threshold_pct"},
-    "DelinquencyConcentration": {"delinquency_rate", "total_owed", "gross_rent_roll", "threshold_pct"},
+    "DelinquencyConcentration": {
+        "delinquency_rate", "total_owed", "gross_rent_roll", "threshold_pct",
+    },
     "BelowMarketRent": {"current_rent", "market_rent", "gap_pct", "threshold_pct"},
     "LegalEscalationRisk": {"tenant_status", "balance_owed"},
 }
@@ -106,8 +108,14 @@ async def test_signals_are_typed_pydantic_models(
         assert isinstance(sig, Signal)
         assert sig.signal_id
         assert sig.signal_type
-        assert isinstance(sig.severity, Severity), f"severity should be Severity enum, got {type(sig.severity)}"
-        assert isinstance(sig.entity_type, str), f"entity_type should be str, got {type(sig.entity_type)}"
-        assert isinstance(sig.provenance, Provenance), f"provenance should be Provenance enum, got {type(sig.provenance)}"
+        assert isinstance(sig.severity, Severity), (
+            f"severity should be Severity enum, got {type(sig.severity)}"
+        )
+        assert isinstance(sig.entity_type, str), (
+            f"entity_type should be str, got {type(sig.entity_type)}"
+        )
+        assert isinstance(sig.provenance, Provenance), (
+            f"provenance should be Provenance enum, got {type(sig.provenance)}"
+        )
         assert sig.entity_id
         assert sig.detected_at is not None

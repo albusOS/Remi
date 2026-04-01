@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_knowledge_graph
-from remi.knowledge.ontology_bridge import BridgedKnowledgeGraph
+from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -123,7 +123,6 @@ async def delete_note(
     if not existing:
         raise HTTPException(404, f"Note '{note_id}' not found")
 
-    from remi.models.memory import Entity
 
     ks = kg._ks  # noqa: SLF001
     deleted = await ks.delete_entity("ontology", note_id)

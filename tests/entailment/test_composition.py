@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from remi.knowledge.entailment.composition import CompositionProducer
 from remi.knowledge.composite import CompositeProducer
+from remi.knowledge.entailment.composition import CompositionProducer
+from remi.models.ontology import KnowledgeProvenance
 from remi.models.signals import (
     CompositionRule,
     DomainRulebook,
@@ -15,7 +16,6 @@ from remi.models.signals import (
     Signal,
     SignalProducer,
 )
-from remi.models.ontology import KnowledgeProvenance
 from remi.stores.signals import InMemorySignalStore
 
 

@@ -159,7 +159,10 @@ _CORE_TYPES: list[ObjectTypeDef] = [
     ObjectTypeDef(
         name="ActionItem",
         plural_name="ActionItems",
-        description="A director-created action item for tracking follow-ups on managers, properties, or tenants",
+        description=(
+            "A director-created action item for tracking"
+            " follow-ups on managers, properties, or tenants"
+        ),
         properties=(
             PropertyDef(name="id", data_type="string", required=True),
             PropertyDef(name="title", data_type="string", required=True),
@@ -183,7 +186,10 @@ _CORE_TYPES: list[ObjectTypeDef] = [
     ObjectTypeDef(
         name="Note",
         plural_name="Notes",
-        description="An observation or note attached to any entity — from the director, AI, or ingested reports",
+        description=(
+            "An observation or note attached to any entity"
+            " — from the director, AI, or ingested reports"
+        ),
         properties=(
             PropertyDef(name="id", data_type="string", required=True),
             PropertyDef(name="content", data_type="string", required=True),

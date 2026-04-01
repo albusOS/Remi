@@ -97,8 +97,9 @@ def register_sandbox_tools(
             name="sandbox_exec_python",
             description=(
                 "Write and execute Python code for data analysis. "
-                "pandas and numpy are available. Use `import remi_data` to query "
-                "live platform data (properties, units, leases, maintenance, signals). "
+                "pandas, numpy, scipy, statsmodels, and scikit-learn are available. "
+                "Use `import remi_data` to query live platform data "
+                "(properties, units, leases, maintenance, signals). "
                 "Print results to stdout. Files written to the working directory "
                 "are preserved across calls."
             ),

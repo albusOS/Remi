@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar, Union
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -47,4 +47,4 @@ class Err(Generic[E]):
         return self.error
 
 
-Result = Union[Ok[T], Err[E]]
+Result = Ok[T] | Err[E]

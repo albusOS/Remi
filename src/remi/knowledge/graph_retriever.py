@@ -13,7 +13,7 @@ from typing import Any
 
 import structlog
 
-from remi.models.ontology import KnowledgeLink, KnowledgeGraph
+from remi.models.ontology import KnowledgeGraph, KnowledgeLink
 from remi.models.retrieval import Embedder, SearchResult, VectorStore
 from remi.models.signals import Signal, SignalStore
 from remi.observability.events import Event
@@ -93,7 +93,11 @@ class GraphRetriever:
                             )
                     result.neighborhood[entity.entity_id] = typed_links
                 except Exception:
-                    _log.warning(Event.GRAPH_EXPAND_FAILED, entity_id=entity.entity_id, exc_info=True)
+                    _log.warning(
+                        Event.GRAPH_EXPAND_FAILED,
+                        entity_id=entity.entity_id,
+                        exc_info=True,
+                    )
 
         if self._ss is not None:
             entity_ids = {e.entity_id for e in resolved}

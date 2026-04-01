@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# REMI Frontend
 
-## Getting Started
+Next.js 16 dashboard for REMI. Connects to the Python API server at `http://localhost:8000`.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16.2** with App Router
+- **React 19.2**
+- **Tailwind CSS 4**
+- **Framer Motion** for animations
+- **react-markdown** + **remark-gfm** for rendering agent responses
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev    # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Requires the API server running (`uv run remi serve --seed` from the project root).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Pages
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Route | Description |
+|-------|-------------|
+| `/` | Home |
+| `/dashboard` | Director dashboard — signals overview, portfolio health |
+| `/ask` | Chat interface — director and researcher agents |
+| `/delinquency` | Delinquency analysis and tracking |
+| `/vacancies` | Vacancy monitoring |
+| `/leases` | Lease expiration analysis |
+| `/documents` | Document upload and management |
+| `/performance` | Manager performance comparison |
+| `/properties/[id]` | Property detail — units, rent roll, metrics |
+| `/managers/[id]` | Manager detail — portfolio, signals, review |
 
-## Learn More
+## Structure
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+  app/
+    (shell)/           Shell layout with sidebar navigation
+      layout.tsx       Shell layout
+      page.tsx         Home
+      dashboard/       Director dashboard
+      ask/             Chat interface
+      delinquency/     Delinquency view
+      vacancies/       Vacancy view
+      leases/          Lease view
+      documents/       Document management
+      performance/     Performance comparison
+      properties/[id]/ Property detail
+      managers/[id]/   Manager detail
+    layout.tsx         Root layout
+    not-found.tsx      404 page
+  components/
+    Shell.tsx          App shell with sidebar
+    ui/                Shared UI components (MetricStrip, MetricCard, DataTable, PageContainer, Markdown, etc.)
+    ask/               Chat components (AskView, SessionInput, SessionThread, SessionSidebar, etc.)
+    dashboard/         Dashboard components
+    delinquency/       Delinquency components
+    documents/         Document components
+    leases/            Lease components
+    managers/          Manager components
+    performance/       Performance components
+    properties/        Property components
+    vacancies/         Vacancy components
+  hooks/
+    useApiQuery.ts     Data fetching hook
+    useAppOSEvents.ts  WebSocket event hook
+    useSessions.ts     Chat session management
+  lib/
+    api.ts             API client
+    format.ts          Formatting utilities
+    types.ts           TypeScript types
+```

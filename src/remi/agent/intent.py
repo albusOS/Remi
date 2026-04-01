@@ -8,7 +8,6 @@ injection profile.  Pure heuristics, no LLM call — runs in <1ms.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import structlog
 
@@ -26,15 +25,13 @@ _ACTION_KEYWORDS = frozenset({
     "create action", "draft plan", "action plan", "action item",
     "follow-up", "follow up", "approve plan", "assign",
 })
-_DEEP_DIVE_KEYWORDS = frozenset({
-    "build", "chart", "audit", "report", "trend", "visualization",
-    "export", "write a report", "deep dive", "investigate",
-    "comprehensive", "detailed analysis",
-})
 _ANALYSIS_KEYWORDS = frozenset({
     "compare", "analyze", "analysis", "which", "rank", "breakdown",
     "summarize", "overview", "assess", "evaluate", "review",
     "underperforming", "top", "worst", "best",
+    "build", "chart", "audit", "report", "trend", "visualization",
+    "export", "write a report", "investigate", "comprehensive",
+    "detailed analysis",
 })
 
 
@@ -60,14 +57,11 @@ def classify_intent(
     if "action" in intents and _matches_keywords(text_lower, _ACTION_KEYWORDS):
         return ("action", intents["action"])
 
-    if "deep_dive" in intents and _matches_keywords(text_lower, _DEEP_DIVE_KEYWORDS):
-        return ("deep_dive", intents["deep_dive"])
-
     if "analysis" in intents and _matches_keywords(text_lower, _ANALYSIS_KEYWORDS):
         return ("analysis", intents["analysis"])
 
     for name, intent_cfg in intents.items():
-        if name in ("conversation", "action", "deep_dive", "analysis", "lookup"):
+        if name in ("conversation", "action", "analysis", "lookup"):
             continue
         if intent_cfg.keywords and _matches_keywords(text_lower, frozenset(intent_cfg.keywords)):
             return (name, intent_cfg)
@@ -97,9 +91,7 @@ def _is_lookup(text: str, text_lower: str, word_count: int) -> bool:
     if word_count <= 20 and _QUESTION_MARK.search(text):
         return True
     lookup_phrases = {"how many", "show me", "what is", "what's", "list", "get"}
-    if any(phrase in text_lower for phrase in lookup_phrases):
-        return True
-    return False
+    return any(phrase in text_lower for phrase in lookup_phrases)
 
 
 def _matches_keywords(text_lower: str, keywords: frozenset[str]) -> bool:

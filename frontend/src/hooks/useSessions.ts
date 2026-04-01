@@ -391,7 +391,7 @@ export function useSessions(agent: string) {
   const send = useCallback(
     async (
       text: string,
-      mode: "ask" | "agent" = "ask",
+      mode: "ask" | "research" = "ask",
       opts?: { provider?: string; model?: string; managerId?: string },
     ) => {
       let sid = activeSessionIdRef.current;

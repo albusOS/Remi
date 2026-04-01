@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import pytest
-
 from remi.knowledge.context_builder import (
     ContextBuilder,
     ContextFrame,
     render_active_signals,
-    render_graph_context,
     render_domain_context,
+    render_graph_context,
 )
 from remi.knowledge.graph_retriever import ResolvedEntity
+from remi.knowledge.ontology.bootstrap import load_domain_yaml
 from remi.knowledge.tokens import estimate_tokens, truncate_to_tokens
 from remi.models.chat import Message
 from remi.models.ontology import KnowledgeLink
-from remi.models.signals import DomainRulebook, Severity, Signal, CompositionRule
-from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.models.signals import DomainRulebook, Severity, Signal
 from remi.stores.signals import InMemorySignalStore
-
 
 # -- token utilities ----------------------------------------------------------
 

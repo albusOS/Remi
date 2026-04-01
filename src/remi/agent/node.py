@@ -21,7 +21,12 @@ from remi.agent.context import RuntimeContext
 from remi.agent.intent import classify_intent
 from remi.agent.llm_bridge import OnEventCallback
 from remi.agent.loop import run_agent_loop
-from remi.agent.thread import build_initial_thread, format_output, last_assistant_content, trim_thread
+from remi.agent.thread import (
+    build_initial_thread,
+    format_output,
+    last_assistant_content,
+    trim_thread,
+)
 from remi.agent.tool_executor import ToolExecutor, build_tool_set, build_tool_set_for_names
 from remi.knowledge.context_builder import extract_signal_references
 from remi.llm.ports import LLMProvider

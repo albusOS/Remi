@@ -42,9 +42,12 @@ async def test_start_trace_creates_root_span(
 async def test_child_spans_form_tree(
     tracer: Tracer, store: InMemoryTraceStore,
 ) -> None:
-    async with tracer.start_trace("root") as root, root.span(SpanKind.ENTAILMENT, "child1"):
-        async with root.span(SpanKind.LLM_CALL, "child2"):
-            pass
+    async with (
+        tracer.start_trace("root") as root,
+        root.span(SpanKind.ENTAILMENT, "child1"),
+        root.span(SpanKind.LLM_CALL, "child2"),
+    ):
+        pass
 
     spans = await store.list_spans(root.trace_id)
     assert len(spans) == 3
@@ -62,10 +65,10 @@ async def test_child_spans_form_tree(
 async def test_nested_child_spans(
     tracer: Tracer, store: InMemoryTraceStore,
 ) -> None:
-    async with tracer.start_trace("root") as root:
-        async with root.span(SpanKind.ENTAILMENT, "parent") as parent:
-            async with parent.span(SpanKind.SIGNAL, "grandchild"):
-                pass
+    async with tracer.start_trace("root") as root, root.span(
+        SpanKind.ENTAILMENT, "parent",
+    ) as parent, parent.span(SpanKind.SIGNAL, "grandchild"):
+        pass
 
     spans = await store.list_spans(root.trace_id)
     assert len(spans) == 3

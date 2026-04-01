@@ -13,13 +13,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from remi.api.actions.router import router as actions_router
-from remi.api.notes.router import router as notes_router
 from remi.api.agents.router import router as agents_router
 from remi.api.dashboard.router import router as dashboard_router
 from remi.api.documents.router import router as documents_router
+from remi.api.error_handler import install_error_handlers
 from remi.api.leases.router import router as leases_router
 from remi.api.maintenance.router import router as maintenance_router
 from remi.api.managers.router import router as managers_router
+from remi.api.middleware import RequestIDMiddleware
+from remi.api.notes.router import router as notes_router
 from remi.api.ontology.router import router as ontology_router
 from remi.api.portfolios.router import router as portfolios_router
 from remi.api.properties.router import router as properties_router
@@ -28,8 +30,6 @@ from remi.api.seed.router import router as seed_router
 from remi.api.signals.router import router as signals_router
 from remi.api.tenants.router import router as tenants_router
 from remi.api.units.router import router as units_router
-from remi.api.error_handler import install_error_handlers
-from remi.api.middleware import RequestIDMiddleware
 from remi.config.container import Container
 from remi.config.settings import RemiSettings, load_settings
 from remi.observability.events import Event

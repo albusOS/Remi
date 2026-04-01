@@ -23,7 +23,6 @@ Run from the project root:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 import time
 from pathlib import Path
@@ -31,6 +30,8 @@ from typing import Any
 
 # Ensure src is on the path when run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import contextlib
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -43,7 +44,6 @@ from textual.widgets import (
     Header,
     Input,
     Label,
-    Log,
     RichLog,
     Static,
 )
@@ -370,12 +370,10 @@ class RemiDashboard(App):
     def _refresh_tbox(self) -> None:
         if self._container is None:
             return
-        try:
+        with contextlib.suppress(NoMatches, Exception):
             self.query_one("#tbox-panel", TBoxPanel).refresh_tbox(
                 self._container.domain_rulebook
             )
-        except (NoMatches, Exception):
-            pass
 
     # ── chat ──────────────────────────────────────────────────────────────
 
@@ -493,25 +491,19 @@ class RemiDashboard(App):
     # ── write helpers ─────────────────────────────────────────────────────
 
     def _activity(self, msg: str) -> None:
-        try:
+        with contextlib.suppress(NoMatches):
             self.query_one("#activity-log", RichLog).write(msg)
-        except NoMatches:
-            pass
 
     def _chat(self, msg: str) -> None:
-        try:
+        with contextlib.suppress(NoMatches):
             self.query_one("#chat-log", RichLog).write(msg)
-        except NoMatches:
-            pass
 
     # ── cleanup ───────────────────────────────────────────────────────────
 
     async def on_unmount(self) -> None:
         if self._container is not None and self._sandbox_session_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._container.sandbox.destroy_session(self._sandbox_session_id)
-            except Exception:
-                pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -82,7 +82,7 @@ async def ingest_property_directory(
     rows_with_manager = 0
     rows_without_manager = 0
 
-    _SKIP_PATTERNS = ("do not use", "admin", "test property")
+    skip_patterns = ("do not use", "admin", "test property")
 
     for row in doc.rows:
         prop_raw = _first_match(row, _PROPERTY_COL_CANDIDATES)
@@ -91,7 +91,7 @@ async def ingest_property_directory(
             continue
 
         prop_name = parse_property_name(prop_raw)
-        if any(pat in prop_name.lower() for pat in _SKIP_PATTERNS):
+        if any(pat in prop_name.lower() for pat in skip_patterns):
             logger.debug("property_directory_skip_inactive", prop_name=prop_name)
             continue
         addr_raw = _first_match(row, _ADDRESS_COL_CANDIDATES) or prop_raw

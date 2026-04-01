@@ -30,6 +30,7 @@ __all__ = [
     "ExpiringLease",
     "LeaseCalendar",
     "ManagerOverview",
+    "MetricsHistoryResponse",
     "NeedsManagerResponse",
     "PortfolioOverview",
     "RentRollUnit",
@@ -59,6 +60,12 @@ class SnapshotsResponse(BaseModel, frozen=True):
 
 class CaptureResponse(BaseModel, frozen=True):
     captured: int
+
+
+class MetricsHistoryResponse(BaseModel, frozen=True):
+    entity_type: str
+    total: int
+    snapshots: list[dict[str, Any]]
 
 
 class AutoAssignResponse(BaseModel, frozen=True):

@@ -20,7 +20,7 @@ from typing import Any
 
 import structlog
 
-from remi.models.ontology import KnowledgeProvenance, KnowledgeGraph
+from remi.models.ontology import KnowledgeGraph, KnowledgeProvenance
 from remi.models.signals import (
     CausalChain,
     Horizon,

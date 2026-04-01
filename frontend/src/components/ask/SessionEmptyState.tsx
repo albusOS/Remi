@@ -14,11 +14,11 @@ const ASK_SUGGESTIONS = [
   { text: "Compare my managers on occupancy", icon: "📊" },
 ];
 
-const AGENT_SUGGESTIONS = [
-  { text: "Run a full portfolio health check", icon: "🩺" },
-  { text: "Find which properties are underperforming and why", icon: "🔍" },
-  { text: "Find patterns in maintenance requests", icon: "🔧" },
-  { text: "Build a manager comparison on key metrics", icon: "⚖️" },
+const RESEARCH_SUGGESTIONS = [
+  { text: "What trends am I missing across all managers?", icon: "📈" },
+  { text: "Find which properties are statistically underperforming", icon: "🔍" },
+  { text: "Run a full portfolio health analysis", icon: "🩺" },
+  { text: "Cluster managers by performance profile", icon: "⚖️" },
 ];
 
 function getGreeting(): string {
@@ -38,16 +38,16 @@ export function SessionEmptyState({
   onSend: (text: string) => void;
   connected: boolean;
   streaming: boolean;
-  mode: "ask" | "agent";
+  mode: "ask" | "research";
   managerName?: string;
 }) {
   const suggestions = managerName
-    ? mode === "agent"
+    ? mode === "research"
       ? [
-          { text: `Run a health check on ${managerName}'s portfolio`, icon: "🩺" },
-          { text: `Find underperforming properties for ${managerName}`, icon: "🔍" },
+          { text: `What trends are emerging in ${managerName}'s portfolio?`, icon: "📈" },
+          { text: `Find statistically underperforming properties for ${managerName}`, icon: "🔍" },
           { text: `Analyze ${managerName}'s maintenance patterns`, icon: "🔧" },
-          { text: `How does ${managerName} compare on key metrics?`, icon: "⚖️" },
+          { text: `How does ${managerName} compare statistically?`, icon: "⚖️" },
         ]
       : [
           { text: `How is ${managerName} doing this month?`, icon: "👤" },
@@ -55,8 +55,8 @@ export function SessionEmptyState({
           { text: `What's ${managerName}'s occupancy rate?`, icon: "📊" },
           { text: `Are any of ${managerName}'s leases expiring soon?`, icon: "📋" },
         ]
-    : mode === "agent"
-      ? AGENT_SUGGESTIONS
+    : mode === "research"
+      ? RESEARCH_SUGGESTIONS
       : ASK_SUGGESTIONS;
 
   return (
@@ -71,8 +71,8 @@ export function SessionEmptyState({
         <p className="text-sm text-fg-muted mb-10 text-center max-w-xs leading-relaxed">
           {managerName
             ? `Focused on ${managerName}'s portfolio.`
-            : mode === "agent"
-              ? "I'll dig into the numbers and tell you what matters."
+            : mode === "research"
+              ? "I'll run statistical analysis and surface what matters."
               : "Ask me anything about your portfolio."}
         </p>
 

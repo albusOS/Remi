@@ -84,7 +84,8 @@ def register_action_tools(
         if "description" in args:
             updates["description"] = args["description"]
         if "due_date" in args:
-            updates["due_date"] = date.fromisoformat(str(args["due_date"])) if args["due_date"] else None
+            raw = args["due_date"]
+            updates["due_date"] = date.fromisoformat(str(raw)) if raw else None
 
         updated = item.model_copy(update=updates)
         await ps.upsert_action_item(updated)
@@ -105,7 +106,11 @@ def register_action_tools(
                 "description, or due date."
             ),
             args=[
-                ToolArg(name="item_id", description="ID of the action item to update", required=True),
+                ToolArg(
+                    name="item_id",
+                    description="ID of the action item to update",
+                    required=True,
+                ),
                 ToolArg(
                     name="status",
                     description="New status: open, in_progress, done, cancelled",

@@ -268,7 +268,8 @@ async def test_outlier_performance_flags_bottom_quartile(
         status = UnitStatus.VACANT if i < 8 else UnitStatus.OCCUPIED
         await property_store.upsert_unit(Unit(
             id=f"u-bob-{i}", property_id=ids["prop3"], unit_number=f"B{i}",
-            status=status, current_rent=Decimal("500") if status == UnitStatus.OCCUPIED else Decimal("0"),
+            status=status,
+            current_rent=Decimal("500") if status == UnitStatus.OCCUPIED else Decimal("0"),
         ))
 
     result = await engine.run_all()

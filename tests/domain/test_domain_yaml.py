@@ -68,7 +68,9 @@ class TestTypedSignalDefinitions:
             assert defn.entity, f"{name}.entity should be non-empty"
             assert isinstance(defn.horizon, Horizon), f"{name}.horizon should be Horizon enum"
             assert isinstance(defn.rule, InferenceRule), f"{name}.rule should be InferenceRule"
-            assert isinstance(defn.rule.condition, RuleCondition), f"{name}.rule.condition should be RuleCondition"
+            assert isinstance(defn.rule.condition, RuleCondition), (
+                f"{name}.rule.condition should be RuleCondition"
+            )
 
     def test_vacancy_duration_definition(self) -> None:
         defn = _domain().signal("VacancyDuration")

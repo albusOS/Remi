@@ -1,4 +1,4 @@
-"""Incline: Tool implementations — ontology, documents, memory, sandbox, trace, vectors, actions, workflows."""
+"""Tool implementations — ontology, documents, memory, sandbox, trace, vectors, actions."""
 
 from __future__ import annotations
 

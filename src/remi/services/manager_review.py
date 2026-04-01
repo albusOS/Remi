@@ -119,24 +119,26 @@ class ManagerReviewService:
         ])
         all_props_with_portfolio = [
             (prop, portfolio)
-            for portfolio, props in zip(portfolios, portfolio_props)
+            for portfolio, props in zip(portfolios, portfolio_props, strict=True)
             for prop in props
         ]
 
         # Gather units/leases/maint for all properties concurrently
         async def _load_prop(prop_id: str) -> tuple:
-            u, l, m = await asyncio.gather(
+            u, le, m = await asyncio.gather(
                 self._ps.list_units(property_id=prop_id),
                 self._ps.list_leases(property_id=prop_id),
                 self._ps.list_maintenance_requests(property_id=prop_id),
             )
-            return u, l, m
+            return u, le, m
 
         prop_data = await asyncio.gather(*[
             _load_prop(prop.id) for prop, _ in all_props_with_portfolio
         ])
 
-        for (prop, portfolio), (units, leases, maint) in zip(all_props_with_portfolio, prop_data):
+        for (prop, portfolio), (units, leases, maint) in zip(
+            all_props_with_portfolio, prop_data, strict=True,
+        ):
             property_count += 1
 
             p_units = len(units)
@@ -282,7 +284,7 @@ class ManagerReviewService:
 
         delinquent_count = 0
         delinquent_balance = Decimal("0")
-        for t, t_leases in zip(delinquent_tenants, delinquent_leases):
+        for t, t_leases in zip(delinquent_tenants, delinquent_leases, strict=True):
             if any(le.property_id in all_property_ids for le in t_leases):
                 delinquent_count += 1
                 delinquent_balance += t.balance_owed

@@ -18,9 +18,7 @@ def _json_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         safe: dict[str, Any] = {}
         for k, v in row.items():
-            if isinstance(v, datetime):
-                safe[k] = v.isoformat()
-            elif isinstance(v, date):
+            if isinstance(v, (datetime, date)):
                 safe[k] = v.isoformat()
             else:
                 safe[k] = v

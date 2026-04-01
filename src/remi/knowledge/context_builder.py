@@ -23,7 +23,6 @@ from remi.knowledge.graph_retriever import GraphRetriever, ResolvedEntity
 from remi.knowledge.tokens import estimate_tokens, truncate_to_tokens
 from remi.models.chat import Message
 from remi.models.ontology import KnowledgeLink
-from remi.observability.events import Event
 from remi.models.signals import (
     CausalChain,
     DomainRulebook,
@@ -33,6 +32,7 @@ from remi.models.signals import (
     SignalStore,
 )
 from remi.models.trace import SpanKind
+from remi.observability.events import Event
 from remi.observability.tracer import Tracer
 
 _log = structlog.get_logger(__name__)

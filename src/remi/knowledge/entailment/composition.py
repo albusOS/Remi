@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 
 from remi.knowledge.entailment.base import signal_id as _signal_id
+from remi.models.ontology import KnowledgeProvenance
 from remi.models.signals import (
     CompositionRule,
     DomainRulebook,
@@ -25,7 +26,6 @@ from remi.models.signals import (
     SignalProducer,
     SignalStore,
 )
-from remi.models.ontology import KnowledgeProvenance
 
 _log = structlog.get_logger(__name__)
 

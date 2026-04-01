@@ -7,8 +7,8 @@ function ModeToggle({
   mode,
   onChange,
 }: {
-  mode: "ask" | "agent";
-  onChange: (m: "ask" | "agent") => void;
+  mode: "ask" | "research";
+  onChange: (m: "ask" | "research") => void;
 }) {
   return (
     <div className="flex rounded-full bg-surface-sunken p-0.5">
@@ -23,14 +23,14 @@ function ModeToggle({
         Quick
       </button>
       <button
-        onClick={() => onChange("agent")}
+        onClick={() => onChange("research")}
         className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-          mode === "agent"
+          mode === "research"
             ? "bg-surface text-fg shadow-sm"
             : "text-fg-faint hover:text-fg-secondary"
         }`}
       >
-        Deep dive
+        Research
       </button>
     </div>
   );
@@ -50,11 +50,11 @@ export function SessionInput({
   managerId,
   onManagerChange,
 }: {
-  onSend: (text: string, mode: "ask" | "agent") => void;
+  onSend: (text: string, mode: "ask" | "research") => void;
   streaming: boolean;
   connected: boolean;
-  mode: "ask" | "agent";
-  onModeChange: (m: "ask" | "agent") => void;
+  mode: "ask" | "research";
+  onModeChange: (m: "ask" | "research") => void;
   hasMessages: boolean;
   showWorkDetails: boolean;
   onToggleWorkDetails: () => void;
@@ -88,11 +88,11 @@ export function SessionInput({
   const selectedManager = managers?.find((m) => m.id === managerId);
   const placeholders = connected
     ? selectedManager
-      ? mode === "agent"
-        ? [`Deep dive into ${selectedManager.name}'s portfolio`, `What issues should I know about for ${selectedManager.name}?`, "Find patterns in their maintenance requests"]
+      ? mode === "research"
+        ? [`Research ${selectedManager.name}'s portfolio trends`, `What patterns are emerging for ${selectedManager.name}?`, "Find statistical anomalies in their maintenance data"]
         : [`How is ${selectedManager.name} doing?`, `Any issues with ${selectedManager.name}'s properties?`, "What's their occupancy looking like?"]
-      : mode === "agent"
-        ? ["What's really going on with vacancies?", "Dig into Marcus's numbers this quarter", "Find me the patterns I'm missing"]
+      : mode === "research"
+        ? ["What trends am I missing across all managers?", "Run a full portfolio health analysis", "Find the patterns I can't see in the numbers"]
         : ["How's my portfolio looking today?", "Anything I should worry about?", "Which managers are crushing it?"]
     : ["Connecting..."];
 

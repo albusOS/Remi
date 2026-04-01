@@ -6,8 +6,8 @@ AI platform for property management directors. The director's core question: **w
 
 ```bash
 uv run pytest tests/ -q              # run all tests
-uv run pytest tests/domain/ -q       # run a specific folder
-uv run remi serve                    # start API server
+uv run pytest tests/entailment/ -q   # run a specific folder
+uv run remi serve --seed             # start API server with demo data
 uv run remi onto signals             # show active signals
 uv run remi trace list               # recent traces
 ```
@@ -33,27 +33,31 @@ uv run remi trace list               # recent traces
 ## Architecture: Four Layers
 
 ```
-Layer 1 — Facts       stores/          PropertyStore, KnowledgeStore, DocumentStore
-Layer 2 — Domain      config/          domain.yaml (rulebook), ontology (schema)
-Layer 3 — Signals     services/        entailment engine → SignalStore; pattern detector → HypothesisStore
-Layer 4 — Interface   api/, cli/       FastAPI routes, Typer CLI, agent loop
+Layer 1 — Facts       stores/          PropertyStore, KnowledgeStore, DocumentStore, SignalStore, VectorStore, TraceStore, MemoryStore, ChatStore, SnapshotStore
+Layer 2 — Domain      config/          domain.yaml (rulebook), ontology (schema), container (DI), settings
+Layer 3 — Signals     services/        entailment engine → SignalStore; pattern detector → hypotheses; domain services (dashboard, manager review, ingestion, queries)
+Layer 4 — Interface   api/, cli/       FastAPI routes + WebSocket, Typer CLI, agent loop, frontend
 ```
 
 **When creating or moving code, say which layer it belongs to before placing it.**
 
-Key constraint: the LLM agent does NOT detect signals — the entailment engine does.  
+Key constraint: the LLM agent does NOT detect signals — the entailment engine does.
 The LLM's job is abductive reasoning: explain, connect, recommend, codify.
 
 ## Key Files
 
 | File | Role |
 |------|------|
-| `src/remi/config/domain.yaml` | Source of truth for signal definitions, thresholds, rules, policies |
-| `src/remi/agents/director/app.yaml` | Director agent — system prompt, tools, modes |
+| `src/remi/config/domain.yaml` | Source of truth for signal definitions, thresholds, rules, policies, causal chains, workflows |
+| `src/remi/config/container.py` | DI container — wires all stores, services, agents, tools |
+| `src/remi/agents/director/app.yaml` | Director agent — fast Q&A, system prompt, tools |
+| `src/remi/agents/researcher/app.yaml` | Researcher agent — deep analysis, sandbox, phased protocol |
 | `src/remi/agent/node.py` | AgentNode — config-driven think-act-observe loop |
+| `src/remi/knowledge/entailment/engine.py` | Entailment engine — evaluates rules, produces signals |
 | `src/remi/knowledge/context_builder.py` | Assembles agent context from knowledge graph + signals |
 | `src/remi/knowledge/graph_retriever.py` | Retrieves entities and relationships from the graph |
 | `src/remi/services/dashboard.py` | Computes director dashboard state from signals |
+| `src/remi/services/manager_review.py` | Manager performance review logic |
 | `src/remi/shared/errors.py` | Shared error types — use these, don't invent new ones |
 
 ## Module Map
@@ -61,17 +65,22 @@ The LLM's job is abductive reasoning: explain, connect, recommend, codify.
 ```
 src/remi/
   agent/        AgentNode, loop, intent classifier, LLM bridge, tool executor
-  agents/       App YAML configs (director, knowledge_enricher, report_classifier)
-  api/          FastAPI routers (realtime chat, agents, documents)
+  agents/       YAML configs — director, researcher, action_planner, report_classifier, knowledge_enricher
+  api/          FastAPI routers (17 route groups + WebSocket chat/events), schemas, middleware
   cli/          Typer CLI entry points
   config/       Settings, DI container, domain.yaml
-  knowledge/    Context builder, graph retriever
+  db/           Database engine and tables (Postgres)
+  documents/    AppFolio report schema and parsers
+  knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline, ontology
   llm/          LLM provider ports + adapters (Anthropic, OpenAI, Gemini)
-  models/       Pydantic models (properties, signals, trace, memory, documents)
-  services/     Domain services (dashboard, manager review, lease queries, etc.)
-  stores/       Storage adapters (properties, signals, vectors, chat, trace, memory)
-  tools/        Agent tool implementations (onto_*, sandbox_*, trace_*, memory_*)
-  shared/       Enums, errors, ids, clock, result types — cross-cutting primitives
+  models/       Pydantic models (properties, signals, ontology, chat, documents, trace, memory, sandbox, tools)
+  observability/ Structured logging (structlog), events, tracer
+  sandbox/      Isolated code execution (local subprocess sandbox, data bridge)
+  services/     Domain services (dashboard, manager review, document ingestion, lease/portfolio/property/maintenance queries, rent roll, snapshots, auto-assign)
+  shared/       Enums, errors, ids, clock, result, paths, text — cross-cutting primitives only
+  stores/       Storage adapters (properties, signals, documents, vectors, chat, trace, memory, snapshots, Postgres variants)
+  tools/        Agent tool implementations (ontology, documents, memory, sandbox, trace, vectors, actions, workflows)
+  vectors/      Embedding pipeline, embedder
 ```
 
 ## When Making Structural Decisions

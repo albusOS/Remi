@@ -34,7 +34,9 @@ class IntentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     max_tool_rounds: int | None = None
     max_iterations: int | None = None
-    context_injection: list[str] = Field(default_factory=lambda: ["signals", "domain", "graph", "memory"])
+    context_injection: list[str] = Field(
+        default_factory=lambda: ["signals", "domain", "graph", "memory"],
+    )
 
 
 class MemoryConfig(BaseModel):

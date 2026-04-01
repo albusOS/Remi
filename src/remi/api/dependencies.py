@@ -17,7 +17,7 @@ from remi.agent.runner import ChatAgentService
 from remi.config.container import Container
 from remi.config.settings import RemiSettings
 from remi.knowledge.composite import CompositeProducer
-from remi.knowledge.ontology_bridge import BridgedKnowledgeGraph
+from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
 from remi.llm.factory import LLMProviderFactory
 from remi.models.chat import ChatSessionStore
 from remi.models.documents import DocumentStore

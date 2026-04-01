@@ -164,7 +164,7 @@ async def merge_managers(
 
     target_portfolios = await ps.list_portfolios(manager_id=body.target_manager_id)
     if not target_portfolios:
-        raise HTTPException(400, f"Target manager has no portfolio")
+        raise HTTPException(400, "Target manager has no portfolio")
     target_pf_id = target_portfolios[0].id
 
     source_portfolios = await ps.list_portfolios(manager_id=body.source_manager_id)

@@ -22,7 +22,10 @@ from rich.table import Table
 
 console = Console()
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "src" / "remi" / "data" / "sample_reports" / "Alex_Budavich_Reports"
+DATA_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "src" / "remi" / "data" / "sample_reports" / "Alex_Budavich_Reports"
+)
 
 FILES = [
     ("Rent Roll_Vacancy (1).xlsx", "Alex Budavich"),
@@ -143,7 +146,13 @@ async def main() -> None:
         sig_table.add_column("Entity")
         sig_table.add_column("Description", max_width=60)
 
-        for s in sorted(signals, key=lambda x: ["critical", "high", "medium", "low"].index(x.severity.value) if x.severity.value in ["critical", "high", "medium", "low"] else 99):
+        severity_order = ["critical", "high", "medium", "low"]
+        for s in sorted(
+            signals,
+            key=lambda x: severity_order.index(x.severity.value)
+            if x.severity.value in severity_order
+            else 99,
+        ):
             icon = severity_icons.get(s.severity.value, "?")
             sig_table.add_row(icon, s.signal_type, s.entity_name, s.description[:60])
 
@@ -203,7 +212,7 @@ async def main() -> None:
     console.print(f"\n  Link types: {len(link_types)}")
 
     if properties:
-        first_prop = properties[0]
+        properties[0]
         result = await os.search_objects("Property", limit=5)
         console.print(f"\n  onto search Property: {len(result)} result(s)")
 
@@ -215,7 +224,9 @@ async def main() -> None:
     domain = container.domain_rulebook
     console.print(f"  Signal definitions: {len(domain.signals)}")
     for name, defn in domain.signals.items():
-        console.print(f"    {name}: {defn.severity.value} | {defn.rule.condition.value} | entity={defn.entity}")
+        sev = defn.severity.value
+        cond = defn.rule.condition.value
+        console.print(f"    {name}: {sev} | {cond} | entity={defn.entity}")
 
     console.print(f"\n  Thresholds: {len(domain.thresholds)}")
     for k, v in domain.thresholds.items():
@@ -246,12 +257,14 @@ async def main() -> None:
     console.print(Panel(summary, title="[bold]Summary[/bold]", border_style="green"))
 
     if signals:
-        console.print(f"\n[bold]Next steps:[/bold]")
-        console.print(f"  remi onto signals             — view all signals")
-        console.print(f"  remi onto explain <signal-id>  — drill into evidence")
+        console.print("\n[bold]Next steps:[/bold]")
+        console.print("  remi onto signals             — view all signals")
+        console.print("  remi onto explain <signal-id>  — drill into evidence")
         if pipeline_result.trace_id:
-            console.print(f"  remi trace show {pipeline_result.trace_id} — full signal pipeline trace")
-        console.print(f"  remi chat --agent director    — ask the AI (needs OPENAI_API_KEY)")
+            console.print(
+                f"  remi trace show {pipeline_result.trace_id} — full signal pipeline trace"
+            )
+        console.print("  remi chat --agent director    — ask the AI (needs OPENAI_API_KEY)")
     console.print()
 
 

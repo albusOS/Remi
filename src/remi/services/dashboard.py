@@ -178,7 +178,7 @@ class DashboardQueryService:
             self._ps.list_portfolios(manager_id=mgr.id) for mgr in managers_list
         ])
 
-        for mgr, portfolios in zip(managers_list, all_mgr_portfolios):
+        for mgr, portfolios in zip(managers_list, all_mgr_portfolios, strict=True):
             # Gather properties across all portfolios concurrently
             pf_props = await asyncio.gather(*[
                 self._ps.list_properties(portfolio_id=pf.id) for pf in portfolios
@@ -266,7 +266,7 @@ class DashboardQueryService:
         if manager_id:
             allowed_property_ids = await self._property_ids_for_manager(manager_id)
             filtered = []
-            for t, leases in zip(tenants, all_lease_lists):
+            for t, leases in zip(tenants, all_lease_lists, strict=True):
                 if any(le.property_id in allowed_property_ids for le in leases):
                     filtered.append(t)
             tenants = filtered
@@ -278,6 +278,7 @@ class DashboardQueryService:
         for t, leases in zip(
             (await self._ps.list_tenants()),
             all_lease_lists,
+            strict=True,
         ):
             if leases:
                 le = leases[0]
@@ -290,8 +291,8 @@ class DashboardQueryService:
             asyncio.gather(*[self._ps.get_property(pid) for pid in prop_ids]),
             asyncio.gather(*[self._ps.get_unit(uid) for uid in unit_ids]),
         )
-        prop_map = {pid: p for pid, p in zip(prop_ids, props_list) if p}
-        unit_map = {uid: u for uid, u in zip(unit_ids, units_list) if u}
+        prop_map = {pid: p for pid, p in zip(prop_ids, props_list, strict=True) if p}
+        unit_map = {uid: u for uid, u in zip(unit_ids, units_list, strict=True) if u}
 
         for tid, (pid, uid) in lease_by_tenant.items():
             prop = prop_map.get(pid)
@@ -383,9 +384,9 @@ class DashboardQueryService:
             asyncio.gather(*[self._ps.get_property(pid) for pid in prop_ids]),
             asyncio.gather(*[self._ps.get_unit(uid) for uid in unit_ids]),
         )
-        tenant_map = {tid: t for tid, t in zip(tenant_ids, tenants_res) if t}
-        prop_map = {pid: p for pid, p in zip(prop_ids, props_res) if p}
-        unit_map = {uid: u for uid, u in zip(unit_ids, units_res) if u}
+        tenant_map = {tid: t for tid, t in zip(tenant_ids, tenants_res, strict=True) if t}
+        prop_map = {pid: p for pid, p in zip(prop_ids, props_res, strict=True) if p}
+        unit_map = {uid: u for uid, u in zip(unit_ids, units_res, strict=True) if u}
 
         items: list[ExpiringLease] = []
         mtm_count = 0
@@ -530,7 +531,7 @@ class DashboardQueryService:
         props = await asyncio.gather(*[
             self._ps.get_property(pid) for pid in unique_prop_ids
         ])
-        prop_map = {pid: p for pid, p in zip(unique_prop_ids, props) if p}
+        prop_map = {pid: p for pid, p in zip(unique_prop_ids, props, strict=True) if p}
 
         vacant_units: list[VacantUnit] = []
         for u in filtered_units:

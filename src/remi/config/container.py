@@ -19,8 +19,8 @@ from remi.knowledge.context_builder import ContextBuilder
 from remi.knowledge.entailment.composition import CompositionProducer
 from remi.knowledge.graduation import HypothesisGraduator
 from remi.knowledge.graph_retriever import GraphRetriever
-from remi.knowledge.ontology_bootstrap import bootstrap_knowledge_graph, load_domain_yaml
-from remi.knowledge.ontology_bridge import BridgedKnowledgeGraph, CoreTypeBindings
+from remi.knowledge.ontology.bootstrap import bootstrap_knowledge_graph, load_domain_yaml
+from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph, CoreTypeBindings
 from remi.knowledge.pattern_detector import PatternDetector
 from remi.knowledge.statistical import StatisticalProducer
 from remi.llm.factory import LLMProviderFactory
@@ -170,8 +170,21 @@ class Container:
             knowledge_store=self.knowledge_store,
         )
 
+        from pathlib import Path
+
+        from remi.stores.snapshots import InMemorySnapshotStore, JsonLinesSnapshotStore
+
+        snapshots_path_str = self.settings.storage.snapshots_path
+        if snapshots_path_str:
+            self.snapshot_store: InMemorySnapshotStore | JsonLinesSnapshotStore = (
+                JsonLinesSnapshotStore(Path(snapshots_path_str))
+            )
+        else:
+            self.snapshot_store = InMemorySnapshotStore()
+
         self.snapshot_service = SnapshotService(
             property_store=self.property_store,
+            snapshot_store=self.snapshot_store,
         )
 
         self.property_query = PropertyQueryService(property_store=self.property_store)

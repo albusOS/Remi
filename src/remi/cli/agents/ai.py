@@ -1,8 +1,8 @@
 """remi ai — unified CLI for REMI agent interactions.
 
 Supports single-shot questions (default) and interactive multi-turn chat
-via --interactive. Mode selects the agent behaviour: "ask" for fast Q&A
-with structured data tools, "agent" for autonomous analysis with sandbox.
+via --interactive. Mode selects the agent behaviour: "ask" for fast Q&A,
+"research" for deep autonomous analysis via the researcher agent.
 """
 
 from __future__ import annotations
@@ -21,23 +21,35 @@ cmd = typer.Typer(name="ai", help="Interact with REMI AI agents.", no_args_is_he
 def ai(
     question: str = typer.Argument(None, help="Natural language question (omit for interactive)"),
     agent: str = typer.Option("director", "--agent", "-a", help="Agent to use"),
-    mode: str = typer.Option("ask", "--mode", "-m", help="Mode: ask (fast Q&A) or agent (deep analysis)"),
-    interactive: bool = typer.Option(False, "--interactive", "-i", help="Start interactive chat session"),
+    mode: str = typer.Option(
+        "ask", "--mode", "-m",
+        help="Mode: ask (fast Q&A), agent, or research (deep analysis)",
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Start interactive chat session",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show LLM output live"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output (interactive only)"),
 ) -> None:
     """Ask REMI a question or start an interactive chat session."""
-    if mode not in ("ask", "agent"):
-        typer.echo(f"Invalid mode: {mode}. Use 'ask' or 'agent'.", err=True)
+    if mode not in ("ask", "agent", "research"):
+        typer.echo(f"Invalid mode: {mode}. Use 'ask', 'agent', or 'research'.", err=True)
         raise typer.Exit(1)
+
+    # "research" routes to the researcher agent in agent mode
+    run_agent = agent
+    run_mode = mode
+    if mode == "research":
+        run_agent = "researcher"
+        run_mode = "agent"
 
     if interactive or question is None:
         if question is not None:
             typer.echo("Ignoring positional question in interactive mode.", err=True)
-        asyncio.run(_run_interactive(agent, mode, verbose=verbose, quiet=quiet))
+        asyncio.run(_run_interactive(run_agent, run_mode, verbose=verbose, quiet=quiet))
     else:
-        asyncio.run(_run_single(agent, question, mode, use_json(json_output), verbose))
+        asyncio.run(_run_single(run_agent, question, run_mode, use_json(json_output), verbose))
 
 
 async def _run_single(

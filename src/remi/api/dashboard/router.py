@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from remi.api.dashboard.schemas import (
     AutoAssignResponse,
     CaptureResponse,
+    MetricsHistoryResponse,
     NeedsManagerResponse,
     SnapshotsResponse,
     UnassignedProperty,
@@ -107,6 +108,42 @@ async def capture_snapshot(
 ) -> CaptureResponse:
     batch = await snap.capture()
     return CaptureResponse(captured=len(batch))
+
+
+@router.get("/metrics-history", response_model=MetricsHistoryResponse)
+async def metrics_history(
+    entity_type: str = Query(default="manager", description="'manager' or 'property'"),
+    entity_id: str | None = Query(
+        default=None, description="Filter to a specific manager_id or property_id",
+    ),
+    manager_id: str | None = Query(
+        default=None, description="Filter property snapshots by manager",
+    ),
+    days: int = Query(default=90, ge=1, le=3650, description="Look back this many days"),
+    snap: SnapshotService = Depends(get_snapshot_service),
+) -> MetricsHistoryResponse:
+    from datetime import UTC, datetime, timedelta
+
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    if entity_type == "property":
+        rows = snap.get_property_history(
+            property_id=entity_id,
+            manager_id=manager_id,
+        )
+        # Filter by since in-memory (store already returned all)
+        rows = [r for r in rows if r.timestamp >= since]
+        dumped = [r.model_dump() for r in rows]
+    else:
+        rows_m = snap.get_history(manager_id=entity_id)
+        rows_m = [r for r in rows_m if r.timestamp >= since]
+        dumped = [r.model_dump() for r in rows_m]
+
+    return MetricsHistoryResponse(
+        entity_type=entity_type,
+        total=len(dumped),
+        snapshots=dumped,
+    )
 
 
 @router.post("/auto-assign", response_model=AutoAssignResponse)

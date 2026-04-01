@@ -7,6 +7,7 @@ Tracks running tasks per session for server-side cancellation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import structlog
@@ -19,7 +20,6 @@ from remi.api.realtime.jsonrpc import (
     JsonRpcRequest,
 )
 from remi.models.chat import ChatSessionStore
-from remi.observability.events import Event
 from remi.shared.errors import SessionNotFoundError, ValidationError
 
 logger = structlog.get_logger("remi.chat_runner")
@@ -110,9 +110,9 @@ def build_chat_dispatcher(
     async def chat_send(req: JsonRpcRequest) -> dict[str, Any]:
         session_id = req.params.get("session_id")
         message_text = req.params.get("message", "")
-        mode = req.params.get("mode", "agent")
-        if mode not in ("ask", "agent"):
-            mode = "agent"
+        mode = req.params.get("mode", "ask")
+        if mode not in ("ask", "agent", "research"):
+            mode = "ask"
 
         req_provider = req.params.get("provider")
         req_model = req.params.get("model")
@@ -156,15 +156,22 @@ def build_chat_dispatcher(
                         ),
                         timeout=10.0,
                     )
-                except (asyncio.TimeoutError, Exception):
+                except (TimeoutError, Exception):
                     log.debug("notification_send_failed", event_type=event_type)
+
+            # "research" routes to the researcher agent in agent mode
+            run_agent_name = session.agent
+            run_mode = mode
+            if mode == "research":
+                run_agent_name = "researcher"
+                run_mode = "agent"
 
             async def _run_agent() -> str:
                 return await chat_agent.run_chat_agent(
-                    session.agent,
+                    run_agent_name,
                     session.thread,
                     on_event,
-                    mode=mode,
+                    mode=run_mode,
                     sandbox_session_id=f"chat-{session_id}",
                     provider=provider,
                     model=model,
@@ -179,7 +186,7 @@ def build_chat_dispatcher(
                 answer = await _run_agent()
             except asyncio.CancelledError:
                 log.info("chat_send_cancelled", session_id=session_id)
-                try:
+                with contextlib.suppress(Exception):
                     await send_notification(
                         ws,
                         "chat.done",
@@ -189,8 +196,6 @@ def build_chat_dispatcher(
                             "cancelled": True,
                         },
                     )
-                except Exception:
-                    pass
                 raise
             except Exception as exc:
                 log.error("chat_send_error", error=str(exc), error_type=type(exc).__name__)

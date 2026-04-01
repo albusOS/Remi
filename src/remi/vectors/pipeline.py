@@ -196,7 +196,8 @@ class EmbeddingPipeline:
                 status_parts.append(f"{vacancy_count} vacancies")
             if delinquent_count:
                 status_parts.append(
-                    f"{delinquent_count} delinquent tenants (balance {_decimal_str(delinquent_balance)})"
+                    f"{delinquent_count} delinquent tenants"
+                    f" (balance {_decimal_str(delinquent_balance)})"
                 )
             if open_maintenance:
                 status_parts.append(f"{open_maintenance} open maintenance requests")

@@ -18,13 +18,13 @@ export function AskView() {
   const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null);
   const [provider, setProvider] = useState("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
-  const [mode, setMode] = useState<"ask" | "agent">("ask");
+  const [mode, setMode] = useState<"ask" | "research">("ask");
   const [managers, setManagers] = useState<ManagerListItem[]>([]);
   const [managerId, setManagerId] = useState("");
   const [showWorkDetails, setShowWorkDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const lastSendRef = useRef<{ text: string; mode: "ask" | "agent" } | null>(null);
+  const lastSendRef = useRef<{ text: string; mode: "ask" | "research" } | null>(null);
 
   useEffect(() => {
     api.listAgents().then((list) => {
@@ -56,7 +56,7 @@ export function AskView() {
     stopGenerating,
   } = useSessions(agent);
 
-  const handleSend = (text: string, sendMode?: "ask" | "agent") => {
+  const handleSend = (text: string, sendMode?: "ask" | "research") => {
     const m = sendMode ?? mode;
     lastSendRef.current = { text, mode: m };
     send(text, m, { provider, model, managerId: managerId || undefined });

@@ -17,6 +17,7 @@ from remi.cli.properties import (
     tenants_cmd,
     units_cmd,
 )
+from remi.cli.research import cmd as research_cmd
 from remi.cli.seed import cmd as seed_cmd
 from remi.cli.trace import cmd as trace_cmd
 
@@ -28,6 +29,7 @@ cli = typer.Typer(
 
 # Agent commands
 cli.add_typer(ai_cmd)
+cli.add_typer(research_cmd)
 
 # Property management commands
 cli.add_typer(portfolio_cmd)

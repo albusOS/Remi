@@ -19,23 +19,47 @@ from typing import Any
 
 import typer
 
-from remi.cli.shared import get_container_async, json_out, use_json
+from remi.cli.shared import get_container_async, json_out
 
-cmd = typer.Typer(name="bench", help="Benchmark agent speed and intent routing.", no_args_is_help=False)
+cmd = typer.Typer(
+    name="bench",
+    help="Benchmark agent speed and intent routing.",
+    no_args_is_help=False,
+)
 
 BENCH_QUERIES: list[dict[str, str]] = [
-    {"label": "greeting",    "expected_intent": "conversation", "query": "hi, what can you do?"},
-    {"label": "lookup",      "expected_intent": "lookup",       "query": "how many vacant units are there?"},
-    {"label": "analysis",    "expected_intent": "analysis",     "query": "compare delinquency rates across all managers"},
-    {"label": "action",      "expected_intent": "action",       "query": "create action items for the manager with the worst delinquency"},
-    {"label": "deep_dive",   "expected_intent": "deep_dive",    "query": "build a comprehensive delinquency trend report with breakdown by manager"},
+    {
+        "label": "greeting",
+        "expected_intent": "conversation",
+        "query": "hi, what can you do?",
+    },
+    {
+        "label": "lookup",
+        "expected_intent": "lookup",
+        "query": "how many vacant units are there?",
+    },
+    {
+        "label": "analysis",
+        "expected_intent": "analysis",
+        "query": "compare delinquency rates across all managers",
+    },
+    {
+        "label": "action",
+        "expected_intent": "action",
+        "query": "create action items for the manager with the worst delinquency",
+    },
+    {
+        "label": "analysis_2",
+        "expected_intent": "analysis",
+        "query": "build a comprehensive delinquency breakdown by manager",
+    },
 ]
 
 
 @cmd.callback(invoke_without_command=True)
 def bench(
     agent: str = typer.Option("director", "--agent", "-a", help="Agent to benchmark"),
-    mode: str = typer.Option("agent", "--mode", "-m", help="Mode: ask or agent"),
+    mode: str = typer.Option("ask", "--mode", "-m", help="Mode: ask, agent, or research"),
     runs: int = typer.Option(1, "--runs", "-n", help="Runs per query (average)"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output JSON"),
     queries: str = typer.Option("all", "--queries", "-q", help="Comma-separated labels or 'all'"),
@@ -58,13 +82,16 @@ async def _bench(
 
     selected = BENCH_QUERIES
     if query_filter != "all":
-        labels = {l.strip() for l in query_filter.split(",")}
+        labels = {lbl.strip() for lbl in query_filter.split(",")}
         selected = [q for q in BENCH_QUERIES if q["label"] in labels]
         if not selected:
             typer.echo(f"No queries matched filter: {query_filter}", err=True)
             raise typer.Exit(1)
 
-    console.print(f"\n[bold]REMI Agent Benchmark[/bold]  agent={agent_name}  mode={mode}  runs={runs}")
+    console.print(
+        f"\n[bold]REMI Agent Benchmark[/bold]"
+        f"  agent={agent_name}  mode={mode}  runs={runs}",
+    )
     console.print("[dim]Bootstrapping container…[/dim]")
 
     from remi.observability.logging import configure_logging
@@ -101,18 +128,20 @@ async def _bench(
                 "trace_id": None,
             }
 
-            async def on_event(event_type: str, data: dict[str, Any]) -> None:
+            async def on_event(
+                event_type: str, data: dict[str, Any], _c: dict[str, Any] = collected,
+            ) -> None:
                 if event_type == "tool_call":
                     tool_name = data.get("tool", "?")
-                    collected["tools"].append(tool_name)
+                    _c["tools"].append(tool_name)
                     console.print(f"  [yellow]▶ {tool_name}[/yellow]")
                 elif event_type == "done":
-                    collected["intent"] = data.get("intent")
-                    collected["usage"] = data.get("usage")
-                    collected["latency_ms"] = data.get("latency_ms")
-                    collected["cost"] = data.get("cost")
-                    collected["model"] = data.get("model")
-                    collected["trace_id"] = data.get("trace_id")
+                    _c["intent"] = data.get("intent")
+                    _c["usage"] = data.get("usage")
+                    _c["latency_ms"] = data.get("latency_ms")
+                    _c["cost"] = data.get("cost")
+                    _c["model"] = data.get("model")
+                    _c["trace_id"] = data.get("trace_id")
 
             t0 = time.monotonic()
             try:
@@ -226,7 +255,11 @@ async def _bench(
         error = r.get("error")
 
         if error:
-            table.add_row(r["label"], "[red]error[/red]", "✗", _fmt_ms(r.get("wall_ms", 0)), "—", "—", "—", f"[red]{error[:40]}[/red]")
+            table.add_row(
+                r["label"], "[red]error[/red]", "✗",
+                _fmt_ms(r.get("wall_ms", 0)),
+                "—", "—", "—", f"[red]{error[:40]}[/red]",
+            )
         else:
             table.add_row(r["label"], intent, match, latency, tokens, cost, tools, model)
 
