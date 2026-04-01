@@ -16,6 +16,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import structlog
+
+_log = structlog.get_logger(__name__)
+
 from remi.models.memory import Entity, KnowledgeStore, Relationship
 from remi.models.ontology import (
     KnowledgeGraph,
@@ -23,6 +27,7 @@ from remi.models.ontology import (
     LinkTypeDef,
     ObjectTypeDef,
 )
+from remi.models.properties import PropertyStore
 
 _NS = "ontology"
 
@@ -134,6 +139,9 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
         )
         await self._ks.put_entity(entity)
 
+    async def delete_object(self, type_name: str, object_id: str) -> bool:
+        return await self._ks.delete_entity(_NS, object_id)
+
     # -- Links ----------------------------------------------------------------
 
     async def get_links(
@@ -221,7 +229,8 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
             if val is not None:
                 try:
                     values.append(Decimal(str(val)))
-                except Exception:
+                except (TypeError, ValueError, ArithmeticError):
+                    _log.debug("aggregate_value_conversion_skipped", field=field, value=val)
                     continue
 
         if not values:
@@ -305,3 +314,22 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
 
 # Backward compatibility
 BridgedOntologyStore = BridgedKnowledgeGraph
+
+
+def build_knowledge_graph(
+    property_store: PropertyStore,
+    knowledge_store: KnowledgeStore,
+) -> BridgedKnowledgeGraph:
+    """Factory: wire REMI's PropertyStore methods into a BridgedKnowledgeGraph."""
+    ps = property_store
+    core_types: CoreTypeBindings = {
+        "PropertyManager": (ps.get_manager, ps.list_managers),
+        "Portfolio": (ps.get_portfolio, ps.list_portfolios),
+        "Property": (ps.get_property, ps.list_properties),
+        "Unit": (ps.get_unit, ps.list_units),
+        "Lease": (ps.get_lease, ps.list_leases),
+        "Tenant": (ps.get_tenant, ps.list_tenants),
+        "MaintenanceRequest": (ps.get_maintenance_request, ps.list_maintenance_requests),
+        "ActionItem": (ps.get_action_item, ps.list_action_items),
+    }
+    return BridgedKnowledgeGraph(knowledge_store, core_types=core_types)

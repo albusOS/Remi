@@ -1,7 +1,5 @@
-"use client";
-
-import { PerformanceView } from "@/components/performance/PerformanceView";
+import { redirect } from "next/navigation";
 
 export default function PerformancePage() {
-  return <PerformanceView />;
+  redirect("/");
 }

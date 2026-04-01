@@ -1,7 +1,8 @@
-"""Bootstrap the knowledge graph — register core types, link types, and seed
-operational PM knowledge from domain.yaml (TBox + ABox seeds).
+"""REMI knowledge graph schema — core types, link types, and domain.yaml seeding.
 
-Called once during container initialization.
+Declares the REMI-specific object types (PropertyManager, Unit, Lease, …),
+structural and operational link types, and provides ``seed_knowledge_graph``
+to register them into a KnowledgeGraph instance.
 """
 
 from __future__ import annotations
@@ -350,11 +351,11 @@ def load_domain_yaml(path: Path | None = None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Bootstrap entry point
+# Schema seeding entry point
 # ---------------------------------------------------------------------------
 
 
-async def bootstrap_knowledge_graph(
+async def seed_knowledge_graph(
     store: KnowledgeGraph,
     domain_yaml_path: Path | None = None,
 ) -> None:
@@ -399,8 +400,9 @@ async def bootstrap_knowledge_graph(
         )
 
 
-# Backward compatibility
-bootstrap_ontology = bootstrap_knowledge_graph
+# COMPAT: old names — remove after all call sites migrate
+bootstrap_knowledge_graph = seed_knowledge_graph
+bootstrap_ontology = seed_knowledge_graph
 
 
 async def _seed_workflow(

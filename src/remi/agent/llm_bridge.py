@@ -38,10 +38,16 @@ def build_llm_request(
     cfg: AgentConfig,
     thread: list[Message],
     tool_defs: list[ToolDefinition] | None,
+    *,
+    model_override: str | None = None,
 ) -> LLMRequest:
-    """Build a typed LLM request from config and thread state."""
+    """Build a typed LLM request from config and thread state.
+
+    *model_override* swaps the model for this request only (used by
+    the agent loop to route tool-selection turns to a cheaper model).
+    """
     return LLMRequest(
-        model=cfg.model or "",
+        model=model_override or cfg.model or "",
         messages=thread,
         temperature=cfg.temperature,
         max_tokens=cfg.max_tokens,
@@ -92,12 +98,13 @@ async def stream_llm_response(
             elif chunk.type == "done":
                 usage = chunk.usage
 
+    effective_model = request.model or cfg.model
     if tracer is not None:
         async with tracer.span(
             SpanKind.LLM_CALL,
-            f"{cfg.provider}/{cfg.model}",
+            f"{cfg.provider}/{effective_model}",
             provider=cfg.provider,
-            model=cfg.model,
+            model=effective_model,
             iteration=iteration,
             message_count=len(request.messages),
             temperature=cfg.temperature,

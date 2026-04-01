@@ -1,4 +1,8 @@
-"""Merged models module."""
+"""Vector subsystem ports — ABCs and DTOs for embeddings, vector storage, and search.
+
+All interfaces and data types for the embedding/retrieval pipeline live here.
+Adapter implementations are in sibling modules (``embedder``, ``store``).
+"""
 
 from __future__ import annotations
 

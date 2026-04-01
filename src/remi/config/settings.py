@@ -97,6 +97,7 @@ class ApiSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: list[str] = Field(default_factory=list)
+    capture_interval_minutes: int = 60
 
 
 class LLMSettings(BaseModel):
@@ -119,17 +120,10 @@ class EmbeddingsSettings(BaseModel):
     dimensions: int = 1536
 
 
-class StorageSettings(BaseModel):
-    """Paths for durable on-disk storage (separate from the database backend)."""
-
-    snapshots_path: str = "data/snapshots.jsonl"
-
-
 class RemiSettings(BaseModel):
     environment: str = "development"
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
     state_store: StateStoreSettings = Field(default_factory=StateStoreSettings)
-    storage: StorageSettings = Field(default_factory=StorageSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)

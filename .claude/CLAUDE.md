@@ -18,11 +18,39 @@ uv run remi trace list               # recent traces
 - Always use `uv add` to add dependencies — never `pip install`
 - Never reference `.venv/` paths directly
 
-## Error Handling
+## Error Handling — Zero Silent Swallows
 
-- Never silently swallow errors — let them raise
-- No bare `except`, no `except Exception: pass`, no returning `None` to mask failures
-- Use `structlog` for logging, not `print` or `logging` directly
+Every exception must either **propagate** or be **logged at warning+ with
+`exc_info=True`**. No other option exists.
+
+**Banned patterns** (will be rejected in review):
+- `except Exception: pass` / `except Exception: continue`
+- `except SomeError: return None` without a log line
+- `except Exception as e: return {"error": str(e)}` without logging
+- Bare `except:` — always name the exception type
+- Catching broad `Exception` when a narrower type fits (`ValueError`, `TypeError`, `KeyError`, etc.)
+
+**Acceptable patterns:**
+- `except ImportError` for optional-dependency guards (must raise or feature-flag)
+- `except (KeyboardInterrupt, EOFError)` in CLI interactive loops
+- `except Exception` that logs at `warning`/`error` with `exc_info=True` **and** surfaces the failure to the caller (error count, warnings list, or re-raise)
+
+**Batch/pipeline catch-and-continue** must:
+1. Log at `warning` with `exc_info=True`
+2. Record the failure in a result object the caller can inspect
+
+Use `structlog` for all logging, not `print` or `logging` directly.
+
+## Type Safety — No `Any`, No Untyped `dict`
+
+**Banned in new code:**
+- `dict[str, Any]` as a function return or parameter — use a Pydantic model or TypedDict
+- `-> Any` return annotations — be explicit
+- `list[dict]` — model the items
+- Returning `None` to mean "something failed" — raise an error instead
+
+**When touching existing `Any`/`dict` code**, narrow the type if feasible.
+At minimum, don't introduce new ones.
 
 ## Tests
 

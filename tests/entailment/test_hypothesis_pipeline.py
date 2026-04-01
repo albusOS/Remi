@@ -61,7 +61,7 @@ def hypothesis_store() -> InMemoryHypothesisStore:
 
 @pytest.fixture
 def domain() -> DomainRulebook:
-    from remi.knowledge.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.schema import load_domain_yaml
 
     return DomainRulebook.from_yaml(load_domain_yaml())
 
@@ -97,19 +97,23 @@ async def test_hypothesis_store_put_and_get(
 async def test_hypothesis_store_list_filters(
     hypothesis_store: InMemoryHypothesisStore,
 ) -> None:
-    for i, kind in enumerate([
-        HypothesisKind.SIGNAL_DEFINITION,
-        HypothesisKind.CAUSAL_CHAIN,
-        HypothesisKind.ANOMALY_PATTERN,
-    ]):
-        await hypothesis_store.put(Hypothesis(
-            hypothesis_id=f"hyp-{i}",
-            kind=kind,
-            title=f"Hypothesis {i}",
-            description="test",
-            confidence=0.5 + i * 0.1,
-            proposed_by="test",
-        ))
+    for i, kind in enumerate(
+        [
+            HypothesisKind.SIGNAL_DEFINITION,
+            HypothesisKind.CAUSAL_CHAIN,
+            HypothesisKind.ANOMALY_PATTERN,
+        ]
+    ):
+        await hypothesis_store.put(
+            Hypothesis(
+                hypothesis_id=f"hyp-{i}",
+                kind=kind,
+                title=f"Hypothesis {i}",
+                description="test",
+                confidence=0.5 + i * 0.1,
+                proposed_by="test",
+            )
+        )
 
     all_hyps = await hypothesis_store.list_hypotheses()
     assert len(all_hyps) == 3
@@ -128,14 +132,16 @@ async def test_hypothesis_store_list_filters(
 async def test_hypothesis_store_update_status(
     hypothesis_store: InMemoryHypothesisStore,
 ) -> None:
-    await hypothesis_store.put(Hypothesis(
-        hypothesis_id="hyp-1",
-        kind=HypothesisKind.SIGNAL_DEFINITION,
-        title="Test",
-        description="test",
-        confidence=0.8,
-        proposed_by="test",
-    ))
+    await hypothesis_store.put(
+        Hypothesis(
+            hypothesis_id="hyp-1",
+            kind=HypothesisKind.SIGNAL_DEFINITION,
+            title="Test",
+            description="test",
+            confidence=0.8,
+            proposed_by="test",
+        )
+    )
 
     updated = await hypothesis_store.update_status(
         "hyp-1",
@@ -153,7 +159,8 @@ async def test_hypothesis_store_update_nonexistent(
     hypothesis_store: InMemoryHypothesisStore,
 ) -> None:
     result = await hypothesis_store.update_status(
-        "nonexistent", HypothesisStatus.CONFIRMED,
+        "nonexistent",
+        HypothesisStatus.CONFIRMED,
     )
     assert result is None
 
@@ -247,32 +254,35 @@ async def test_pattern_detector_finds_outlier_threshold(
     await _bootstrap(knowledge_graph)
 
     for i in range(10):
-        await property_store.upsert_unit(Unit(
-            id=f"u-{i}",
-            property_id="prop-1",
-            unit_number=str(100 + i),
-            status=UnitStatus.OCCUPIED,
-            days_vacant=5,
-        ))
+        await property_store.upsert_unit(
+            Unit(
+                id=f"u-{i}",
+                property_id="prop-1",
+                unit_number=str(100 + i),
+                status=UnitStatus.OCCUPIED,
+                days_vacant=5,
+            )
+        )
 
-    await property_store.upsert_unit(Unit(
-        id="u-outlier",
-        property_id="prop-1",
-        unit_number="999",
-        status=UnitStatus.VACANT,
-        days_vacant=200,
-    ))
+    await property_store.upsert_unit(
+        Unit(
+            id="u-outlier",
+            property_id="prop-1",
+            unit_number="999",
+            status=UnitStatus.VACANT,
+            days_vacant=200,
+        )
+    )
 
     detector = PatternDetector(
-        knowledge_graph, hypothesis_store,
-        zscore_threshold=2.0, min_sample_size=5,
+        knowledge_graph,
+        hypothesis_store,
+        zscore_threshold=2.0,
+        min_sample_size=5,
     )
     result = await detector.run()
 
-    threshold_hyps = [
-        h for h in result.hypotheses
-        if h.kind == HypothesisKind.SIGNAL_DEFINITION
-    ]
+    threshold_hyps = [h for h in result.hypotheses if h.kind == HypothesisKind.SIGNAL_DEFINITION]
     assert len(threshold_hyps) >= 1, (
         f"Expected at least 1 threshold hypothesis, "
         f"got {result.proposed} total: "
@@ -297,29 +307,32 @@ async def test_pattern_detector_finds_concentration(
     await _bootstrap(knowledge_graph)
 
     for i in range(9):
-        await property_store.upsert_unit(Unit(
-            id=f"u-{i}",
+        await property_store.upsert_unit(
+            Unit(
+                id=f"u-{i}",
+                property_id="prop-1",
+                unit_number=str(100 + i),
+                status=UnitStatus.OCCUPIED,
+            )
+        )
+    await property_store.upsert_unit(
+        Unit(
+            id="u-9",
             property_id="prop-1",
-            unit_number=str(100 + i),
-            status=UnitStatus.OCCUPIED,
-        ))
-    await property_store.upsert_unit(Unit(
-        id="u-9",
-        property_id="prop-1",
-        unit_number="109",
-        status=UnitStatus.VACANT,
-    ))
+            unit_number="109",
+            status=UnitStatus.VACANT,
+        )
+    )
 
     detector = PatternDetector(
-        knowledge_graph, hypothesis_store,
-        concentration_threshold=0.80, min_sample_size=5,
+        knowledge_graph,
+        hypothesis_store,
+        concentration_threshold=0.80,
+        min_sample_size=5,
     )
     result = await detector.run()
 
-    concentration_hyps = [
-        h for h in result.hypotheses
-        if h.kind == HypothesisKind.ANOMALY_PATTERN
-    ]
+    concentration_hyps = [h for h in result.hypotheses if h.kind == HypothesisKind.ANOMALY_PATTERN]
     assert len(concentration_hyps) >= 1
 
 
@@ -356,11 +369,15 @@ async def test_graduate_signal_definition(
     )
     await hypothesis_store.put(hyp)
     await hypothesis_store.update_status(
-        "hyp-grad-1", HypothesisStatus.CONFIRMED, reviewed_by="test",
+        "hyp-grad-1",
+        HypothesisStatus.CONFIRMED,
+        reviewed_by="test",
     )
 
     graduator = HypothesisGraduator(
-        mutable_domain, knowledge_graph, hypothesis_store,
+        mutable_domain,
+        knowledge_graph,
+        hypothesis_store,
     )
     result = await graduator.graduate("hyp-grad-1")
 
@@ -397,11 +414,14 @@ async def test_graduate_causal_chain(
     )
     await hypothesis_store.put(hyp)
     await hypothesis_store.update_status(
-        "hyp-grad-2", HypothesisStatus.CONFIRMED,
+        "hyp-grad-2",
+        HypothesisStatus.CONFIRMED,
     )
 
     graduator = HypothesisGraduator(
-        mutable_domain, knowledge_graph, hypothesis_store,
+        mutable_domain,
+        knowledge_graph,
+        hypothesis_store,
     )
     result = await graduator.graduate("hyp-grad-2")
 
@@ -425,7 +445,9 @@ async def test_graduate_rejects_unconfirmed(
     await hypothesis_store.put(hyp)
 
     graduator = HypothesisGraduator(
-        mutable_domain, knowledge_graph, hypothesis_store,
+        mutable_domain,
+        knowledge_graph,
+        hypothesis_store,
     )
     result = await graduator.graduate("hyp-unconfirmed")
 
@@ -451,11 +473,14 @@ async def test_graduate_all_confirmed(
         )
         await hypothesis_store.put(hyp)
         await hypothesis_store.update_status(
-            f"hyp-batch-{i}", HypothesisStatus.CONFIRMED,
+            f"hyp-batch-{i}",
+            HypothesisStatus.CONFIRMED,
         )
 
     graduator = HypothesisGraduator(
-        mutable_domain, knowledge_graph, hypothesis_store,
+        mutable_domain,
+        knowledge_graph,
+        hypothesis_store,
     )
     results = await graduator.graduate_all_confirmed()
     graduated = [r for r in results if r.graduated]
@@ -475,24 +500,30 @@ async def test_full_hypothesis_lifecycle(
     await _bootstrap(knowledge_graph)
 
     for i in range(10):
-        await property_store.upsert_unit(Unit(
-            id=f"u-{i}",
+        await property_store.upsert_unit(
+            Unit(
+                id=f"u-{i}",
+                property_id="prop-1",
+                unit_number=str(100 + i),
+                status=UnitStatus.OCCUPIED,
+                days_vacant=5,
+            )
+        )
+    await property_store.upsert_unit(
+        Unit(
+            id="u-extreme",
             property_id="prop-1",
-            unit_number=str(100 + i),
-            status=UnitStatus.OCCUPIED,
-            days_vacant=5,
-        ))
-    await property_store.upsert_unit(Unit(
-        id="u-extreme",
-        property_id="prop-1",
-        unit_number="999",
-        status=UnitStatus.VACANT,
-        days_vacant=300,
-    ))
+            unit_number="999",
+            status=UnitStatus.VACANT,
+            days_vacant=300,
+        )
+    )
 
     detector = PatternDetector(
-        knowledge_graph, hypothesis_store,
-        zscore_threshold=2.0, min_sample_size=5,
+        knowledge_graph,
+        hypothesis_store,
+        zscore_threshold=2.0,
+        min_sample_size=5,
     )
     detect_result = await detector.run()
     assert detect_result.proposed >= 1
@@ -502,21 +533,25 @@ async def test_full_hypothesis_lifecycle(
 
     for hyp in proposed:
         await hypothesis_store.update_status(
-            hyp.hypothesis_id, HypothesisStatus.CONFIRMED,
+            hyp.hypothesis_id,
+            HypothesisStatus.CONFIRMED,
             reviewed_by="test_suite",
         )
 
     initial_signals = len(mutable_domain.all_signal_names())
 
     graduator = HypothesisGraduator(
-        mutable_domain, knowledge_graph, hypothesis_store,
+        mutable_domain,
+        knowledge_graph,
+        hypothesis_store,
     )
     grad_results = await graduator.graduate_all_confirmed()
     graduated = [r for r in grad_results if r.graduated]
     assert len(graduated) >= 1
 
     signal_defs_created = [
-        r for r in graduated
+        r
+        for r in graduated
         if any(e.get("type") == "signal_definition" for e in r.tbox_entries_created)
     ]
     if signal_defs_created:
@@ -527,6 +562,6 @@ async def test_full_hypothesis_lifecycle(
 
 
 async def _bootstrap(knowledge_graph: BridgedKnowledgeGraph) -> None:
-    from remi.knowledge.ontology.bootstrap import bootstrap_knowledge_graph
+    from remi.knowledge.ontology.schema import seed_knowledge_graph
 
-    await bootstrap_knowledge_graph(knowledge_graph)
+    await seed_knowledge_graph(knowledge_graph)

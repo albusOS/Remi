@@ -7,19 +7,73 @@ Anthropic's wire format internally.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from remi.llm.ports import LLMProvider, LLMResponse, StreamChunk, TokenUsage, ToolCallRequest
+from remi.llm.ports import (
+    LLMProvider,
+    LLMResponse,
+    ModelCapabilities,
+    ModelPricing,
+    ProviderConfig,
+    StreamChunk,
+    TokenUsage,
+    ToolCallRequest,
+)
 from remi.models.chat import Message
 from remi.models.tools import ToolDefinition
+from remi.vectors.tokens import CHARS_PER_TOKEN
+
+_MODEL_REGISTRY: dict[str, ModelCapabilities] = {
+    "claude-opus-4-20250514": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=32_000,
+        supports_vision=True,
+        pricing=ModelPricing(5.0, 25.0),
+    ),
+    "claude-opus-4-6": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=32_000,
+        supports_vision=True,
+        pricing=ModelPricing(5.0, 25.0),
+    ),
+    "claude-sonnet-4-20250514": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=16_000,
+        supports_vision=True,
+        pricing=ModelPricing(3.0, 15.0),
+    ),
+    "claude-sonnet-4-6": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=16_000,
+        supports_vision=True,
+        pricing=ModelPricing(3.0, 15.0),
+    ),
+    "claude-sonnet-4-5-20250929": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=16_000,
+        supports_vision=True,
+        pricing=ModelPricing(3.0, 15.0),
+    ),
+    "claude-haiku-4-5-20251001": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=8_192,
+        supports_vision=True,
+        pricing=ModelPricing(1.0, 5.0),
+    ),
+}
+
+_DEFAULT_CAPABILITIES = ModelCapabilities(
+    context_window=200_000,
+    max_output_tokens=8_192,
+    supports_vision=True,
+)
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    def __init__(self, config: ProviderConfig) -> None:
+        self._config = config
         self._client: Any = None
 
     # -- wire-format translation (REMI → Anthropic) --------------------------
@@ -92,13 +146,12 @@ class AnthropicProvider(LLMProvider):
 
     def _get_client(self) -> Any:
         if self._client is None:
-            try:
-                import anthropic
-            except ImportError as exc:
-                raise RuntimeError(
-                    "Anthropic provider requires the 'anthropic' package: pip install anthropic"
-                ) from exc
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
+            import anthropic
+
+            kwargs: dict[str, Any] = {"api_key": self._config.api_key}
+            if self._config.base_url:
+                kwargs["base_url"] = self._config.base_url
+            self._client = anthropic.AsyncAnthropic(**kwargs)
         return self._client
 
     # -- prompt caching helpers -----------------------------------------------
@@ -273,3 +326,42 @@ class AnthropicProvider(LLMProvider):
                 cache_creation_tokens=cache_creation,
             ),
         )
+
+    def count_tokens(
+        self,
+        messages: list[Message],
+        *,
+        model: str,
+        tools: list[ToolDefinition] | None = None,
+    ) -> int:
+        """Approximate token count using character heuristic.
+
+        Anthropic's server-side count_tokens API is async and requires a
+        network call. For synchronous budget checks we use a conservative
+        4-chars-per-token estimate — the same heuristic used elsewhere in
+        the codebase. Callers needing exact counts should use the Anthropic
+        SDK directly.
+        """
+        total_chars = 0
+        for msg in messages:
+            text = (
+                msg.content
+                if isinstance(msg.content, str)
+                else json.dumps(msg.content, default=str)
+            )
+            total_chars += len(text)
+            if msg.name:
+                total_chars += len(msg.name)
+        if tools:
+            for tool in tools:
+                total_chars += len(tool.name) + len(tool.description)
+                total_chars += len(json.dumps(tool.to_json_schema(), separators=(",", ":")))
+        return max(1, total_chars // CHARS_PER_TOKEN)
+
+    def model_capabilities(self, model: str) -> ModelCapabilities:
+        if model in _MODEL_REGISTRY:
+            return _MODEL_REGISTRY[model]
+        for prefix, caps in _MODEL_REGISTRY.items():
+            if model.startswith(prefix):
+                return caps
+        return _DEFAULT_CAPABILITIES

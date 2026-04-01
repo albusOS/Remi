@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from remi.knowledge.entailment.engine import EntailmentEngine
-from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.knowledge.ontology.schema import load_domain_yaml
 from remi.models.properties import Unit, UnitStatus
 from remi.models.signals import DomainRulebook
 from remi.observability.tracer import Tracer
@@ -64,10 +64,16 @@ async def test_entailment_produces_trace(
     trace_store: InMemoryTraceStore,
 ) -> None:
     ids = await seed_basic_portfolio(property_store)
-    await property_store.upsert_unit(Unit(
-        id="u-1", property_id=ids["property_id"], unit_number="101",
-        status=UnitStatus.VACANT, days_vacant=45, market_rent=Decimal("1500"),
-    ))
+    await property_store.upsert_unit(
+        Unit(
+            id="u-1",
+            property_id=ids["property_id"],
+            unit_number="101",
+            status=UnitStatus.VACANT,
+            days_vacant=45,
+            market_rent=Decimal("1500"),
+        )
+    )
 
     result = await traced_engine.run_all()
 
@@ -124,10 +130,16 @@ async def test_untraced_engine_still_works(
         signal_store=signal_store,
     )
     ids = await seed_basic_portfolio(property_store)
-    await property_store.upsert_unit(Unit(
-        id="u-1", property_id=ids["property_id"], unit_number="101",
-        status=UnitStatus.VACANT, days_vacant=45, market_rent=Decimal("1500"),
-    ))
+    await property_store.upsert_unit(
+        Unit(
+            id="u-1",
+            property_id=ids["property_id"],
+            unit_number="101",
+            status=UnitStatus.VACANT,
+            days_vacant=45,
+            market_rent=Decimal("1500"),
+        )
+    )
 
     result = await engine.run_all()
     assert result.trace_id is None

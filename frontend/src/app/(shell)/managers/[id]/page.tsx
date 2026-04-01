@@ -9,5 +9,5 @@ export default function ManagerReviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  return <ManagerReviewView managerId={id} />;
+  return <ManagerReviewView managerId={decodeURIComponent(id)} />;
 }

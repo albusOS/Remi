@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from remi.api.dependencies import get_portfolio_query, get_property_store
 from remi.api.portfolios.schemas import (
@@ -14,6 +14,7 @@ from remi.api.portfolios.schemas import (
 )
 from remi.models.properties import PropertyStore
 from remi.services.portfolio_queries import PortfolioQueryService
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
 
@@ -36,7 +37,7 @@ async def get_portfolio(
 ) -> PortfolioDetail:
     portfolio = await ps.get_portfolio(portfolio_id)
     if not portfolio:
-        raise HTTPException(404, f"Portfolio '{portfolio_id}' not found")
+        raise NotFoundError("Portfolio", portfolio_id)
     return PortfolioDetail(
         id=portfolio.id,
         manager_id=portfolio.manager_id,
@@ -54,7 +55,7 @@ async def portfolio_summary(
 ) -> PortfolioSummary:
     result = await svc.portfolio_summary(portfolio_id)
     if not result:
-        raise HTTPException(404, f"Portfolio '{portfolio_id}' not found")
+        raise NotFoundError("Portfolio", portfolio_id)
     return PortfolioSummary(
         portfolio_id=result.portfolio_id,
         name=result.name,

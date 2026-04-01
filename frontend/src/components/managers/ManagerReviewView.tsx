@@ -12,6 +12,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { StatusDot } from "@/components/ui/StatusDot";
+import { TimeSeriesChart } from "@/components/ui/TimeSeriesChart";
 import type {
   ManagerReview,
   ManagerPropertySummary,
@@ -83,7 +84,12 @@ function PropertyRow({ p }: { p: ManagerPropertySummary }) {
 }
 
 function OverviewTab({ review }: { review: ManagerReview }) {
+  const [propSearch, setPropSearch] = useState("");
   const totalIssues = review.vacant + review.open_maintenance + review.expiring_leases_90d + review.expired_leases + review.below_market_units;
+
+  const filteredProps = propSearch
+    ? review.properties.filter((p) => p.property_name.toLowerCase().includes(propSearch.toLowerCase()))
+    : review.properties;
 
   return (
     <div className="space-y-6">
@@ -101,15 +107,28 @@ function OverviewTab({ review }: { review: ManagerReview }) {
 
       {/* Properties table */}
       <section className="rounded-xl border border-border bg-surface overflow-hidden">
-        <div className="px-5 py-3 border-b border-border-subtle">
-          <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide">
-            Properties ({review.properties.length})
+        <div className="px-5 py-3 border-b border-border-subtle flex items-center gap-3">
+          <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide shrink-0">
+            Properties {propSearch ? `(${filteredProps.length} of ${review.properties.length})` : `(${review.properties.length})`}
           </h2>
+          <div className="flex-1" />
+          {review.properties.length > 3 && (
+            <input
+              type="text"
+              value={propSearch}
+              onChange={(e) => setPropSearch(e.target.value)}
+              placeholder="Filter properties..."
+              className="bg-surface border border-border rounded-lg px-3 py-1 text-xs text-fg-secondary placeholder-fg-ghost focus:outline-none focus:border-fg-ghost w-44"
+            />
+          )}
         </div>
         <div className="max-h-[600px] overflow-y-auto">
-          {review.properties.map((p) => (
+          {filteredProps.map((p) => (
             <PropertyRow key={p.property_id} p={p} />
           ))}
+          {filteredProps.length === 0 && review.properties.length > 0 && (
+            <p className="text-sm text-fg-faint text-center py-12">No properties match &quot;{propSearch}&quot;</p>
+          )}
           {review.properties.length === 0 && (
             <p className="text-sm text-fg-faint text-center py-12">No properties</p>
           )}
@@ -318,8 +337,21 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
   );
 }
 
-function PerformanceTab({ snapshots, managerName }: { snapshots: ManagerSnapshot[]; managerName: string }) {
-  if (snapshots.length === 0) {
+function PerformanceTab({ snapshots, managerName, managerId }: { snapshots: ManagerSnapshot[]; managerName: string; managerId: string }) {
+  const { data: historyData } = useApiQuery(
+    () => api.metricsHistory("manager", managerId, 180).catch(() => ({ entity_type: "manager", total: 0, snapshots: [] })),
+    [managerId],
+  );
+
+  const chartData = (historyData?.snapshots ?? [])
+    .map((s) => ({ ...s }))
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .map((s) => ({
+      ...s,
+      occupancy_pct: Math.round(((s as ManagerSnapshot).occupancy_rate ?? 0) * 1000) / 10,
+    }));
+
+  if (snapshots.length === 0 && chartData.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-sm text-fg-faint">No performance snapshots yet.</p>
@@ -328,66 +360,104 @@ function PerformanceTab({ snapshots, managerName }: { snapshots: ManagerSnapshot
     );
   }
 
-  const sorted = [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-fg-muted">{sorted.length} snapshots for {managerName}</p>
-      <div className="rounded-xl border border-border bg-surface overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Snapshot</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Props</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Units</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Occ</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Revenue</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">LTL</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Delinquent</th>
-                <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Vacant</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((s, i) => {
-                const prev = i > 0 ? sorted[i - 1] : null;
-                return (
-                  <tr key={s.timestamp} className="border-b border-border-subtle hover:bg-surface-raised">
-                    <td className="px-4 py-2 text-fg-secondary text-[10px]">{fmtDate(s.timestamp)}</td>
-                    <td className="px-4 py-2 text-right text-fg-secondary">{s.property_count}</td>
-                    <td className="px-4 py-2 text-right text-fg-secondary">
-                      {s.total_units}
-                      {prev && s.total_units !== prev.total_units && (
-                        <Delta prev={prev.total_units} curr={s.total_units} />
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={s.occupancy_rate < 0.9 ? "text-warn" : "text-fg-secondary"}>{pct(s.occupancy_rate)}</span>
-                      {prev && <Delta prev={prev.occupancy_rate} curr={s.occupancy_rate} fmt={pct} />}
-                    </td>
-                    <td className="px-4 py-2 text-right text-fg-secondary">
-                      {fmt$(s.total_rent)}
-                      {prev && <Delta prev={prev.total_rent} curr={s.total_rent} fmt={fmt$} />}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={s.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}>
-                        {s.loss_to_lease > 0 ? fmt$(s.loss_to_lease) : "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={s.delinquent_count > 0 ? "text-error" : "text-fg-muted"}>{s.delinquent_count || "—"}</span>
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <span className={s.vacant > 0 ? "text-error" : "text-fg-muted"}>{s.vacant || "—"}</span>
-                      {prev && <Delta prev={prev.vacant} curr={s.vacant} invert />}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+    <div className="space-y-6">
+      <p className="text-xs text-fg-muted">{chartData.length} snapshots for {managerName} (last 180 days)</p>
+
+      {chartData.length >= 2 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <TimeSeriesChart
+            title="Occupancy"
+            data={chartData}
+            series={[{ dataKey: "occupancy_pct", color: "var(--color-ok)", label: "Occupancy %" }]}
+            yDomain={[0, 100]}
+            yTickFormatter={(v) => `${v}%`}
+          />
+          <TimeSeriesChart
+            title="Revenue vs Market"
+            data={chartData}
+            series={[
+              { dataKey: "total_rent", color: "var(--color-accent)", label: "Revenue", type: "area" },
+              { dataKey: "total_market_rent", color: "var(--color-fg-faint)", label: "Market Rent", type: "line" },
+            ]}
+            yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+          />
+          <TimeSeriesChart
+            title="Loss to Lease"
+            data={chartData}
+            series={[{ dataKey: "loss_to_lease", color: "var(--color-warn)", label: "LTL" }]}
+            yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+          />
+          <TimeSeriesChart
+            title="Delinquency"
+            data={chartData}
+            series={[
+              { dataKey: "delinquent_balance", color: "var(--color-error)", label: "Balance", type: "area" },
+              { dataKey: "delinquent_count", color: "var(--color-error)", label: "Count", type: "line" },
+            ]}
+          />
         </div>
-      </div>
+      )}
+
+      {/* Snapshot detail table */}
+      {snapshots.length > 0 && (
+        <details className="group">
+          <summary className="text-xs text-fg-muted cursor-pointer hover:text-fg-secondary transition-colors">
+            Snapshot detail table ({snapshots.length})
+          </summary>
+          <div className="mt-3 rounded-xl border border-border bg-surface overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Snapshot</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Props</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Units</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Occ</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Revenue</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">LTL</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Delinquent</th>
+                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Vacant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()).map((s, i, arr) => {
+                    const prev = i > 0 ? arr[i - 1] : null;
+                    return (
+                      <tr key={s.timestamp} className="border-b border-border-subtle hover:bg-surface-raised">
+                        <td className="px-4 py-2 text-fg-secondary text-[10px]">{fmtDate(s.timestamp)}</td>
+                        <td className="px-4 py-2 text-right text-fg-secondary">{s.property_count}</td>
+                        <td className="px-4 py-2 text-right text-fg-secondary">
+                          {s.total_units}
+                          {prev && s.total_units !== prev.total_units && <Delta prev={prev.total_units} curr={s.total_units} />}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={s.occupancy_rate < 0.9 ? "text-warn" : "text-fg-secondary"}>{pct(s.occupancy_rate)}</span>
+                          {prev && <Delta prev={prev.occupancy_rate} curr={s.occupancy_rate} fmt={pct} />}
+                        </td>
+                        <td className="px-4 py-2 text-right text-fg-secondary">
+                          {fmt$(s.total_rent)}
+                          {prev && <Delta prev={prev.total_rent} curr={s.total_rent} fmt={fmt$} />}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={s.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}>{s.loss_to_lease > 0 ? fmt$(s.loss_to_lease) : "—"}</span>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={s.delinquent_count > 0 ? "text-error" : "text-fg-muted"}>{s.delinquent_count || "—"}</span>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={s.vacant > 0 ? "text-error" : "text-fg-muted"}>{s.vacant || "—"}</span>
+                          {prev && <Delta prev={prev.vacant} curr={s.vacant} invert />}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -610,7 +680,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
         {tab === "delinquency" && <DelinquencyTab data={delinquency} />}
         {tab === "leases" && <LeasesTab data={leases} />}
         {tab === "vacancies" && <VacanciesTab data={vacancies} />}
-        {tab === "performance" && <PerformanceTab snapshots={snapshots} managerName={review.name} />}
+        {tab === "performance" && <PerformanceTab snapshots={snapshots} managerName={review.name} managerId={managerId} />}
         {tab === "review" && <ReviewPrepTab managerId={managerId} />}
     </PageContainer>
   );

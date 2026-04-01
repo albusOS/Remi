@@ -39,17 +39,15 @@ async def _resolve_manager_scope(
         portfolios = await property_store.list_portfolios(manager_id=manager_id)
 
         # Gather property lists across all portfolios concurrently
-        portfolio_props = await asyncio.gather(*[
-            property_store.list_properties(portfolio_id=p.id)
-            for p in portfolios
-        ])
+        portfolio_props = await asyncio.gather(
+            *[property_store.list_properties(portfolio_id=p.id) for p in portfolios]
+        )
         all_props = [prop for props in portfolio_props for prop in props]
 
         # Gather unit counts across all properties concurrently
-        unit_lists = await asyncio.gather(*[
-            property_store.list_units(property_id=prop.id)
-            for prop in all_props
-        ])
+        unit_lists = await asyncio.gather(
+            *[property_store.list_units(property_id=prop.id) for prop in all_props]
+        )
 
         property_names = [prop.name for prop in all_props]
         total_units = sum(len(units) for units in unit_lists)
@@ -62,7 +60,7 @@ async def _resolve_manager_scope(
             "manager_unit_count": total_units,
         }
     except Exception:
-        logger.debug("manager_scope_resolve_failed", manager_id=manager_id, exc_info=True)
+        logger.warning("manager_scope_resolve_failed", manager_id=manager_id, exc_info=True)
         return {"manager_id": manager_id}
 
 
@@ -111,7 +109,7 @@ def build_chat_dispatcher(
         session_id = req.params.get("session_id")
         message_text = req.params.get("message", "")
         mode = req.params.get("mode", "ask")
-        if mode not in ("ask", "agent", "research"):
+        if mode not in ("ask", "agent"):
             mode = "ask"
 
         req_provider = req.params.get("provider")
@@ -159,12 +157,8 @@ def build_chat_dispatcher(
                 except (TimeoutError, Exception):
                     log.debug("notification_send_failed", event_type=event_type)
 
-            # "research" routes to the researcher agent in agent mode
             run_agent_name = session.agent
             run_mode = mode
-            if mode == "research":
-                run_agent_name = "researcher"
-                run_mode = "agent"
 
             async def _run_agent() -> str:
                 return await chat_agent.run_chat_agent(

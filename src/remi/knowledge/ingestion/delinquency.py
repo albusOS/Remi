@@ -98,7 +98,11 @@ async def ingest_delinquency(
 
         addr = parse_address(row.property_address)
         await upsert_property_safe(
-            prop_id, row.property_name, addr, portfolio_id=upload_portfolio_id
+            prop_id,
+            row.property_name,
+            addr,
+            portfolio_id=upload_portfolio_id,
+            source_document_id=doc.id,
         )
 
         await ps.upsert_unit(
@@ -109,6 +113,7 @@ async def ingest_delinquency(
                 status=UnitStatus.OCCUPIED,
                 occupancy_status=OccupancyStatus.OCCUPIED,
                 current_rent=Decimal(str(row.monthly_rent)) if row.monthly_rent else Decimal("0"),
+                source_document_id=doc.id,
             )
         )
 
@@ -128,6 +133,7 @@ async def ingest_delinquency(
                 balance_30_plus=Decimal(str(row.balance_30_plus)),
                 last_payment_date=last_payment,
                 tags=tags,
+                source_document_id=doc.id,
             )
         )
 
@@ -143,5 +149,6 @@ async def ingest_delinquency(
                 start_date=date(2000, 1, 1),
                 end_date=date(2099, 12, 31),
                 monthly_rent=Decimal(str(row.monthly_rent)) if row.monthly_rent else Decimal("0"),
+                source_document_id=doc.id,
             )
         )

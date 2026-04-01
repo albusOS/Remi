@@ -91,7 +91,13 @@ async def ingest_lease_expiration(
                 portfolio_id = await ensure_manager(manager_tag)
 
         addr = parse_address(row.property_address)
-        await upsert_property_safe(prop_id, row.property_name, addr, portfolio_id=portfolio_id)
+        await upsert_property_safe(
+            prop_id,
+            row.property_name,
+            addr,
+            portfolio_id=portfolio_id,
+            source_document_id=doc.id,
+        )
 
         has_active_lease = row.monthly_rent > 0 and row.tenant_name.strip() != ""
         unit_status = UnitStatus.OCCUPIED if has_active_lease else UnitStatus.VACANT
@@ -107,10 +113,18 @@ async def ingest_lease_expiration(
                 market_rent=Decimal(str(row.market_rent)) if row.market_rent else Decimal("0"),
                 status=unit_status,
                 occupancy_status=occ_status,
+                source_document_id=doc.id,
             )
         )
 
-        await ps.upsert_tenant(Tenant(id=tenant_id, name=row.tenant_name, phone=row.phone_numbers))
+        await ps.upsert_tenant(
+            Tenant(
+                id=tenant_id,
+                name=row.tenant_name,
+                phone=row.phone_numbers,
+                source_document_id=doc.id,
+            )
+        )
 
         start = row.move_in_date.date() if row.move_in_date else date(2000, 1, 1)
         end = row.lease_expires.date() if row.lease_expires else date(2099, 12, 31)
@@ -127,5 +141,6 @@ async def ingest_lease_expiration(
                 deposit=Decimal(str(row.deposit)),
                 market_rent=Decimal(str(row.market_rent)) if row.market_rent else Decimal("0"),
                 is_month_to_month=row.is_month_to_month,
+                source_document_id=doc.id,
             )
         )

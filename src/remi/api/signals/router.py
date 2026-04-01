@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from remi.api.dependencies import get_feedback_store, get_signal_pipeline, get_signal_store
 from remi.api.signals.schemas import (
@@ -18,6 +18,7 @@ from remi.api.signals.schemas import (
 )
 from remi.knowledge.composite import CompositeProducer
 from remi.models.signals import FeedbackStore, SignalStore
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -62,7 +63,7 @@ async def get_signal(
 ) -> SignalDetailResponse:
     signal = await ss.get_signal(signal_id)
     if signal is None:
-        raise HTTPException(404, f"Signal '{signal_id}' not found")
+        raise NotFoundError("Signal", signal_id)
     return SignalDetailResponse(
         **_signal_summary(signal).model_dump(),
     )
@@ -75,7 +76,7 @@ async def explain_signal(
 ) -> SignalExplainResponse:
     signal = await ss.get_signal(signal_id)
     if signal is None:
-        raise HTTPException(404, f"Signal '{signal_id}' not found")
+        raise NotFoundError("Signal", signal_id)
     return SignalExplainResponse(
         **_signal_summary(signal).model_dump(),
         provenance=signal.provenance.value,
@@ -117,7 +118,7 @@ async def record_feedback(
 
     signal = await ss.get_signal(signal_id)
     if signal is None:
-        raise HTTPException(404, f"Signal '{signal_id}' not found")
+        raise NotFoundError("Signal", signal_id)
 
     outcome = SignalOutcome(body.outcome)
     feedback = SignalFeedback(
@@ -149,7 +150,7 @@ async def list_signal_feedback(
     return FeedbackListResponse(
         signal_id=signal_id,
         count=len(entries),
-        feedback=[e.model_dump(mode="json") for e in entries],
+        feedback=entries,
     )
 
 

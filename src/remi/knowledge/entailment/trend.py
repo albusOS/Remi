@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import structlog
 
 from remi.knowledge.entailment.base import MakeSignalFn
@@ -10,6 +12,8 @@ from remi.models.signals import Signal, SignalDefinition
 from remi.services.snapshots import SnapshotService
 
 _log = structlog.get_logger(__name__)
+
+_LOOKBACK_DAYS = 180
 
 
 async def eval_declining_consecutive_periods(
@@ -24,11 +28,12 @@ async def eval_declining_consecutive_periods(
         return []
 
     required_periods = defn.rule.periods or 2
+    since = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
     managers = await ps.list_managers()
     signals: list[Signal] = []
 
     for mgr in managers:
-        history = snapshots.get_history(mgr.id)
+        history = await snapshots.get_history(mgr.id, since=since)
         if len(history) < required_periods + 1:
             continue
 
@@ -74,11 +79,12 @@ async def eval_consistent_direction(
         return []
 
     required_periods = defn.rule.periods or 2
+    since = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
     managers = await ps.list_managers()
     signals: list[Signal] = []
 
     for mgr in managers:
-        history = snapshots.get_history(mgr.id)
+        history = await snapshots.get_history(mgr.id, since=since)
         if len(history) < required_periods + 1:
             continue
 

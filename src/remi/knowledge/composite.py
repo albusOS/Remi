@@ -20,9 +20,18 @@ from dataclasses import dataclass, field
 
 import structlog
 
-from remi.models.signals import ProducerResult, Signal, SignalProducer, SignalStore
+from remi.models.ontology import KnowledgeGraph
+from remi.models.properties import PropertyStore
+from remi.models.signals import (
+    MutableRulebook,
+    ProducerResult,
+    Signal,
+    SignalProducer,
+    SignalStore,
+)
 from remi.models.trace import SpanKind
 from remi.observability.tracer import Tracer
+from remi.services.snapshots import SnapshotService
 
 _log = structlog.get_logger(__name__)
 
@@ -34,9 +43,11 @@ class CompositeResult:
     produced: int = 0
     retired: int = 0
     unchanged: int = 0
+    errors: int = 0
     signals: list[Signal] = field(default_factory=list)
     trace_id: str | None = None
     per_source: dict[str, ProducerResult] = field(default_factory=dict)
+    failed_producers: list[str] = field(default_factory=list)
 
 
 class CompositeProducer:
@@ -97,6 +108,8 @@ class CompositeProducer:
                     errors=pr.errors,
                 )
             except Exception:
+                result.errors += 1
+                result.failed_producers.append(producer.name)
                 _log.warning(
                     "producer_failed",
                     producer=producer.name,
@@ -151,6 +164,8 @@ class CompositeProducer:
                                 provenance=sig.provenance.value,
                             )
                     except Exception as exc:
+                        result.errors += 1
+                        result.failed_producers.append(producer.name)
                         prod_ctx.set_attribute("error", str(exc))
                         _log.warning(
                             "producer_failed",
@@ -160,3 +175,35 @@ class CompositeProducer:
 
             trace_ctx.set_attribute("total_produced", result.produced)
             return result
+
+
+def build_signal_pipeline(
+    *,
+    domain: MutableRulebook,
+    property_store: PropertyStore,
+    signal_store: SignalStore,
+    snapshot_service: SnapshotService,
+    knowledge_graph: KnowledgeGraph,
+    tracer: Tracer,
+) -> CompositeProducer:
+    """Factory: assembles the full signal pipeline (entailment + statistical + composition)."""
+    from remi.knowledge.entailment import EntailmentEngine
+    from remi.knowledge.entailment.composition import CompositionProducer
+    from remi.knowledge.statistical import StatisticalProducer
+
+    entailment_engine = EntailmentEngine(
+        domain=domain,
+        property_store=property_store,
+        signal_store=signal_store,
+        tracer=tracer,
+        snapshot_service=snapshot_service,
+    )
+    return CompositeProducer(
+        signal_store=signal_store,
+        producers=[
+            entailment_engine,
+            StatisticalProducer(knowledge_graph=knowledge_graph),
+            CompositionProducer(domain=domain, signal_store=signal_store),
+        ],
+        tracer=tracer,
+    )

@@ -29,6 +29,7 @@ from remi.services.dashboard import (
     VacancyTracker,
 )
 from remi.services.snapshots import SnapshotService
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -63,11 +64,9 @@ async def rent_roll(
     property_id: str,
     svc: DashboardQueryService = Depends(get_dashboard_service),
 ) -> RentRollView:
-    from fastapi import HTTPException
-
     result = await svc.rent_roll(property_id)
     if result is None:
-        raise HTTPException(404, f"Property '{property_id}' not found")
+        raise NotFoundError("Property", property_id)
     return result
 
 
@@ -97,9 +96,8 @@ async def snapshots(
     manager_id: str | None = Query(default=None),
     snap: SnapshotService = Depends(get_snapshot_service),
 ) -> SnapshotsResponse:
-    history = snap.get_history(manager_id=manager_id)
-    dumped = [s.model_dump() for s in history]
-    return SnapshotsResponse(total=len(history), snapshots=dumped)
+    history = await snap.get_history(manager_id=manager_id)
+    return SnapshotsResponse(total=len(history), snapshots=history)
 
 
 @router.post("/snapshots/capture", response_model=CaptureResponse)
@@ -114,10 +112,12 @@ async def capture_snapshot(
 async def metrics_history(
     entity_type: str = Query(default="manager", description="'manager' or 'property'"),
     entity_id: str | None = Query(
-        default=None, description="Filter to a specific manager_id or property_id",
+        default=None,
+        description="Filter to a specific manager_id or property_id",
     ),
     manager_id: str | None = Query(
-        default=None, description="Filter property snapshots by manager",
+        default=None,
+        description="Filter property snapshots by manager",
     ),
     days: int = Query(default=90, ge=1, le=3650, description="Look back this many days"),
     snap: SnapshotService = Depends(get_snapshot_service),
@@ -127,22 +127,18 @@ async def metrics_history(
     since = datetime.now(UTC) - timedelta(days=days)
 
     if entity_type == "property":
-        rows = snap.get_property_history(
+        rows = await snap.get_property_history(
             property_id=entity_id,
             manager_id=manager_id,
+            since=since,
         )
-        # Filter by since in-memory (store already returned all)
-        rows = [r for r in rows if r.timestamp >= since]
-        dumped = [r.model_dump() for r in rows]
     else:
-        rows_m = snap.get_history(manager_id=entity_id)
-        rows_m = [r for r in rows_m if r.timestamp >= since]
-        dumped = [r.model_dump() for r in rows_m]
+        rows = await snap.get_history(manager_id=entity_id, since=since)
 
     return MetricsHistoryResponse(
         entity_type=entity_type,
-        total=len(dumped),
-        snapshots=dumped,
+        total=len(rows),
+        snapshots=rows,
     )
 
 

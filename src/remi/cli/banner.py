@@ -28,6 +28,7 @@ def _short_model(name: str) -> str:
         stem = name.replace("claude-", "")
         # Strip dated suffix like -20250514
         import re
+
         stem = re.sub(r"-\d{8}$", "", stem)
         return stem
     return name
@@ -57,7 +58,7 @@ def print_banner(
     host: str = "127.0.0.1",
     port: int = 8000,
     reload: bool = False,
-    seed_demo: bool = False,
+    seed: bool = False,
 ) -> None:
     """Print the startup banner to stderr via Rich."""
     console = Console(stderr=True)
@@ -90,7 +91,7 @@ def print_banner(
                 None,
                 [
                     "reload" if reload else None,
-                    "seed-demo" if seed_demo else None,
+                    "seed" if seed else None,
                 ],
             )
         )

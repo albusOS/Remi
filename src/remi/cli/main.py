@@ -20,6 +20,7 @@ from remi.cli.properties import (
 from remi.cli.research import cmd as research_cmd
 from remi.cli.seed import cmd as seed_cmd
 from remi.cli.trace import cmd as trace_cmd
+from remi.cli.vectors import cmd as vectors_cmd
 
 cli = typer.Typer(
     name="remi",
@@ -43,6 +44,7 @@ cli.add_typer(documents_cmd)
 cli.add_typer(onto_cmd)
 cli.add_typer(seed_cmd)
 cli.add_typer(trace_cmd)
+cli.add_typer(vectors_cmd)
 cli.add_typer(bench_cmd)
 
 
@@ -65,7 +67,7 @@ def serve(
     host: str = typer.Option("127.0.0.1", help="Host to bind to"),
     port: int = typer.Option(8000, help="Port to listen on"),
     reload: bool = typer.Option(False, help="Enable auto-reload"),
-    seed_demo: bool = typer.Option(False, "--seed", help="Load demo data at startup"),
+    seed: bool = typer.Option(False, "--seed", help="Ingest AppFolio reports at startup"),
 ) -> None:
     """Start the API server."""
     import os
@@ -74,10 +76,10 @@ def serve(
 
     from remi.cli.banner import print_banner
 
-    if seed_demo:
-        os.environ["REMI_SEED_DEMO"] = "1"
+    if seed:
+        os.environ["REMI_SEED"] = "1"
 
-    print_banner(host=host, port=port, reload=reload, seed_demo=seed_demo)
+    print_banner(host=host, port=port, reload=reload, seed=seed)
 
     uvicorn.run(
         "remi.api.main:app",

@@ -61,7 +61,8 @@ def test_trim_thread_notice_message_count() -> None:
 
     notice = result[1]
     assert notice.role == "system"
-    assert "14 messages removed" in str(notice.content)
+    assert "14 messages" in str(notice.content)
+    assert "7 exchanges removed" in str(notice.content)
 
 
 def test_trim_thread_zero_turns_returns_original() -> None:

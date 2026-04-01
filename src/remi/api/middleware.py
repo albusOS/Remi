@@ -1,12 +1,9 @@
 """HTTP middleware — request-ID propagation and timing.
 
-Extracts or generates a ``request_id`` for every HTTP request and binds
-it to structlog context vars so that every log line emitted during the
-request automatically includes the ID.  The ID is echoed back in the
-``X-Request-ID`` response header for client-side correlation.
-
-Also logs method, path, status code, and ``duration_ms`` for every
-request so you can monitor latency from structured log output.
+Pure ASGI middleware (no BaseHTTPMiddleware). Generates or propagates a
+``request_id``, binds it to structlog context vars, echoes it in the
+``X-Request-ID`` response header, and logs method/path/status/duration
+for every HTTP request.
 """
 
 from __future__ import annotations
@@ -15,32 +12,54 @@ import time
 import uuid
 
 import structlog
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-_REQUEST_ID_HEADER = "X-Request-ID"
+_REQUEST_ID_HEADER = "x-request-id"
 _logger = structlog.get_logger("remi.http")
 
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        request_id = request.headers.get(_REQUEST_ID_HEADER) or uuid.uuid4().hex[:16]
+class RequestIDMiddleware:
+    """Lightweight ASGI middleware — no BaseHTTPMiddleware overhead."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        request_id = (
+            headers.get(b"x-request-id", b"").decode() or uuid.uuid4().hex[:16]
+        )
+
         structlog.contextvars.bind_contextvars(request_id=request_id)
         t0 = time.monotonic()
-        status_code = 500
+        status_code = 0
+
+        async def send_with_id(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 0)
+                raw_headers: list[tuple[bytes, bytes]] = list(
+                    message.get("headers", [])
+                )
+                raw_headers.append(
+                    (b"x-request-id", request_id.encode())
+                )
+                message = {**message, "headers": raw_headers}
+            await send(message)
+
         try:
-            response = await call_next(request)
-            status_code = response.status_code
-            response.headers[_REQUEST_ID_HEADER] = request_id
-            return response
+            await self.app(scope, receive, send_with_id)
         finally:
             duration_ms = round((time.monotonic() - t0) * 1000)
-            path = request.url.path
+            path = scope.get("path", "")
             if not path.startswith("/ws/"):
                 _logger.info(
                     "http_request",
-                    method=request.method,
+                    method=scope.get("method", ""),
                     path=path,
                     status=status_code,
                     duration_ms=duration_ms,

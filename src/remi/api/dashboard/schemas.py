@@ -5,10 +5,9 @@ Re-exports from the service module — the service owns the canonical models.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
 
+from remi.models.rollups import ManagerSnapshot, PropertySnapshot
 from remi.services.dashboard import (
     DelinquencyBoard,
     DelinquentTenant,
@@ -55,7 +54,7 @@ class NeedsManagerResponse(BaseModel, frozen=True):
 
 class SnapshotsResponse(BaseModel, frozen=True):
     total: int
-    snapshots: list[dict[str, Any]]
+    snapshots: list[ManagerSnapshot]
 
 
 class CaptureResponse(BaseModel, frozen=True):
@@ -65,7 +64,7 @@ class CaptureResponse(BaseModel, frozen=True):
 class MetricsHistoryResponse(BaseModel, frozen=True):
     entity_type: str
     total: int
-    snapshots: list[dict[str, Any]]
+    snapshots: list[ManagerSnapshot | PropertySnapshot]
 
 
 class AutoAssignResponse(BaseModel, frozen=True):

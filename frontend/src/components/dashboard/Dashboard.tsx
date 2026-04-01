@@ -9,6 +9,8 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
+import { SearchBar } from "@/components/ui/SearchBar";
+import { SparklineChart } from "@/components/ui/SparklineChart";
 import type {
   ManagerListItem,
   ManagerSnapshot,
@@ -266,17 +268,17 @@ function sortManagers(mgrs: ManagerListItem[], key: SortKey): ManagerListItem[] 
 }
 
 export function Dashboard() {
-  const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("issues");
 
   const { data: dashboardData, loading, refetch } = useApiQuery(async () => {
-    const [mgrs, del, lse, vac, nm, snaps] = await Promise.all([
+    const [mgrs, del, lse, vac, nm, snaps, mhist] = await Promise.all([
       api.listManagers().catch(() => []),
       api.delinquencyBoard().catch(() => null),
       api.leasesExpiring(90).catch(() => null),
       api.vacancyTracker().catch(() => null),
       api.needsManager().catch(() => null),
       api.snapshots().catch(() => ({ total: 0, snapshots: [] })),
+      api.metricsHistory("manager", undefined, 90).catch(() => ({ entity_type: "manager", total: 0, snapshots: [] })),
     ]);
     return {
       managers: mgrs as ManagerListItem[],
@@ -285,6 +287,7 @@ export function Dashboard() {
       vacancies: vac as VacancyTracker | null,
       needsMgr: nm as NeedsManagerResponse | null,
       snapshots: snaps.snapshots as ManagerSnapshot[],
+      metricsHistory: mhist.snapshots as ManagerSnapshot[],
     };
   }, []);
 
@@ -294,13 +297,10 @@ export function Dashboard() {
   const vacancies = dashboardData?.vacancies ?? null;
   const needsMgr = dashboardData?.needsMgr ?? null;
   const snapshots = dashboardData?.snapshots ?? [];
+  const metricsHistory = dashboardData?.metricsHistory ?? [];
 
-  // Filter out PMs with zero properties and apply search
   const activeMgrs = managers.filter((m) => m.total_units > 0 || m.property_count > 0);
-  const filtered = search
-    ? activeMgrs.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
-    : activeMgrs;
-  const sorted = sortManagers(filtered, sortBy);
+  const sorted = sortManagers(activeMgrs, sortBy);
 
   // Build a map from manager_id → second-to-last snapshot (for trend arrows)
   const prevSnapshotMap = new Map<string, ManagerSnapshot>();
@@ -324,14 +324,40 @@ export function Dashboard() {
   const totalVacLoss = activeMgrs.reduce((s, m) => s + m.total_vacancy_loss, 0);
   const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
 
+  // Aggregate metrics history into portfolio-level sparkline data
+  const sparklineData = (() => {
+    if (metricsHistory.length === 0) return [];
+    const byDay = new Map<string, { occ: number[]; rev: number; delBal: number; count: number }>();
+    for (const s of metricsHistory) {
+      const day = s.timestamp.slice(0, 10);
+      const entry = byDay.get(day) || { occ: [], rev: 0, delBal: 0, count: 0 };
+      entry.occ.push(s.occupancy_rate);
+      entry.rev += s.total_rent;
+      entry.delBal += s.delinquent_balance;
+      entry.count += 1;
+      byDay.set(day, entry);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, v]) => ({
+        day,
+        occupancy: Math.round((v.occ.reduce((a, b) => a + b, 0) / v.occ.length) * 1000) / 10,
+        revenue: v.rev,
+        delinquency: v.delBal,
+      }));
+  })();
+
   return (
     <PageContainer wide>
-        {/* Header */}
-        <div>
-          <h1 className="text-xl font-bold text-fg">Portfolio Overview</h1>
-          <p className="text-xs text-fg-muted mt-1">
-            {activeMgrs.length} active managers · {totalUnits.toLocaleString()} units
-          </p>
+        {/* Header + Search */}
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <h1 className="text-xl font-bold text-fg">Portfolio Overview</h1>
+            <p className="text-xs text-fg-muted mt-1">
+              {activeMgrs.length} active managers · {totalUnits.toLocaleString()} units
+            </p>
+          </div>
+          <SearchBar />
         </div>
 
         {loading && (
@@ -350,6 +376,33 @@ export function Dashboard() {
             sub={`of ${totalUnits.toLocaleString()} (${(totalUnits - totalOccupied).toLocaleString()} vacant)`}
           />
         </MetricStrip>
+
+        {/* Portfolio trend sparklines */}
+        {sparklineData.length >= 2 && (
+          <div className="flex gap-3">
+            <SparklineChart
+              data={sparklineData}
+              dataKey="occupancy"
+              color="var(--color-ok)"
+              label="Occupancy"
+              value={pct(avgOcc)}
+            />
+            <SparklineChart
+              data={sparklineData}
+              dataKey="revenue"
+              color="var(--color-accent)"
+              label="Revenue"
+              value={fmt$(totalRevenue)}
+            />
+            <SparklineChart
+              data={sparklineData}
+              dataKey="delinquency"
+              color="var(--color-error)"
+              label="Delinquency"
+              value={sparklineData.length > 0 ? fmt$(sparklineData[sparklineData.length - 1].delinquency) : "$0"}
+            />
+          </div>
+        )}
 
         {/* Attention strip */}
         <div className="flex gap-3 overflow-x-auto pb-1">
@@ -383,19 +436,12 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* Manager section header with search + sort */}
+        {/* Manager section header with sort */}
         <div className="flex items-center gap-3">
           <h2 className="text-xs font-semibold text-fg-secondary uppercase tracking-wide shrink-0">
             Property Managers
           </h2>
           <div className="flex-1" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search managers..."
-            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary placeholder-fg-ghost focus:outline-none focus:border-fg-ghost w-48"
-          />
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
@@ -418,7 +464,7 @@ export function Dashboard() {
 
         {sorted.length === 0 && !loading && (
           <p className="text-sm text-fg-faint text-center py-12">
-            {search ? "No managers match your search" : "No property managers found — upload reports to get started"}
+            No property managers found — upload reports to get started
           </p>
         )}
     </PageContainer>

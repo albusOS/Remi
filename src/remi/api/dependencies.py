@@ -33,6 +33,8 @@ from remi.services.manager_review import ManagerReviewService
 from remi.services.portfolio_queries import PortfolioQueryService
 from remi.services.property_queries import PropertyQueryService
 from remi.services.rent_roll import RentRollService
+from remi.services.search import SearchService
+from remi.services.seed import SeedService
 from remi.services.snapshots import SnapshotService
 
 
@@ -122,3 +124,11 @@ def get_rent_roll_service(c: Container = Depends(get_container)) -> RentRollServ
 
 def get_auto_assign_service(c: Container = Depends(get_container)) -> AutoAssignService:
     return c.auto_assign_service
+
+
+def get_search_service(c: Container = Depends(get_container)) -> SearchService:
+    return c.search_service
+
+
+def get_seed_service(c: Container = Depends(get_container)) -> SeedService:
+    return c.seed_service

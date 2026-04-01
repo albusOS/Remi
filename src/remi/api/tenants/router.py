@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_property_store
+from remi.api.schemas import DeletedResponse, UpdatedResponse
 from remi.models.properties import PropertyStore
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -41,7 +43,7 @@ async def get_tenant(
 ) -> TenantDetailResponse:
     tenant = await ps.get_tenant(tenant_id)
     if not tenant:
-        raise HTTPException(404, f"Tenant '{tenant_id}' not found")
+        raise NotFoundError("Tenant", tenant_id)
     leases = await ps.list_leases(tenant_id=tenant_id)
     lease_info: list[LeaseInfo] = []
     for le in leases:
@@ -71,10 +73,10 @@ async def update_tenant(
     tenant_id: str,
     body: UpdateTenantRequest,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, str]:
+) -> UpdatedResponse:
     tenant = await ps.get_tenant(tenant_id)
     if not tenant:
-        raise HTTPException(404, f"Tenant '{tenant_id}' not found")
+        raise NotFoundError("Tenant", tenant_id)
 
     updates: dict[str, str | None] = {}
     if body.email is not None:
@@ -84,15 +86,15 @@ async def update_tenant(
 
     updated = tenant.model_copy(update=updates)
     await ps.upsert_tenant(updated)
-    return {"id": tenant_id, "name": updated.name}
+    return UpdatedResponse(id=tenant_id, name=updated.name)
 
 
 @router.delete("/{tenant_id}", status_code=200)
 async def delete_tenant(
     tenant_id: str,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     deleted = await ps.delete_tenant(tenant_id)
     if not deleted:
-        raise HTTPException(404, f"Tenant '{tenant_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("Tenant", tenant_id)
+    return DeletedResponse()

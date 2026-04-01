@@ -19,6 +19,7 @@ from remi.sandbox.data_bridge import DATA_BRIDGE_SOURCE
 
 # -- US-4 prerequisite: bridge is valid Python --------------------------------
 
+
 def test_bridge_source_is_valid_python() -> None:
     """DATA_BRIDGE_SOURCE must compile without syntax errors."""
     code = compile(DATA_BRIDGE_SOURCE, "remi_data.py", "exec")
@@ -78,6 +79,7 @@ def mock_api():
 
 # -- US-4: bridge functions hit correct endpoints -----------------------------
 
+
 def test_bridge_properties_function(mock_api: tuple) -> None:
     url, handler = mock_api
     handler.response_data = {"properties": [{"id": "p1", "name": "Elm St"}]}
@@ -121,6 +123,7 @@ def test_bridge_rent_roll(mock_api: tuple) -> None:
 
 # -- Error handling -----------------------------------------------------------
 
+
 def test_bridge_handles_connection_error() -> None:
     bridge = _load_bridge("http://127.0.0.1:1")
     with pytest.raises(ConnectionError, match="Cannot reach REMI API"):
@@ -128,6 +131,7 @@ def test_bridge_handles_connection_error() -> None:
 
 
 # -- Query string construction ------------------------------------------------
+
 
 def test_bridge_query_string_skips_none(mock_api: tuple) -> None:
     url, handler = mock_api

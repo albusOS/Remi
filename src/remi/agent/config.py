@@ -39,6 +39,19 @@ class IntentConfig(BaseModel):
     )
 
 
+class PhaseConfig(BaseModel):
+    """Defines a named phase in a multi-phase agent run.
+
+    Used by the researcher to enforce structured progress through
+    DATA -> ANALYZE -> SYNTHESIZE stages with iteration budgets.
+    """
+
+    name: str
+    description: str = ""
+    max_iterations: int = 5
+    nudge: str = ""
+
+
 class MemoryConfig(BaseModel):
     """Memory settings for an agent node."""
 
@@ -70,6 +83,8 @@ class AgentConfig(BaseModel):
     ask_model: str | None = None
     agent_provider: str | None = None
     agent_model: str | None = None
+    tool_routing_provider: str | None = None
+    tool_routing_model: str | None = None
     temperature: float = 0.7
     max_tokens: int = 1024
     response_format: str = "text"
@@ -97,6 +112,9 @@ class AgentConfig(BaseModel):
 
     # Intent-based routing
     intents: dict[str, IntentConfig] = Field(default_factory=dict)
+
+    # Phase-gated execution (researcher)
+    phases: list[PhaseConfig] = Field(default_factory=list)
 
     # Output
     output_contract: str = "conversation"
@@ -166,6 +184,12 @@ class AgentConfig(BaseModel):
                 if isinstance(intent_data, dict):
                     intents[intent_name] = IntentConfig(**intent_data)
 
+        raw_phases = data.get("phases", [])
+        phases: list[PhaseConfig] = []
+        for p in raw_phases:
+            if isinstance(p, dict):
+                phases.append(PhaseConfig(**p))
+
         return cls(
             name=data.get("name", "unknown"),
             provider=data.get("provider"),
@@ -174,6 +198,8 @@ class AgentConfig(BaseModel):
             ask_model=data.get("ask_model"),
             agent_provider=data.get("agent_provider"),
             agent_model=data.get("agent_model"),
+            tool_routing_provider=data.get("tool_routing_provider"),
+            tool_routing_model=data.get("tool_routing_model"),
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", 1024),
             response_format=data.get("response_format", "text"),
@@ -186,6 +212,7 @@ class AgentConfig(BaseModel):
             agent_tools=agent_tools,
             memory=memory,
             intents=intents,
+            phases=phases,
             max_iterations=data.get("max_iterations", 10),
             ask_max_iterations=data.get("ask_max_iterations"),
             agent_max_iterations=data.get("agent_max_iterations"),

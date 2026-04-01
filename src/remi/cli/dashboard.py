@@ -309,7 +309,7 @@ class RemiDashboard(App):  # type: ignore[type-arg]
             if len(spans) > 10:
                 self._log_activity(f"    [dim]… {len(spans) - 10} more spans[/dim]")
         except Exception:
-            pass
+            self._log_activity("  [dim]trace span retrieval failed[/dim]")
 
     def _refresh_tbox(self) -> None:
         if self._container is None:
@@ -346,7 +346,7 @@ class RemiDashboard(App):  # type: ignore[type-arg]
             sev_str = "  ".join(sev_parts) if sev_parts else "none"
             self._log_chat(f"  [cyan]◆ perception[/cyan]  tbox ✓  signals: {sev_str}")
         except Exception:
-            pass
+            self._log_chat("  [dim]signal perception fetch failed[/dim]")
 
         user_msg = Message(role="user", content=user_input)
         await self._container.chat_session_store.append_message(self._session_id, user_msg)
@@ -417,8 +417,10 @@ class RemiDashboard(App):  # type: ignore[type-arg]
                 self.query_one(_SignalPanel).refresh_signals(
                     signals, self._container.domain_rulebook
                 )
-        except (NoMatches, Exception):
+        except NoMatches:
             pass
+        except Exception:
+            self._log_activity("  [dim]signal panel refresh failed[/dim]")
 
     def _log_activity(self, msg: str) -> None:
         with contextlib.suppress(NoMatches):

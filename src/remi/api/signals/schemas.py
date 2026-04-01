@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from remi.models.signals.feedback import SignalFeedback
+
 
 class SignalSummary(BaseModel, frozen=True):
     signal_id: str
@@ -61,7 +63,7 @@ class FeedbackResponse(BaseModel, frozen=True):
 class FeedbackListResponse(BaseModel, frozen=True):
     signal_id: str
     count: int
-    feedback: list[dict[str, Any]]
+    feedback: list[SignalFeedback]
 
 
 class FeedbackSummaryResponse(BaseModel):

@@ -89,12 +89,12 @@ async def _bench(
             raise typer.Exit(1)
 
     console.print(
-        f"\n[bold]REMI Agent Benchmark[/bold]"
-        f"  agent={agent_name}  mode={mode}  runs={runs}",
+        f"\n[bold]REMI Agent Benchmark[/bold]  agent={agent_name}  mode={mode}  runs={runs}",
     )
     console.print("[dim]Bootstrapping container…[/dim]")
 
     from remi.observability.logging import configure_logging
+
     configure_logging(level="WARNING", format="console")
 
     container = await get_container_async()
@@ -113,8 +113,7 @@ async def _bench(
         for run_i in range(runs):
             console.print(
                 f"\n[cyan]({qi}/{len(selected)})[/cyan] "
-                f"[bold]{label}[/bold]"
-                + (f" run {run_i + 1}/{runs}" if runs > 1 else "")
+                f"[bold]{label}[/bold]" + (f" run {run_i + 1}/{runs}" if runs > 1 else "")
             )
             console.print(f"  [dim]> {query}[/dim]")
 
@@ -129,7 +128,9 @@ async def _bench(
             }
 
             async def on_event(
-                event_type: str, data: dict[str, Any], _c: dict[str, Any] = collected,
+                event_type: str,
+                data: dict[str, Any],
+                _c: dict[str, Any] = collected,
             ) -> None:
                 if event_type == "tool_call":
                     tool_name = data.get("tool", "?")
@@ -198,27 +199,31 @@ async def _bench(
             except Exception as exc:
                 wall_ms = round((time.monotonic() - t0) * 1000)
                 console.print(f"  [red]✗ Error after {wall_ms}ms:[/red] {exc}")
-                run_results.append({
-                    "label": label,
-                    "query": query,
-                    "expected_intent": expected,
-                    "actual_intent": None,
-                    "intent_match": "✗",
-                    "wall_ms": wall_ms,
-                    "server_ms": wall_ms,
-                    "error": str(exc),
-                })
+                run_results.append(
+                    {
+                        "label": label,
+                        "query": query,
+                        "expected_intent": expected,
+                        "actual_intent": None,
+                        "intent_match": "✗",
+                        "wall_ms": wall_ms,
+                        "server_ms": wall_ms,
+                        "error": str(exc),
+                    }
+                )
 
         if runs > 1 and run_results:
             avg_ms = sum(r.get("server_ms", 0) for r in run_results) // len(run_results)
             avg_tokens = sum(r.get("total_tokens", 0) for r in run_results) // len(run_results)
-            results.append({
-                **run_results[0],
-                "server_ms": avg_ms,
-                "wall_ms": avg_ms,
-                "total_tokens": avg_tokens,
-                "runs": len(run_results),
-            })
+            results.append(
+                {
+                    **run_results[0],
+                    "server_ms": avg_ms,
+                    "wall_ms": avg_ms,
+                    "total_tokens": avg_tokens,
+                    "runs": len(run_results),
+                }
+            )
         elif run_results:
             results.append(run_results[0])
 
@@ -256,9 +261,14 @@ async def _bench(
 
         if error:
             table.add_row(
-                r["label"], "[red]error[/red]", "✗",
+                r["label"],
+                "[red]error[/red]",
+                "✗",
                 _fmt_ms(r.get("wall_ms", 0)),
-                "—", "—", "—", f"[red]{error[:40]}[/red]",
+                "—",
+                "—",
+                "—",
+                f"[red]{error[:40]}[/red]",
             )
         else:
             table.add_row(r["label"], intent, match, latency, tokens, cost, tools, model)
@@ -269,9 +279,7 @@ async def _bench(
     total_cost = sum(r.get("cost", 0) or 0 for r in results if "error" not in r)
     total_tokens = sum(r.get("total_tokens", 0) for r in results if "error" not in r)
     console.print(
-        f"\n[bold]Total:[/bold] {_fmt_ms(total_ms)}  "
-        f"{total_tokens:,} tokens  "
-        f"${total_cost:.4f}"
+        f"\n[bold]Total:[/bold] {_fmt_ms(total_ms)}  {total_tokens:,} tokens  ${total_cost:.4f}"
     )
     console.print()
 

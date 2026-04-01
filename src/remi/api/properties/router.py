@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_property_query, get_property_store, get_rent_roll_service
+from remi.api.schemas import DeletedResponse, UpdatedResponse
 from remi.api.properties.schemas import (
     PropertyDetail,
     PropertyListItem,
@@ -16,6 +17,7 @@ from remi.api.properties.schemas import (
 )
 from remi.models.properties import Address, PropertyStore, UnitStatus
 from remi.services.property_queries import PropertyQueryService
+from remi.shared.errors import NotFoundError
 from remi.services.rent_roll import RentRollService
 
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -39,7 +41,7 @@ async def get_property(
 ) -> PropertyDetail:
     detail = await svc.get_property_detail(property_id)
     if not detail:
-        raise HTTPException(404, f"Property '{property_id}' not found")
+        raise NotFoundError("Property", property_id)
     return PropertyDetail(
         id=detail.id,
         name=detail.name,
@@ -64,13 +66,28 @@ async def list_units(
 ) -> UnitListResponse:
     prop = await ps.get_property(property_id)
     if not prop:
-        raise HTTPException(404, f"Property '{property_id}' not found")
+        raise NotFoundError("Property", property_id)
     unit_status = UnitStatus(status) if status else None
     units = await ps.list_units(property_id=property_id, status=unit_status)
     return UnitListResponse(
         property_id=property_id,
         count=len(units),
-        units=[u.model_dump(mode="json") for u in units],
+        units=[
+            UnitSummary(
+                id=u.id,
+                property_id=u.property_id,
+                unit_number=u.unit_number,
+                status=u.status.value,
+                occupancy_status=u.occupancy_status.value if u.occupancy_status else None,
+                bedrooms=u.bedrooms,
+                bathrooms=u.bathrooms,
+                sqft=u.sqft,
+                floor=u.floor,
+                market_rent=float(u.market_rent),
+                current_rent=float(u.current_rent),
+            )
+            for u in units
+        ],
     )
 
 
@@ -81,7 +98,7 @@ async def rent_roll(
 ) -> RentRollResponse:
     result = await svc.build_rent_roll(property_id)
     if result is None:
-        raise HTTPException(404, f"Property '{property_id}' not found")
+        raise NotFoundError("Property", property_id)
     return RentRollResponse(**result.model_dump())
 
 
@@ -99,10 +116,10 @@ async def update_property(
     property_id: str,
     body: UpdatePropertyRequest,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, str]:
+) -> UpdatedResponse:
     prop = await ps.get_property(property_id)
     if not prop:
-        raise HTTPException(404, f"Property '{property_id}' not found")
+        raise NotFoundError("Property", property_id)
 
     updates: dict[str, object] = {}
     if body.name is not None:
@@ -119,15 +136,15 @@ async def update_property(
 
     updated = prop.model_copy(update=updates)
     await ps.upsert_property(updated)
-    return {"id": property_id, "name": updated.name}
+    return UpdatedResponse(id=property_id, name=updated.name)
 
 
 @router.delete("/{property_id}", status_code=200)
 async def delete_property(
     property_id: str,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     deleted = await ps.delete_property(property_id)
     if not deleted:
-        raise HTTPException(404, f"Property '{property_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("Property", property_id)
+    return DeletedResponse()

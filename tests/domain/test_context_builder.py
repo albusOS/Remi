@@ -10,12 +10,12 @@ from remi.knowledge.context_builder import (
     render_graph_context,
 )
 from remi.knowledge.graph_retriever import ResolvedEntity
-from remi.knowledge.ontology.bootstrap import load_domain_yaml
-from remi.knowledge.tokens import estimate_tokens, truncate_to_tokens
+from remi.knowledge.ontology.schema import load_domain_yaml
 from remi.models.chat import Message
 from remi.models.ontology import KnowledgeLink
 from remi.models.signals import DomainRulebook, Severity, Signal
 from remi.stores.signals import InMemorySignalStore
+from remi.vectors.tokens import estimate_tokens, truncate_to_tokens
 
 # -- token utilities ----------------------------------------------------------
 
@@ -52,14 +52,14 @@ def test_render_graph_context_with_entities() -> None:
             ResolvedEntity(
                 entity_id="prop-1",
                 entity_type="Property",
-                properties={"name": "Oak Tower", "year_built": 2010},
+                properties={"name": "100 Smithfield St", "year_built": 2010},
                 score=0.85,
             ),
         ],
     )
 
     result = render_graph_context(frame)
-    assert "Oak Tower" in result
+    assert "100 Smithfield St" in result
     assert "Property" in result
     assert "0.85" in result
     assert "Graph Context" in result
@@ -71,7 +71,7 @@ def test_render_graph_context_with_neighborhood() -> None:
             ResolvedEntity(
                 entity_id="prop-1",
                 entity_type="Property",
-                properties={"name": "Oak Tower"},
+                properties={"name": "100 Smithfield St"},
                 score=0.9,
             ),
         ],
@@ -104,7 +104,7 @@ def test_render_graph_context_with_signals() -> None:
             ResolvedEntity(
                 entity_id="mgr-1",
                 entity_type="PropertyManager",
-                properties={"name": "Alice"},
+                properties={"name": "Jake Kraus"},
                 score=0.8,
             ),
         ],
@@ -115,7 +115,7 @@ def test_render_graph_context_with_signals() -> None:
                 severity=Severity.HIGH,
                 entity_type="PropertyManager",
                 entity_id="mgr-1",
-                entity_name="Alice",
+                entity_name="Jake Kraus",
                 description="High delinquency rate",
             ),
             Signal(
@@ -124,7 +124,7 @@ def test_render_graph_context_with_signals() -> None:
                 severity=Severity.HIGH,
                 entity_type="PropertyManager",
                 entity_id="mgr-1",
-                entity_name="Alice",
+                entity_name="Jake Kraus",
                 description="Lease cliff approaching",
             ),
         ],
@@ -158,7 +158,7 @@ def test_render_graph_context_signals_not_on_entity_excluded() -> None:
             ResolvedEntity(
                 entity_id="mgr-1",
                 entity_type="PropertyManager",
-                properties={"name": "Alice"},
+                properties={"name": "Jake Kraus"},
                 score=0.8,
             ),
         ],
@@ -214,7 +214,7 @@ def test_render_domain_context_includes_compositions() -> None:
 def _make_signal(
     signal_type: str,
     severity: Severity = Severity.HIGH,
-    entity_name: str = "Alice",
+    entity_name: str = "Jake Kraus",
     description: str = "test description",
     entity_id: str = "mgr-1",
     evidence: dict | None = None,
@@ -248,9 +248,7 @@ async def test_render_active_signals_ranked() -> None:
 async def test_render_active_signals_max_signals() -> None:
     store = InMemorySignalStore()
     for i in range(20):
-        await store.put_signal(
-            _make_signal(f"Sig{i}", entity_id=f"e-{i}")
-        )
+        await store.put_signal(_make_signal(f"Sig{i}", entity_id=f"e-{i}"))
 
     result = await render_active_signals(store, max_signals=5)
     assert "20 total, showing top 5" in result
@@ -258,9 +256,7 @@ async def test_render_active_signals_max_signals() -> None:
 
 async def test_render_active_signals_truncates_descriptions() -> None:
     store = InMemorySignalStore()
-    await store.put_signal(
-        _make_signal("LongDesc", description="A" * 200)
-    )
+    await store.put_signal(_make_signal("LongDesc", description="A" * 200))
     result = await render_active_signals(store)
     assert "…" in result
 

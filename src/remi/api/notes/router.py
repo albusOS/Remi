@@ -11,11 +11,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_knowledge_graph
+from remi.api.schemas import DeletedResponse
 from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -45,6 +47,15 @@ class NoteResponse(BaseModel):
 class NoteListResponse(BaseModel):
     notes: list[NoteResponse]
     total: int
+
+
+class BatchNoteRequest(BaseModel):
+    entity_type: str
+    entity_ids: list[str]
+
+
+class BatchNoteResponse(BaseModel):
+    notes_by_entity: dict[str, list[NoteResponse]]
 
 
 def _note_resp(obj: dict) -> NoteResponse:
@@ -77,6 +88,27 @@ async def list_notes(
     return NoteListResponse(notes=notes, total=len(notes))
 
 
+@router.post("/batch", response_model=BatchNoteResponse)
+async def batch_notes(
+    body: BatchNoteRequest,
+    kg: BridgedKnowledgeGraph = Depends(get_knowledge_graph),
+) -> BatchNoteResponse:
+    """Fetch notes for multiple entities in a single round trip."""
+    all_notes = await kg.search_objects(
+        "Note",
+        filters={"entity_type": body.entity_type},
+        limit=5000,
+    )
+    by_entity: dict[str, list[NoteResponse]] = {eid: [] for eid in body.entity_ids}
+    for obj in all_notes:
+        eid = obj.get("entity_id", "")
+        if eid in by_entity:
+            by_entity[eid].append(_note_resp(obj))
+    for notes in by_entity.values():
+        notes.sort(key=lambda n: n.created_at or "", reverse=True)
+    return BatchNoteResponse(notes_by_entity=by_entity)
+
+
 @router.post("", response_model=NoteResponse, status_code=201)
 async def create_note(
     body: NoteCreateRequest,
@@ -105,7 +137,7 @@ async def update_note(
 ) -> NoteResponse:
     existing = await kg.get_object("Note", note_id)
     if not existing:
-        raise HTTPException(404, f"Note '{note_id}' not found")
+        raise NotFoundError("Note", note_id)
 
     now = datetime.now(UTC).isoformat()
     updated_props = {**existing, "content": body.content, "updated_at": now}
@@ -118,14 +150,12 @@ async def update_note(
 async def delete_note(
     note_id: str,
     kg: BridgedKnowledgeGraph = Depends(get_knowledge_graph),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     existing = await kg.get_object("Note", note_id)
     if not existing:
-        raise HTTPException(404, f"Note '{note_id}' not found")
+        raise NotFoundError("Note", note_id)
 
-
-    ks = kg._ks  # noqa: SLF001
-    deleted = await ks.delete_entity("ontology", note_id)
+    deleted = await kg.delete_object("Note", note_id)
     if not deleted:
-        raise HTTPException(404, f"Note '{note_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("Note", note_id)
+    return DeletedResponse()

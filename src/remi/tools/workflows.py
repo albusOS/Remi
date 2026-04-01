@@ -28,9 +28,7 @@ from remi.services.manager_review import ManagerReviewService
 class SubAgentInvoker(Protocol):
     """Minimal interface for calling a sub-agent by name."""
 
-    async def ask(
-        self, agent_name: str, question: str, *, mode: str
-    ) -> tuple[str | None, str]: ...
+    async def ask(self, agent_name: str, question: str, *, mode: str) -> tuple[str | None, str]: ...
 
 
 def register_workflow_tools(
@@ -62,9 +60,7 @@ def register_workflow_tools(
             result["delinquency"] = board.model_dump(mode="json")
 
         if summary.expiring_leases_90d > 0:
-            calendar = await ds.lease_expiration_calendar(
-                days=90, manager_id=manager_id
-            )
+            calendar = await ds.lease_expiration_calendar(days=90, manager_id=manager_id)
             result["lease_expirations"] = calendar.model_dump(mode="json")
 
         if summary.vacant > 0:
@@ -73,9 +69,7 @@ def register_workflow_tools(
 
         action_items = await ps.list_action_items(manager_id=manager_id)
         if action_items:
-            result["action_items"] = [
-                ai.model_dump(mode="json") for ai in action_items
-            ]
+            result["action_items"] = [ai.model_dump(mode="json") for ai in action_items]
 
         notes = await kg.search_objects(
             "Note",
@@ -129,9 +123,7 @@ def register_workflow_tools(
 
             tenant_actions = await ps.list_action_items(tenant_id=tid)
             if tenant_actions:
-                actions_by_tenant[tid] = [
-                    ai.model_dump(mode="json") for ai in tenant_actions
-                ]
+                actions_by_tenant[tid] = [ai.model_dump(mode="json") for ai in tenant_actions]
 
         if notes_by_tenant:
             result["notes_by_tenant"] = notes_by_tenant
@@ -165,14 +157,12 @@ def register_workflow_tools(
         manager_id = args.get("manager_id")
         days = int(args.get("days", 90))
 
-        calendar = await ds.lease_expiration_calendar(
-            days=days, manager_id=manager_id
-        )
+        calendar = await ds.lease_expiration_calendar(days=days, manager_id=manager_id)
         vacancies = await ds.vacancy_tracker(manager_id=manager_id)
 
-        revenue_at_risk = sum(
-            le.monthly_rent for le in calendar.leases
-        ) + vacancies.total_market_rent_at_risk
+        revenue_at_risk = (
+            sum(le.monthly_rent for le in calendar.leases) + vacancies.total_market_rent_at_risk
+        )
 
         return {
             "lease_expirations": calendar.model_dump(mode="json"),
@@ -229,9 +219,7 @@ def register_workflow_tools(
                 review_data["delinquency"] = board.model_dump(mode="json")
 
             if focus in ("leases", "all") and summary.expiring_leases_90d > 0:
-                cal = await ds.lease_expiration_calendar(
-                    days=90, manager_id=manager_id
-                )
+                cal = await ds.lease_expiration_calendar(days=90, manager_id=manager_id)
                 review_data["lease_expirations"] = cal.model_dump(mode="json")
 
             if focus in ("maintenance", "all") and summary.open_maintenance > 0:
@@ -253,9 +241,7 @@ def register_workflow_tools(
                 ]
 
             payload = json.dumps(review_data, default=str)
-            answer, _run_id = await _sa.ask(
-                "action_planner", payload, mode="agent"
-            )
+            answer, _run_id = await _sa.ask("action_planner", payload, mode="agent")
             if not answer:
                 return {"error": "Action planner returned no response"}
 

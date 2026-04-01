@@ -7,18 +7,70 @@ Google's Generative AI wire format internally.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from typing import Any
 
-from remi.llm.ports import LLMProvider, LLMResponse, TokenUsage, ToolCallRequest
+from remi.llm.ports import (
+    LLMProvider,
+    LLMResponse,
+    ModelCapabilities,
+    ModelPricing,
+    ProviderConfig,
+    TokenUsage,
+    ToolCallRequest,
+)
 from remi.models.chat import Message
 from remi.models.tools import ToolDefinition
+from remi.vectors.tokens import CHARS_PER_TOKEN
+
+_MODEL_REGISTRY: dict[str, ModelCapabilities] = {
+    "gemini-2.0-flash": ModelCapabilities(
+        context_window=1_048_576,
+        max_output_tokens=8_192,
+        supports_vision=True,
+        supports_streaming=True,
+        pricing=ModelPricing(0.1, 0.4),
+    ),
+    "gemini-1.5-pro": ModelCapabilities(
+        context_window=2_097_152,
+        max_output_tokens=8_192,
+        supports_vision=True,
+        supports_streaming=True,
+        pricing=ModelPricing(1.25, 5.0),
+    ),
+    "gemini-1.5-flash": ModelCapabilities(
+        context_window=1_048_576,
+        max_output_tokens=8_192,
+        supports_vision=True,
+        supports_streaming=True,
+        pricing=ModelPricing(0.075, 0.3),
+    ),
+    "gemini-2.5-pro": ModelCapabilities(
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_streaming=True,
+        pricing=ModelPricing(1.25, 10.0),
+    ),
+    "gemini-2.5-flash": ModelCapabilities(
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_streaming=True,
+        pricing=ModelPricing(0.15, 0.6),
+    ),
+}
+
+_DEFAULT_CAPABILITIES = ModelCapabilities(
+    context_window=1_048_576,
+    max_output_tokens=8_192,
+    supports_vision=True,
+)
 
 
 class GeminiProvider(LLMProvider):
-    def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("GOOGLE_API_KEY", "")
+    def __init__(self, config: ProviderConfig) -> None:
+        self._config = config
         self._configured = False
 
     # -- wire-format translation (REMI → Gemini) -----------------------------
@@ -111,7 +163,7 @@ class GeminiProvider(LLMProvider):
                 "pip install google-generativeai"
             ) from exc
         if not self._configured:
-            genai.configure(api_key=self._api_key)
+            genai.configure(api_key=self._config.api_key)
             self._configured = True
         return genai
 
@@ -175,3 +227,39 @@ class GeminiProvider(LLMProvider):
             usage=usage,
             tool_calls=tool_calls,
         )
+
+    def count_tokens(
+        self,
+        messages: list[Message],
+        *,
+        model: str,
+        tools: list[ToolDefinition] | None = None,
+    ) -> int:
+        """Approximate token count using character heuristic.
+
+        Gemini's count_tokens API is async and requires the SDK. For
+        synchronous budget checks we use a 4-chars-per-token estimate.
+        """
+        total_chars = 0
+        for msg in messages:
+            text = (
+                msg.content
+                if isinstance(msg.content, str)
+                else json.dumps(msg.content, default=str)
+            )
+            total_chars += len(text)
+            if msg.name:
+                total_chars += len(msg.name)
+        if tools:
+            for tool in tools:
+                total_chars += len(tool.name) + len(tool.description)
+                total_chars += len(json.dumps(tool.to_json_schema(), separators=(",", ":")))
+        return max(1, total_chars // CHARS_PER_TOKEN)
+
+    def model_capabilities(self, model: str) -> ModelCapabilities:
+        if model in _MODEL_REGISTRY:
+            return _MODEL_REGISTRY[model]
+        for prefix, caps in _MODEL_REGISTRY.items():
+            if model.startswith(prefix):
+                return caps
+        return _DEFAULT_CAPABILITIES

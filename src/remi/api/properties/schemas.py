@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
+
+from remi.models.properties import Address
 
 
 class PropertyListItem(BaseModel):
@@ -38,7 +38,7 @@ class UnitSummary(BaseModel):
 class PropertyDetail(BaseModel):
     id: str
     name: str
-    address: dict[str, Any]
+    address: Address
     property_type: str
     year_built: int | None
     total_units: int
@@ -53,7 +53,7 @@ class PropertyDetail(BaseModel):
 class UnitListResponse(BaseModel):
     property_id: str
     count: int
-    units: list[dict[str, Any]]
+    units: list[UnitSummary]
 
 
 class LeaseInRentRoll(BaseModel):

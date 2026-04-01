@@ -6,7 +6,7 @@ Maps 1:1 to the CLI ``remi onto`` subcommands.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from remi.api.dependencies import get_knowledge_graph
 from remi.api.ontology.schemas import (
@@ -26,6 +26,7 @@ from remi.api.ontology.schemas import (
 )
 from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
 from remi.models.ontology import ObjectTypeDef, PropertyDef
+from remi.shared.errors import NotFoundError
 
 router = APIRouter(prefix="/ontology", tags=["ontology"])
 
@@ -80,7 +81,7 @@ async def get_object(
     """Get a single object by type and ID."""
     obj = await store.get_object(type_name, object_id)
     if obj is None:
-        raise HTTPException(404, f"{type_name} '{object_id}' not found")
+        raise NotFoundError(type_name, object_id)
     return ObjectResponse(object=obj)
 
 
@@ -201,7 +202,7 @@ async def get_schema_type(
     """Describe a specific object type and its related link types."""
     ot = await store.get_object_type(type_name)
     if ot is None:
-        raise HTTPException(404, f"Unknown type '{type_name}'")
+        raise NotFoundError("Type", type_name)
     links = await store.list_link_types()
     related = [
         lt.model_dump(mode="json")

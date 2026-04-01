@@ -10,7 +10,7 @@ import math
 from collections import defaultdict
 from typing import Any
 
-from remi.models.retrieval import EmbeddingRecord, SearchResult, VectorStore
+from remi.vectors.ports import EmbeddingRecord, SearchResult, VectorStore
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

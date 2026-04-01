@@ -88,7 +88,7 @@ def register_document_tools(
                 "Search uploaded document rows. Can filter by document_id, text query "
                 "across all values, or column filters. Filter values can be a single "
                 "value or a list for IN-style matching, e.g. "
-                '{"property_name": ["Oak Tower", "Elm Place"]}.'
+                '{"property_name": ["100 Smithfield St", "1002 Fordham Ave"]}.'
             ),
             args=[
                 ToolArg(

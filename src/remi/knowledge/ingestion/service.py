@@ -96,17 +96,36 @@ class IngestionService:
         return portfolio_id
 
     async def _resolve_manager_alias(self, name: str) -> tuple[str | None, str | None]:
-        """Find an existing manager whose name is a prefix of or prefixed by the given name.
+        """Find an existing manager that matches the given name.
 
         Returns (manager_id, canonical_name) if found, else (None, None).
-        When a match is found, the longer name becomes canonical so the record
-        improves (e.g. "Denise" is upgraded to "Denise Shoemaker").
+
+        Two-tier matching:
+          1. Normalized slug match — handles casing/whitespace variants like
+             "NIkki Smith" vs "Nikki  Smith" (both slug to the same ID).
+          2. First-name + prefix match — handles partial names like "Denise"
+             upgrading to "Denise Shoemaker". Only used when the slug didn't
+             match, and requires the first name to be identical to avoid
+             false-positives between e.g. "Ryan Steen" and "Ryan Other".
+
+        The longer name always wins so records become more complete over time.
         """
-        first_name = name.split()[0].lower() if name else ""
-        if not first_name:
+        if not name:
             return None, None
 
+        target_slug = slugify(f"manager:{name}")
         managers = await self._ps.list_managers()
+
+        for m in managers:
+            if m.id == target_slug:
+                canonical = name if len(name) > len(m.name) else m.name
+                if len(canonical) > len(m.name):
+                    await self._ps.upsert_manager(
+                        PropertyManager(id=m.id, name=canonical, manager_tag=m.manager_tag)
+                    )
+                return m.id, canonical
+
+        first_name = name.split()[0].lower()
         for m in managers:
             m_first = m.name.split()[0].lower() if m.name else ""
             if m_first != first_name:
@@ -127,6 +146,7 @@ class IngestionService:
         name: str,
         addr: Address,
         portfolio_id: str | None = None,
+        source_document_id: str | None = None,
     ) -> None:
         existing = await self._ps.get_property(prop_id)
         if portfolio_id is not None:
@@ -137,7 +157,13 @@ class IngestionService:
             effective_pid = ""
 
         await self._ps.upsert_property(
-            Property(id=prop_id, portfolio_id=effective_pid, name=name, address=addr)
+            Property(
+                id=prop_id,
+                portfolio_id=effective_pid,
+                name=name,
+                address=addr,
+                source_document_id=source_document_id,
+            )
         )
 
     async def _upsert_entity(

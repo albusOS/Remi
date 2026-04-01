@@ -12,12 +12,58 @@ alwaysApply: true
 - Always use `uv add` to add dependencies — never `pip install`
 - Never reference `.venv/` paths
 
-## Error Handling
+## Error Handling — Zero Silent Swallows
 
-- Never silently swallow errors — let them raise
-- No bare `except`, no `except Exception: pass`, no returning `None` to mask failures
-- Use `structlog` for logging (`import structlog; logger = structlog.get_logger(...)`)
-- Do not use `print()` or the stdlib `logging` module directly
+Every exception must either **propagate** or be **logged at warning+ with
+`exc_info=True`**. There are no other options.
+
+**Banned patterns** (will be rejected in review):
+- `except Exception: pass`
+- `except Exception: continue`
+- `except SomeError: return None` without a log line
+- `except Exception as e: return {"error": str(e)}` without logging
+- Bare `except:` (always name the exception type)
+
+**Acceptable patterns:**
+- `except ImportError` for optional-dependency guards — must `raise RuntimeError` with install instructions or be an explicit feature-flag check
+- `except (KeyboardInterrupt, EOFError)` in CLI interactive loops
+- `except Exception` that logs at `warning`/`error` with `exc_info=True` **and** the caller can see the failure (via return type, error list, or re-raise)
+
+**Rules for catch-and-continue (pipelines, producers, batch loops):**
+- Log at `warning` with `exc_info=True`
+- Track the failure in a result object (`errors` count, `failed_items` list, `pipeline_warnings`)
+- The caller must be able to distinguish "nothing happened" from "it crashed"
+
+**Use `structlog`** for all logging:
+```python
+import structlog
+logger = structlog.get_logger(__name__)
+```
+Do not use `print()` or the stdlib `logging` module directly.
+
+## Type Safety — No `Any`, No `dict`
+
+**Banned in new code:**
+- `dict[str, Any]` as a return type or function parameter — define a Pydantic model or TypedDict
+- `-> Any` as a return type — be specific
+- `list[dict]` or `list[dict[str, Any]]` — define a model for the items
+- `Optional[X]` where `None` means "something went wrong" — raise instead
+
+**Acceptable uses of `Any`:**
+- `**kwargs: Any` in delegation/adapter boundaries
+- JSON deserialization intermediaries (`json.loads` result) before immediate validation
+- Third-party library interop where the upstream type is genuinely untyped
+
+**When touching existing code** that uses `dict[str, Any]` or `Any`, narrow
+the type if you can do so without a large refactor. At minimum, don't make
+it worse.
+
+## Import Hygiene
+
+- Never use `typing.TYPE_CHECKING`. If you need it, the dependency is
+  in the wrong place — fix the design, not the import.
+- Keep imports direct and honest. If module A uses a type from module B
+  at runtime, import it at the top of the file.
 
 ## Tests
 
@@ -41,6 +87,42 @@ Layer 4 — Interface   src/remi/api/          FastAPI routers — thin, delegat
 
 **State the intended layer before creating a new file or adding significant logic.**
 
+## Repository Protocols
+
+Port interfaces for storage are split into **narrow, per-entity protocols**
+(e.g. `LeaseRepository`, `UnitRepository`, `ManagerRepository`).
+`PropertyStore` is a composite that inherits all of them.
+
+- **New code must depend on the narrowest protocol** that covers its needs.
+- When touching existing code that takes `PropertyStore`, narrow the type
+  if the function only uses one or two entity groups.
+
+## Container Discipline
+
+`Container` is pure wiring — no business logic, no factory decisions.
+
+- Only attributes read **outside** `container.py` may be `self.*`.
+  Everything else is a local variable.
+- Before adding a new `self.*` attribute, verify it will be read
+  externally. If not, make it a local.
+- Do not add factory functions inside `container.py`. Factories belong
+  in the module that owns the thing being built.
+
+## Factory Pattern
+
+Each module owns the factory for the thing it defines:
+
+- `knowledge/ontology/bridge.py` → `build_knowledge_graph()`
+- `knowledge/composite.py` → `build_signal_pipeline()`
+- `knowledge/context_builder.py` → `build_context_builder()`
+- `stores/factory.py` → `build_property_store()`, `build_document_store()`, etc.
+- `llm/factory.py` → `build_provider_factory()`
+- `vectors/embedder.py` → `build_embedder()`
+
+When creating a new subsystem that requires multi-object assembly, add a
+`build_*` factory in the module that defines the top-level object.
+The container calls these factories — it does not inline the assembly.
+
 ## Key Constraints
 
 - `src/remi/config/domain.yaml` is the source of truth for signal definitions, thresholds, and rules — do not hardcode these values in Python
@@ -57,11 +139,19 @@ agents/       App YAML configs (director, knowledge_enricher, report_classifier)
 api/          FastAPI routers
 cli/          Typer CLI
 config/       Settings, DI container, domain.yaml
-knowledge/    Context builder, graph retriever
+knowledge/    Context builder, graph retriever, entailment, ingestion
+  ontology/
+    bridge.py    BridgedKnowledgeGraph + build_knowledge_graph factory
+    schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph
+    remote.py    RemoteKnowledgeGraph (HTTP client for sandbox)
+  composite.py   CompositeProducer + build_signal_pipeline factory
+  context_builder.py  ContextBuilder + build_context_builder factory
 llm/          LLM provider ports + adapters
-models/       Pydantic models
+models/       Pydantic DTOs + narrow repository protocols (ABCs)
 services/     Domain services
-stores/       Storage adapters
+stores/       Storage adapters (implementations of model ABCs)
+  factory.py  build_property_store, build_document_store, build_rollup_store
 tools/        Agent tool implementations
+vectors/      Embedding pipeline, vector store ports + adapters
 shared/       Cross-cutting primitives only
 ```

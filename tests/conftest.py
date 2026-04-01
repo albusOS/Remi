@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from remi.knowledge.entailment.engine import EntailmentEngine
-from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.knowledge.ontology.schema import load_domain_yaml
 from remi.models.properties import (
     Address,
     Portfolio,
@@ -50,21 +50,21 @@ def engine(
 # Fixture data helpers
 # ---------------------------------------------------------------------------
 
-_ADDR = Address(street="100 Main St", city="Portland", state="OR", zip_code="97201")
+_ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 
 
 async def seed_basic_portfolio(ps: InMemoryPropertyStore) -> dict[str, str]:
-    """Seed one manager → one portfolio → one property → several units.
+    """Seed one manager -> one portfolio -> one property.
 
     Returns a dict of entity IDs for convenience.
     """
-    mgr = PropertyManager(id="mgr-1", name="Alice Manager", email="a@test.com")
+    mgr = PropertyManager(id="mgr-1", name="Jake Kraus", email="jake@rivaridge.com")
     await ps.upsert_manager(mgr)
 
-    pf = Portfolio(id="pf-1", manager_id="mgr-1", name="Main Portfolio")
+    pf = Portfolio(id="pf-1", manager_id="mgr-1", name="Kraus Portfolio")
     await ps.upsert_portfolio(pf)
 
-    prop = Property(id="prop-1", portfolio_id="pf-1", name="Oak Tower", address=_ADDR)
+    prop = Property(id="prop-1", portfolio_id="pf-1", name="100 Smithfield St", address=_ADDR)
     await ps.upsert_property(prop)
 
     return {"manager_id": "mgr-1", "portfolio_id": "pf-1", "property_id": "prop-1"}

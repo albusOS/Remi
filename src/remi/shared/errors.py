@@ -54,6 +54,22 @@ class ModuleNotFoundError(DomainError):
         self.kind = kind
 
 
+class NotFoundError(DomainError):
+    """Generic 404 — requested resource does not exist."""
+
+    def __init__(self, entity: str, entity_id: str) -> None:
+        super().__init__(f"{entity} '{entity_id}' not found", code="NOT_FOUND")
+        self.entity = entity
+        self.entity_id = entity_id
+
+
+class ConflictError(DomainError):
+    """409 — resource already exists or state conflict."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="CONFLICT")
+
+
 class AppNotFoundError(DomainError):
     """Raised when an app_id is not in the registry."""
 

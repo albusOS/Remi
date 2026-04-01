@@ -81,7 +81,11 @@ async def ingest_rent_roll(
         unit_status = occupancy_to_unit_status(occupancy)
         addr = parse_address(row.property_address)
         await upsert_property_safe(
-            prop_id, row.property_name, addr, portfolio_id=upload_portfolio_id
+            prop_id,
+            row.property_name,
+            addr,
+            portfolio_id=upload_portfolio_id,
+            source_document_id=doc.id,
         )
 
         await ps.upsert_unit(
@@ -96,5 +100,6 @@ async def ingest_rent_roll(
                 days_vacant=row.days_vacant,
                 listed_on_website=row.posted_website,
                 listed_on_internet=row.posted_internet,
+                source_document_id=doc.id,
             )
         )

@@ -28,10 +28,7 @@ class InMemoryChatSessionStore(ChatSessionStore):
     def _evict_expired(self) -> None:
         """Remove sessions older than TTL."""
         cutoff = datetime.now(UTC) - self._ttl
-        expired = [
-            sid for sid, s in self._sessions.items()
-            if s.updated_at < cutoff
-        ]
+        expired = [sid for sid, s in self._sessions.items() if s.updated_at < cutoff]
         for sid in expired:
             del self._sessions[sid]
         if expired:

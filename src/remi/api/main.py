@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ from remi.api.ontology.router import router as ontology_router
 from remi.api.portfolios.router import router as portfolios_router
 from remi.api.properties.router import router as properties_router
 from remi.api.realtime.router import router as realtime_router
+from remi.api.search.router import router as search_router
 from remi.api.seed.router import router as seed_router
 from remi.api.signals.router import router as signals_router
 from remi.api.tenants.router import router as tenants_router
@@ -49,6 +51,7 @@ def _attach_routers(application: FastAPI) -> None:
     application.include_router(tenants_router, prefix="/api/v1")
     application.include_router(units_router, prefix="/api/v1")
     application.include_router(ontology_router, prefix="/api/v1")
+    application.include_router(search_router, prefix="/api/v1")
     application.include_router(seed_router, prefix="/api/v1")
     application.include_router(actions_router, prefix="/api/v1")
     application.include_router(notes_router, prefix="/api/v1")
@@ -71,17 +74,17 @@ def _add_cors(application: FastAPI, settings: RemiSettings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    import asyncio
     import os
 
     import structlog
 
-    settings = load_settings()
+    settings: RemiSettings = app.state.settings
     configure_logging(level=settings.logging.level, format=settings.logging.format)
     log = structlog.get_logger("remi.server")
 
     container = Container(settings=settings)
     app.state.container = container
-    app.state.settings = settings
     await container.ensure_bootstrapped()
 
     log.info(
@@ -92,20 +95,54 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment,
     )
 
-    if os.environ.pop("REMI_SEED_DEMO", None):
-        from remi.cli.seed import seed_into
+    seed_task: asyncio.Task[None] | None = None
+    if os.environ.pop("REMI_SEED", None):
+        seed_task = asyncio.create_task(_run_seed(container, log))
+    app.state.seed_task = seed_task
 
-        await seed_into(container.property_store)
-        result = await container.signal_pipeline.run_all()
-        log.info("seed_signals_complete", produced=result.produced)
-        embed_result = await container.embedding_pipeline.run_full()
-        log.info("seed_embeddings_complete", embedded=embed_result.embedded)
-
+    capture_task = asyncio.create_task(
+        _periodic_capture(container, settings.api.capture_interval_minutes, log)
+    )
     yield
+    if seed_task and not seed_task.done():
+        seed_task.cancel()
+    capture_task.cancel()
     log.info(Event.SERVER_SHUTDOWN)
 
 
+async def _run_seed(container: Container, log: Any) -> None:
+    """Run seed in the background so the server starts accepting requests immediately."""
+    try:
+        seed_result = await container.seed_service.seed_from_reports()
+        log.info(
+            "seed_complete",
+            managers=seed_result.managers_created,
+            properties=seed_result.properties_created,
+            reports=len(seed_result.reports_ingested),
+            signals=seed_result.signals_produced,
+            history_snapshots=seed_result.history_snapshots,
+            errors=seed_result.errors,
+        )
+    except Exception:
+        log.exception("seed_failed")
+
+
+async def _periodic_capture(container: Container, interval_minutes: int, log: Any) -> None:
+    """Background task: capture rollup snapshots on a fixed interval."""
+    import asyncio
+
+    interval = interval_minutes * 60
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            snapshots = await container.snapshot_service.capture()
+            log.info("periodic_capture_complete", managers=len(snapshots))
+        except Exception:
+            log.exception("periodic_capture_failed")
+
+
 def create_app() -> FastAPI:
+    settings = load_settings()
     application = FastAPI(
         title="REMI",
         description=(
@@ -114,11 +151,15 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    application.state.settings = settings
     install_error_handlers(application)
-    application.add_middleware(RequestIDMiddleware)
-    _add_cors(application, load_settings())
     _attach_routers(application)
     _attach_health(application)
+    # Middleware executes in reverse-add order (last-added = outermost).
+    # RequestID sits closest to the handler. CORS is outermost so its
+    # headers appear on every response including errors.
+    application.add_middleware(RequestIDMiddleware)
+    _add_cors(application, settings)
     return application
 
 
@@ -130,6 +171,8 @@ def _attach_health(application: FastAPI) -> None:
 
     @application.get("/health", tags=["ops"])
     async def health() -> dict:
+        import asyncio as _aio
+
         container: Container | None = getattr(application.state, "container", None)
         trace_count = 0
         span_count = 0
@@ -139,10 +182,22 @@ def _attach_health(application: FastAPI) -> None:
                 trace_count = len(store._by_trace)
                 span_count = len(store._spans)
         uptime_s = round(_time.time() - _boot_time)
+
+        seed_task: _aio.Task | None = getattr(application.state, "seed_task", None)
+        if seed_task is None:
+            seed_status = "not_requested"
+        elif not seed_task.done():
+            seed_status = "running"
+        elif seed_task.exception():
+            seed_status = "failed"
+        else:
+            seed_status = "complete"
+
         return {
             "status": "ok",
             "version": application.version,
             "uptime_s": uptime_s,
+            "seed": seed_status,
             "traces": trace_count,
             "spans": span_count,
         }

@@ -1,4 +1,4 @@
-"""Embedder implementations.
+"""Embedder implementations and factory.
 
 Supported providers:
   openai   — text-embedding-3-small / text-embedding-3-large (default)
@@ -6,6 +6,8 @@ Supported providers:
 
 NoopEmbedder: deterministic hash-based fallback for tests and offline dev.
               Logs a warning at construction time in non-test environments.
+
+``build_embedder`` selects the right implementation from settings.
 """
 
 from __future__ import annotations
@@ -13,11 +15,14 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from remi.models.retrieval import Embedder
+from remi.vectors.ports import Embedder
+
+if TYPE_CHECKING:
+    from remi.config.settings import EmbeddingsSettings, SecretsSettings
 
 _log = structlog.get_logger(__name__)
 
@@ -192,3 +197,25 @@ class NoopEmbedder(Embedder):
         if norm > 0:
             raw = [x / norm for x in raw]
         return raw
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def build_embedder(cfg: EmbeddingsSettings, secrets: SecretsSettings) -> Embedder:
+    """Select and construct an embedder from settings."""
+    provider = cfg.provider.lower()
+
+    if provider == "openai" and secrets.openai_api_key:
+        return OpenAIEmbedder(
+            model=cfg.model,
+            api_key=secrets.openai_api_key,
+            dimensions=cfg.dimensions,
+        )
+
+    if provider == "voyage" and secrets.voyage_api_key:
+        return VoyageEmbedder(model=cfg.model, api_key=secrets.voyage_api_key)
+
+    return NoopEmbedder()

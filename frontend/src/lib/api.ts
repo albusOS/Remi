@@ -2,6 +2,7 @@ import type {
   ActionItemResponse,
   AgentMeta,
   EntityNoteResponse,
+  MetricsHistoryResponse,
   ModelsConfig,
   ManagerListItem,
   ManagerNoteResponse,
@@ -14,6 +15,7 @@ import type {
   PropertyDetail,
   RentRollResponse,
   DocumentMeta,
+  SearchResponse,
   SnapshotHistory,
 } from "./types";
 
@@ -54,6 +56,18 @@ export const api = {
 
   snapshots: (managerId?: string) =>
     get<SnapshotHistory>(`/api/v1/dashboard/snapshots${qs({ manager_id: managerId })}`),
+
+  // --- Search ---
+
+  search: (q: string, limit = 10) =>
+    get<SearchResponse>(`/api/v1/search${qs({ q, limit })}`),
+
+  // --- Metrics History ---
+
+  metricsHistory: (entityType: string, entityId?: string, days?: number, managerId?: string) =>
+    get<MetricsHistoryResponse>(`/api/v1/dashboard/metrics-history${qs({
+      entity_type: entityType, entity_id: entityId, days, manager_id: managerId,
+    })}`),
 
   // --- Managers ---
 
@@ -270,6 +284,16 @@ export const api = {
 
   listEntityNotes: (entityType: string, entityId: string) =>
     get<{ notes: EntityNoteResponse[]; total: number }>(`/api/v1/notes?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`),
+
+  batchEntityNotes: async (entityType: string, entityIds: string[]) => {
+    const res = await fetch(`${BASE}/api/v1/notes/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity_type: entityType, entity_ids: entityIds }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ notes_by_entity: Record<string, EntityNoteResponse[]> }>;
+  },
 
   createEntityNote: async (entityType: string, entityId: string, content: string) => {
     const res = await fetch(`${BASE}/api/v1/notes`, {

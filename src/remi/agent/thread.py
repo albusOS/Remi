@@ -10,13 +10,12 @@ from remi.agent.config import AgentConfig
 
 
 def trim_thread(thread: list[Message], max_turns: int) -> list[Message]:
-    """Apply a sliding window to keep only the last *max_turns* user/assistant pairs.
+    """Apply a sliding window to keep the last *max_turns* complete exchanges.
 
-    System messages at the head are preserved unconditionally. If any
-    conversational messages are removed, a short notice is inserted after the
-    first system message so the model knows history was truncated.
-
-    A "turn" is one user message plus one assistant message (2 messages).
+    System messages at the head are preserved unconditionally. Trimming
+    operates on **complete exchanges** — a user message followed by all
+    assistant/tool messages until the next user message. This ensures
+    tool calls are never orphaned from their results.
     """
     if max_turns <= 0:
         return thread
@@ -29,18 +28,31 @@ def trim_thread(thread: list[Message], max_turns: int) -> list[Message]:
         else:
             conversation.append(msg)
 
-    max_messages = max_turns * 2
-    if len(conversation) <= max_messages:
+    # Group conversation into exchanges: each starts with a user message
+    # and includes all subsequent non-user messages (assistant, tool, system)
+    exchanges: list[list[Message]] = []
+    current: list[Message] = []
+    for msg in conversation:
+        if msg.role == "user" and current:
+            exchanges.append(current)
+            current = []
+        current.append(msg)
+    if current:
+        exchanges.append(current)
+
+    if len(exchanges) <= max_turns:
         return thread
 
-    trimmed_count = len(conversation) - max_messages
-    kept = conversation[-max_messages:]
+    trimmed_exchanges = len(exchanges) - max_turns
+    trimmed_msgs = sum(len(ex) for ex in exchanges[:trimmed_exchanges])
+    kept_exchanges = exchanges[-max_turns:]
+    kept = [msg for ex in kept_exchanges for msg in ex]
 
     notice = Message(
         role="system",
         content=(
             f"[Earlier conversation history was trimmed for context limits. "
-            f"{trimmed_count} messages removed.]"
+            f"{trimmed_msgs} messages from {trimmed_exchanges} exchanges removed.]"
         ),
     )
     return system_prefix + [notice] + kept

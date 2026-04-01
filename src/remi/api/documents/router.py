@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from remi.api.dependencies import get_document_ingest, get_document_store
 from remi.api.documents.schemas import (
@@ -16,6 +16,7 @@ from remi.api.documents.schemas import (
 )
 from remi.models.documents import DocumentStore
 from remi.services.document_ingest import DocumentIngestService
+from remi.shared.errors import DomainError, NotFoundError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -46,7 +47,7 @@ async def upload_document(
             manager=manager,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise DomainError(str(exc)) from exc
 
     return UploadResponse(
         id=result.doc.id,
@@ -91,7 +92,7 @@ async def get_document(
 ) -> DocumentDetail:
     doc = await ds.get(document_id)
     if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise NotFoundError("Document", document_id)
     return DocumentDetail(
         id=doc.id,
         filename=doc.filename,
@@ -112,7 +113,7 @@ async def query_rows(
 ) -> DocumentRowsResponse:
     doc = await ds.get(document_id)
     if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise NotFoundError("Document", document_id)
     rows = await ds.query_rows(document_id, limit=limit)
     return DocumentRowsResponse(document_id=document_id, rows=rows, count=len(rows))
 
@@ -124,5 +125,5 @@ async def delete_document(
 ) -> DeleteResponse:
     deleted = await ds.delete(document_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise NotFoundError("Document", document_id)
     return DeleteResponse(deleted=True, id=document_id)

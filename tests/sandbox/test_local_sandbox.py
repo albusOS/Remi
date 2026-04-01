@@ -69,10 +69,13 @@ async def test_exec_python_reads_written_file(sandbox: LocalSandbox) -> None:
     await sandbox.create_session("s5")
     await sandbox.write_file("s5", "input.txt", "hello world")
 
-    result = await sandbox.exec_python("s5", """
+    result = await sandbox.exec_python(
+        "s5",
+        """
 with open("input.txt") as f:
     print(f.read().upper())
-""")
+""",
+    )
     assert result.status == ExecStatus.SUCCESS
     assert "HELLO WORLD" in result.stdout
 
@@ -80,11 +83,14 @@ with open("input.txt") as f:
 @pytest.mark.asyncio
 async def test_exec_python_creates_file(sandbox: LocalSandbox) -> None:
     await sandbox.create_session("s6")
-    result = await sandbox.exec_python("s6", """
+    result = await sandbox.exec_python(
+        "s6",
+        """
 with open("output.txt", "w") as f:
     f.write("result: 42")
 print("done")
-""")
+""",
+    )
     assert result.status == ExecStatus.SUCCESS
     assert "output.txt" in result.files_created
 

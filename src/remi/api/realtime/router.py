@@ -43,7 +43,10 @@ async def chat_ws(ws: WebSocket) -> None:
     await ws.accept()
     c = ws.app.state.container
     dispatcher = build_chat_dispatcher(
-        ws, c.chat_session_store, c.chat_agent, property_store=c.property_store,
+        ws,
+        c.chat_session_store,
+        c.chat_agent,
+        property_store=c.property_store,
     )
 
     background_tasks: set[asyncio.Task[None]] = set()
@@ -72,7 +75,7 @@ async def chat_ws(ws: WebSocket) -> None:
                 method = data.get("method", "")
                 is_long_running = method in LONG_RUNNING_METHODS
             except (json.JSONDecodeError, TypeError, AttributeError):
-                pass
+                logger.debug("ws_message_not_json", raw_length=len(raw))
 
             if is_long_running:
                 request_id = data.get("id")

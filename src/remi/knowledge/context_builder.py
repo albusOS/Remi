@@ -20,9 +20,8 @@ from typing import Any
 import structlog
 
 from remi.knowledge.graph_retriever import GraphRetriever, ResolvedEntity
-from remi.knowledge.tokens import estimate_tokens, truncate_to_tokens
 from remi.models.chat import Message
-from remi.models.ontology import KnowledgeLink
+from remi.models.ontology import KnowledgeGraph, KnowledgeLink
 from remi.models.signals import (
     CausalChain,
     DomainRulebook,
@@ -34,6 +33,8 @@ from remi.models.signals import (
 from remi.models.trace import SpanKind
 from remi.observability.events import Event
 from remi.observability.tracer import Tracer
+from remi.vectors.ports import Embedder, VectorStore
+from remi.vectors.tokens import estimate_tokens, truncate_to_tokens
 
 _log = structlog.get_logger(__name__)
 
@@ -64,11 +65,14 @@ class ContextBuilder:
 
     Phases:
     1. Render domain context (TBox -> system message block)
-    2. Render active signals (ranked by relevance to the question)
+    2. Render active signals (ranked by semantic relevance to the question)
     3. Optionally resolve question-relevant entities via GraphRetriever
 
     Injection is token-budgeted: the total injected context will not
     exceed ``token_budget`` tokens (approximate, char-based estimate).
+
+    When an embedder is available, signal ranking and domain context
+    selection use embedding similarity rather than keyword overlap.
     """
 
     def __init__(
@@ -76,11 +80,13 @@ class ContextBuilder:
         domain: DomainRulebook | MutableRulebook,
         signal_store: SignalStore | None = None,
         graph_retriever: GraphRetriever | None = None,
+        embedder: Embedder | None = None,
         token_budget: int = _DEFAULT_TOKEN_BUDGET,
     ) -> None:
         self._domain = domain
         self._signal_store = signal_store
         self._graph_retriever = graph_retriever
+        self._embedder = embedder
         self._token_budget = token_budget
 
     async def build(
@@ -103,9 +109,11 @@ class ContextBuilder:
         needs_signals = run_all or "signals" in phases
         needs_graph = run_all or "graph" in phases
 
-        # Domain context is synchronous (CPU-only), run it immediately
+        # Domain context — semantic retrieval when embedder is available
         if needs_domain:
-            frame.domain_context = render_domain_context(self._domain)
+            frame.domain_context = await render_domain_context_semantic(
+                self._domain, question=question, embedder=self._embedder,
+            )
             frame.policies = list(getattr(self._domain, "policies", []))
             frame.causal_chains = list(getattr(self._domain, "causal_chains", []))
             if tracer is not None and frame.domain_context:
@@ -124,7 +132,9 @@ class ContextBuilder:
             if not (needs_signals and self._signal_store is not None):
                 return
             frame.signal_summary = await render_active_signals(
-                self._signal_store, question=question,
+                self._signal_store,
+                question=question,
+                embedder=self._embedder,
             )
             with contextlib.suppress(Exception):
                 frame.signals = await self._signal_store.list_signals()
@@ -155,9 +165,7 @@ class ContextBuilder:
                         if s.signal_id not in seen:
                             frame.signals.append(s)
                 if tracer is not None:
-                    total_links = sum(
-                        len(links) for links in frame.neighborhood.values()
-                    )
+                    total_links = sum(len(links) for links in frame.neighborhood.values())
                     async with tracer.span(
                         SpanKind.GRAPH,
                         "graph_retrieval",
@@ -186,9 +194,7 @@ class ContextBuilder:
         and allocates the remaining budget across domain context, signal
         summary, and graph context in priority order.
         """
-        existing_tokens = sum(
-            estimate_tokens(str(m.content)) for m in thread if m.content
-        )
+        existing_tokens = sum(estimate_tokens(str(m.content)) for m in thread if m.content)
         remaining = self._token_budget - existing_tokens
         insert_idx = 1
 
@@ -286,22 +292,141 @@ def render_domain_context(domain: Any) -> str:
         parts.append("\n**Composition rules (compound signals from co-occurring signals):**")
         parts.append("\n".join(comp_lines))
 
-    parts.append(
-        "\nComposition signals indicate compounding situations — prioritize them."
-    )
+    parts.append("\nComposition signals indicate compounding situations — prioritize them.")
     return "\n".join(parts)
+
+
+async def render_domain_context_semantic(
+    domain: Any,
+    *,
+    question: str | None = None,
+    embedder: Embedder | None = None,
+    max_items_per_section: int = 8,
+) -> str:
+    """Render domain context, semantically filtered when possible.
+
+    When an embedder and question are available, scores each domain rule
+    (signal definition, threshold, policy, causal chain) against the
+    question and includes only the most relevant ones. Falls back to
+    the full render when embeddings aren't available.
+    """
+    if question is None or embedder is None:
+        return render_domain_context(domain)
+
+    if isinstance(domain, MutableRulebook):
+        pass
+    elif not isinstance(domain, DomainRulebook):
+        return ""
+
+    # Collect all domain items as (section, label, text) triples
+    items: list[tuple[str, str, str]] = []
+
+    signals = getattr(domain, "signals", {})
+    for defn in signals.values() if isinstance(signals, dict) else signals:
+        desc = defn.description.split("\n")[0].strip()
+        text = f"{defn.name} {defn.severity.value} {defn.entity}: {desc}"
+        label = f"- **{defn.name}** [{defn.severity.value}] ({defn.entity}): {desc}"
+        items.append(("signals", label, text))
+
+    thresholds = getattr(domain, "thresholds", {})
+    for key, val in thresholds.items():
+        text = f"{key}: {val}"
+        label = f"- {key}: {val}"
+        items.append(("thresholds", label, text))
+
+    policies = getattr(domain, "policies", [])
+    for pol in policies:
+        text = f"{pol.deontic.value} {pol.description}"
+        label = f"- [{pol.deontic.value}] {pol.description}"
+        items.append(("policies", label, text))
+
+    causal_chains = getattr(domain, "causal_chains", [])
+    for c in causal_chains:
+        text = f"{c.cause} causes {c.effect}: {c.description}"
+        label = f"- {c.cause} → {c.effect}: {c.description}"
+        items.append(("causal", label, text))
+
+    compositions = getattr(domain, "compositions", [])
+    for comp in compositions:
+        sev = comp.severity.value if hasattr(comp.severity, "value") else str(comp.severity)
+        constituents = " + ".join(comp.constituents)
+        text = f"{comp.name} {sev} {constituents}: {comp.description.split(chr(10))[0].strip()}"
+        label = (
+            f"- **{comp.name}** [{sev}] = {constituents}: "
+            f"{comp.description.split(chr(10))[0].strip()}"
+        )
+        items.append(("compositions", label, text))
+
+    if not items:
+        return ""
+
+    # Embed question + all items in one batch
+    try:
+        texts_to_embed = [question] + [text for _, _, text in items]
+        vectors = await embedder.embed(texts_to_embed)
+        question_vec = vectors[0]
+
+        scored: list[tuple[float, str, str]] = []
+        for i, (section, label, _) in enumerate(items):
+            item_vec = vectors[i + 1]
+            dot = sum(a * b for a, b in zip(question_vec, item_vec))
+            norm_q = sum(a * a for a in question_vec) ** 0.5
+            norm_s = sum(a * a for a in item_vec) ** 0.5
+            sim = dot / (norm_q * norm_s) if norm_q and norm_s else 0.0
+            scored.append((sim, section, label))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Group by section, keeping order, cap per section
+        section_counts: dict[str, int] = {}
+        selected: list[tuple[str, str]] = []
+        for sim, section, label in scored:
+            count = section_counts.get(section, 0)
+            if count < max_items_per_section:
+                selected.append((section, label))
+                section_counts[section] = count + 1
+
+        # Render grouped by section
+        section_headers = {
+            "signals": "**Signal definitions (what the entailment engine detects):**",
+            "thresholds": "**Operational thresholds:**",
+            "policies": "**Deontic obligations:**",
+            "causal": "**Known causal relationships:**",
+            "compositions": "**Composition rules (compound signals from co-occurring signals):**",
+        }
+        parts = ["## Domain Context (semantically matched to your question)\n"]
+        current_section = ""
+        for section, label in selected:
+            if section != current_section:
+                if current_section:
+                    parts.append("")
+                parts.append(section_headers.get(section, f"**{section}:**"))
+                current_section = section
+            parts.append(label)
+
+        if len(parts) > 1:
+            parts.append("\nComposition signals indicate compounding situations — prioritize them.")
+            return "\n".join(parts)
+
+    except Exception:
+        _log.debug("semantic_domain_context_failed", exc_info=True)
+
+    # Fall back to full render
+    return render_domain_context(domain)
 
 
 async def render_active_signals(
     signal_store: Any,
     *,
     question: str | None = None,
+    embedder: Embedder | None = None,
     max_signals: int = 15,
 ) -> str:
-    """Fetch current signals, rank by relevance, and render a compact summary."""
+    """Fetch current signals, rank by semantic relevance, and render a compact summary."""
     try:
         signals = await signal_store.list_signals()
     except Exception:
+        _log.warning("signal_summary_fetch_failed", exc_info=True)
         return ""
 
     if not signals:
@@ -311,7 +436,8 @@ async def render_active_signals(
             "If the user asks about problems, verify by querying the data directly."
         )
 
-    ranked = _rank_signals(signals, question)[:max_signals]
+    ranked = await _rank_signals(signals, question, embedder)
+    ranked = ranked[:max_signals]
 
     severity_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "⚪"}
 
@@ -327,35 +453,65 @@ async def render_active_signals(
         )
 
     lines.append(
-        "\nThese signals are pre-computed from the data. Reference them by name "
-        "in your response."
+        "\nThese signals are pre-computed from the data. Reference them by name in your response."
     )
     return "\n".join(lines)
 
 
-def _rank_signals(signals: list[Signal], question: str | None) -> list[Signal]:
-    """Sort signals by relevance: severity tier, then keyword overlap with the question."""
+async def _rank_signals(
+    signals: list[Signal],
+    question: str | None,
+    embedder: Embedder | None = None,
+) -> list[Signal]:
+    """Rank signals by semantic relevance to the question.
+
+    When an embedder is available, computes cosine similarity between
+    the question embedding and each signal's text representation. Falls
+    back to keyword overlap when no embedder is configured.
+    """
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
-    question_words: set[str] = set()
-    if question:
-        question_words = {w.lower() for w in re.findall(r"[a-zA-Z]{3,}", question)}
+    def _signal_text(s: Signal) -> str:
+        return f"{s.signal_type} {s.entity_name} {s.description}"
 
-    def sort_key(s: Signal) -> tuple[int, int, str]:
+    # Try embedding-based ranking first
+    similarity_scores: dict[str, float] = {}
+    if question and embedder is not None:
+        try:
+            signal_texts = [_signal_text(s) for s in signals]
+            all_texts = [question] + signal_texts
+            all_vectors = await embedder.embed(all_texts)
+
+            question_vec = all_vectors[0]
+            for i, s in enumerate(signals):
+                signal_vec = all_vectors[i + 1]
+                dot = sum(a * b for a, b in zip(question_vec, signal_vec))
+                norm_q = sum(a * a for a in question_vec) ** 0.5
+                norm_s = sum(a * a for a in signal_vec) ** 0.5
+                similarity_scores[s.signal_id] = dot / (norm_q * norm_s) if norm_q and norm_s else 0.0
+        except Exception:
+            _log.debug("embedding_signal_rank_failed", exc_info=True)
+
+    # Keyword overlap fallback when embeddings aren't available
+    keyword_scores: dict[str, int] = {}
+    if not similarity_scores and question:
+        question_words = {w.lower() for w in re.findall(r"[a-zA-Z]{3,}", question)}
+        for s in signals:
+            haystack_words = set(re.findall(r"[a-zA-Z]{3,}", _signal_text(s).lower()))
+            keyword_scores[s.signal_id] = len(question_words & haystack_words)
+
+    def sort_key(s: Signal) -> tuple[int, int, float, str]:
         sev = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
         tier = severity_order.get(sev, 4)
-
-        overlap = 0
-        if question_words:
-            haystack = f"{s.signal_type} {s.entity_name} {s.description}".lower()
-            haystack_words = set(re.findall(r"[a-zA-Z]{3,}", haystack))
-            overlap = len(question_words & haystack_words)
-
-        # Composite signals (evidence has composition_rule) get a small boost
         is_composite = "composition_rule" in (s.evidence or {})
         composite_boost = 0 if is_composite else 1
 
-        return (composite_boost, tier, -overlap, s.signal_type)
+        if similarity_scores:
+            relevance = -similarity_scores.get(s.signal_id, 0.0)
+        else:
+            relevance = -float(keyword_scores.get(s.signal_id, 0))
+
+        return (composite_boost, tier, relevance, s.signal_type)
 
     return sorted(signals, key=sort_key)
 
@@ -390,9 +546,7 @@ def render_graph_context(
         )
 
         display_props = {
-            k: v
-            for k, v in entity.properties.items()
-            if k not in ("text",) and v is not None
+            k: v for k, v in entity.properties.items() if k not in ("text",) and v is not None
         }
         if display_props:
             prop_parts = [f"{k}={v}" for k, v in list(display_props.items())[:8]]
@@ -403,14 +557,8 @@ def render_graph_context(
             entity_lines.append("  Relationships:")
             for link in links:
                 direction = "→" if link.source_id == entity.entity_id else "←"
-                other_id = (
-                    link.target_id
-                    if link.source_id == entity.entity_id
-                    else link.source_id
-                )
-                entity_lines.append(
-                    f"  - {direction} {link.link_type} → `{other_id}`"
-                )
+                other_id = link.target_id if link.source_id == entity.entity_id else link.source_id
+                entity_lines.append(f"  - {direction} {link.link_type} → `{other_id}`")
 
         sigs = entity_signals.get(entity.entity_id, [])
         for sig in sigs:
@@ -431,8 +579,7 @@ def render_graph_context(
         return ""
 
     lines.append(
-        "This graph context was pre-fetched based on your question. "
-        "Use it to ground your answer."
+        "This graph context was pre-fetched based on your question. Use it to ground your answer."
     )
     return "\n".join(lines)
 
@@ -446,3 +593,26 @@ def extract_signal_references(text: str, domain: Any) -> list[str]:
         if re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE):
             found.append(name)
     return found
+
+
+def build_context_builder(
+    *,
+    domain: DomainRulebook | MutableRulebook,
+    signal_store: SignalStore,
+    knowledge_graph: KnowledgeGraph,
+    vector_store: VectorStore | None = None,
+    embedder: Embedder | None = None,
+) -> ContextBuilder:
+    """Factory: assembles a ContextBuilder with its GraphRetriever."""
+    graph_retriever = GraphRetriever(
+        knowledge_graph=knowledge_graph,
+        vector_store=vector_store,
+        embedder=embedder,
+        signal_store=signal_store,
+    )
+    return ContextBuilder(
+        domain=domain,
+        signal_store=signal_store,
+        graph_retriever=graph_retriever,
+        embedder=embedder,
+    )

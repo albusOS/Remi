@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remi.knowledge.ontology.bootstrap import load_domain_yaml
+from remi.knowledge.ontology.schema import load_domain_yaml
 from remi.models.signals import (
     CausalChain,
     Deontic,
@@ -117,8 +117,13 @@ class TestTypedCausalChains:
 class TestThresholds:
     def test_thresholds_have_expected_keys(self) -> None:
         domain = _domain()
-        for key in ("vacancy_chronic_days", "lease_cliff_pct", "delinquency_critical_pct",
-                     "maintenance_backlog_days", "below_market_rent_pct"):
+        for key in (
+            "vacancy_chronic_days",
+            "lease_cliff_pct",
+            "delinquency_critical_pct",
+            "maintenance_backlog_days",
+            "below_market_rent_pct",
+        ):
             assert key in domain.thresholds, f"Missing threshold: {key}"
             assert domain.threshold(key) > 0
 

@@ -73,10 +73,13 @@ async def test_search_objects_empty(client: AsyncClient) -> None:
 
 
 async def test_search_objects_post_with_filters(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/ontology/search/Unit", json={
-        "filters": {"status": "vacant"},
-        "limit": 10,
-    })
+    resp = await client.post(
+        "/api/v1/ontology/search/Unit",
+        json={
+            "filters": {"status": "vacant"},
+            "limit": 10,
+        },
+    )
     assert resp.status_code == 200
     assert "objects" in resp.json()
 
@@ -111,9 +114,12 @@ async def test_related_with_depth(client: AsyncClient) -> None:
 
 
 async def test_aggregate_count(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/ontology/aggregate/PropertyManager", json={
-        "metric": "count",
-    })
+    resp = await client.post(
+        "/api/v1/ontology/aggregate/PropertyManager",
+        json={
+            "metric": "count",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["type_name"] == "PropertyManager"
@@ -136,11 +142,14 @@ async def test_timeline_empty(client: AsyncClient) -> None:
 
 
 async def test_codify_observation(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/ontology/codify", json={
-        "knowledge_type": "observation",
-        "data": {"description": "Test observation from API"},
-        "provenance": "inferred",
-    })
+    resp = await client.post(
+        "/api/v1/ontology/codify",
+        json={
+            "knowledge_type": "observation",
+            "data": {"description": "Test observation from API"},
+            "provenance": "inferred",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -149,12 +158,15 @@ async def test_codify_observation(client: AsyncClient) -> None:
 
 
 async def test_codify_with_link(client: AsyncClient, container: Container) -> None:
-    resp = await client.post("/api/v1/ontology/codify", json={
-        "knowledge_type": "causal_link",
-        "data": {"description": "Cause and effect"},
-        "source_id": "entity-a",
-        "target_id": "entity-b",
-    })
+    resp = await client.post(
+        "/api/v1/ontology/codify",
+        json={
+            "knowledge_type": "causal_link",
+            "data": {"description": "Cause and effect"},
+            "source_id": "entity-a",
+            "target_id": "entity-b",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -167,14 +179,17 @@ async def test_codify_with_link(client: AsyncClient, container: Container) -> No
 
 
 async def test_define_type(client: AsyncClient, container: Container) -> None:
-    resp = await client.post("/api/v1/ontology/define", json={
-        "name": "TestWidget",
-        "description": "A test widget type",
-        "properties": [
-            {"name": "color", "data_type": "string"},
-            {"name": "weight", "data_type": "decimal", "required": True},
-        ],
-    })
+    resp = await client.post(
+        "/api/v1/ontology/define",
+        json={
+            "name": "TestWidget",
+            "description": "A test widget type",
+            "properties": [
+                {"name": "color", "data_type": "string"},
+                {"name": "weight", "data_type": "decimal", "required": True},
+            ],
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True

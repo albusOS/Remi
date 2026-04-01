@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from remi.models.retrieval import EmbeddingRecord
-from remi.stores.vectors import InMemoryVectorStore
+from remi.vectors.ports import EmbeddingRecord
+from remi.vectors.store import InMemoryVectorStore
 
 
 @pytest.fixture
@@ -105,7 +105,8 @@ class TestSearch:
         await store.put(_make_record("r2", [1.0], manager_id="mgr-2"))
 
         results = await store.search(
-            [1.0], metadata_filter={"manager_id": "mgr-1"},
+            [1.0],
+            metadata_filter={"manager_id": "mgr-1"},
         )
         assert len(results) == 1
         assert results[0].record.metadata["manager_id"] == "mgr-1"

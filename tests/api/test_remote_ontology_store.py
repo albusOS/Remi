@@ -91,9 +91,7 @@ async def test_search_objects_empty(remote_store: RemoteKnowledgeGraph) -> None:
 
 
 async def test_search_with_filters(remote_store: RemoteKnowledgeGraph) -> None:
-    results = await remote_store.search_objects(
-        "Unit", filters={"status": "vacant"}, limit=5
-    )
+    results = await remote_store.search_objects("Unit", filters={"status": "vacant"}, limit=5)
     assert isinstance(results, list)
 
 
@@ -151,9 +149,7 @@ async def test_codify_returns_entity_id(remote_store: RemoteKnowledgeGraph) -> N
 # -- Contract parity: remote matches local ------------------------------------
 
 
-async def test_schema_parity(
-    remote_store: RemoteKnowledgeGraph, container: Container
-) -> None:
+async def test_schema_parity(remote_store: RemoteKnowledgeGraph, container: Container) -> None:
     """RemoteKnowledgeGraph returns the same types as the local store."""
     local_types = await container.knowledge_graph.list_object_types()
     remote_types = await remote_store.list_object_types()
@@ -163,9 +159,7 @@ async def test_schema_parity(
     assert local_names == remote_names
 
 
-async def test_aggregate_parity(
-    remote_store: RemoteKnowledgeGraph, container: Container
-) -> None:
+async def test_aggregate_parity(remote_store: RemoteKnowledgeGraph, container: Container) -> None:
     """Aggregate results match between local and remote."""
     local_result = await container.knowledge_graph.aggregate("PropertyManager", "count")
     remote_result = await remote_store.aggregate("PropertyManager", "count")

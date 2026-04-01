@@ -231,7 +231,7 @@ async def test_entailment_engine_implements_signal_producer(
     property_store: InMemoryPropertyStore,
 ) -> None:
     """EntailmentEngine is a valid SignalProducer."""
-    from remi.knowledge.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.schema import load_domain_yaml
 
     domain = DomainRulebook.from_yaml(load_domain_yaml())
     engine = EntailmentEngine(domain=domain, property_store=property_store)
@@ -284,13 +284,14 @@ async def test_statistical_outlier_detection(
     await property_store.upsert_unit(outlier)
 
     producer = StatisticalProducer(
-        knowledge_graph=knowledge_graph, zscore_threshold=2.0, min_sample_size=5,
+        knowledge_graph=knowledge_graph,
+        zscore_threshold=2.0,
+        min_sample_size=5,
     )
     result = await producer.evaluate()
 
     outlier_signals = [
-        s for s in result.signals
-        if "outlier" in s.signal_id.lower() and "u-outlier" in s.signal_id
+        s for s in result.signals if "outlier" in s.signal_id.lower() and "u-outlier" in s.signal_id
     ]
     assert len(outlier_signals) >= 1, (
         f"Expected at least 1 outlier signal for u-outlier, "
@@ -327,11 +328,13 @@ async def test_feedback_record_and_retrieve(
 async def test_feedback_list_by_signal(
     feedback_store: InMemoryFeedbackStore,
 ) -> None:
-    for i, outcome in enumerate([
-        SignalOutcome.ACTED_ON,
-        SignalOutcome.DISMISSED,
-        SignalOutcome.ACKNOWLEDGED,
-    ]):
+    for i, outcome in enumerate(
+        [
+            SignalOutcome.ACTED_ON,
+            SignalOutcome.DISMISSED,
+            SignalOutcome.ACKNOWLEDGED,
+        ]
+    ):
         fb = SignalFeedback(
             feedback_id=f"fb-{i}",
             signal_id="sig-1",
@@ -344,7 +347,8 @@ async def test_feedback_list_by_signal(
     assert len(all_fb) == 3
 
     acted = await feedback_store.list_feedback(
-        signal_id="sig-1", outcome="acted_on",
+        signal_id="sig-1",
+        outcome="acted_on",
     )
     assert len(acted) == 1
 
@@ -352,13 +356,15 @@ async def test_feedback_list_by_signal(
 async def test_feedback_summary(
     feedback_store: InMemoryFeedbackStore,
 ) -> None:
-    for i, outcome in enumerate([
-        SignalOutcome.ACTED_ON,
-        SignalOutcome.ACTED_ON,
-        SignalOutcome.DISMISSED,
-        SignalOutcome.ACKNOWLEDGED,
-        SignalOutcome.FALSE_POSITIVE,
-    ]):
+    for i, outcome in enumerate(
+        [
+            SignalOutcome.ACTED_ON,
+            SignalOutcome.ACTED_ON,
+            SignalOutcome.DISMISSED,
+            SignalOutcome.ACKNOWLEDGED,
+            SignalOutcome.FALSE_POSITIVE,
+        ]
+    ):
         fb = SignalFeedback(
             feedback_id=f"fb-{i}",
             signal_id=f"sig-{i}",
@@ -391,7 +397,7 @@ async def test_full_pipeline_integration(
     knowledge_graph: BridgedKnowledgeGraph,
 ) -> None:
     """End-to-end: rules + stats produce signals, feedback records outcomes."""
-    from remi.knowledge.ontology.bootstrap import load_domain_yaml
+    from remi.knowledge.ontology.schema import load_domain_yaml
 
     await _bootstrap(knowledge_graph)
 
@@ -427,6 +433,6 @@ async def test_full_pipeline_integration(
 
 
 async def _bootstrap(knowledge_graph: BridgedKnowledgeGraph) -> None:
-    from remi.knowledge.ontology.bootstrap import bootstrap_knowledge_graph
+    from remi.knowledge.ontology.schema import seed_knowledge_graph
 
-    await bootstrap_knowledge_graph(knowledge_graph)
+    await seed_knowledge_graph(knowledge_graph)

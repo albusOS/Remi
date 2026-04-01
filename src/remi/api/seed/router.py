@@ -1,154 +1,55 @@
-"""Seed endpoint — ingest sample AppFolio reports in correct dependency order.
+"""Seed endpoint — ingest AppFolio report exports in dependency order.
 
 POST /api/v1/seed/reports   — ingest the bundled sample reports
-POST /api/v1/seed/demo      — load synthetic demo data (Alice Chen / Bob Diaz)
-DELETE /api/v1/seed         — clear all in-memory state (restart-equivalent)
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from remi.api.dependencies import get_auto_assign_service, get_container, get_document_ingest
-from remi.config.container import Container
-from remi.services.auto_assign import AutoAssignService
-from remi.services.document_ingest import DocumentIngestService
+from remi.api.dependencies import get_seed_service
+from remi.services.seed import IngestedReport, SeedService
+from remi.shared.errors import IngestionError
 
 router = APIRouter(prefix="/seed", tags=["seed"])
 logger = structlog.get_logger("remi.seed")
 
-# Relative to the project root (two levels above the package src/remi dir).
-_PACKAGE_ROOT = Path(__file__).resolve().parents[4]
-_SAMPLE_DIR = _PACKAGE_ROOT / "data" / "sample_reports" / "Alex_Budavich_Reports"
 
-# Ingest order matters: property directory creates the manager/property spine
-# that delinquency and lease expiration attach to. Rent roll last since it's
-# vacancy-only and has no manager tags.
-_REPORT_ORDER = [
-    "property_directory-20260330.xlsx",
-    "Delinquency.xlsx",
-    "Lease Expiration Detail By Month.xlsx",
-    "Rent Roll_Vacancy (1).xlsx",
-]
-
-
-class SeedResult(BaseModel):
+class SeedResponse(BaseModel):
     ok: bool
-    reports_ingested: list[dict[str, Any]]
+    reports_ingested: list[IngestedReport]
     managers_created: int
     properties_created: int
     auto_assigned: int
     signals_produced: int
+    history_snapshots: int
     errors: list[str]
 
 
-class DemoSeedResult(BaseModel):
-    ok: bool
-    summary: str
-
-
-@router.post("/reports", response_model=SeedResult)
+@router.post("/reports", response_model=SeedResponse)
 async def seed_reports(
-    ingest: DocumentIngestService = Depends(get_document_ingest),
-    auto_assign: AutoAssignService = Depends(get_auto_assign_service),
-    container: Container = Depends(get_container),
-) -> SeedResult:
+    seed_service: SeedService = Depends(get_seed_service),
+) -> SeedResponse:
     """Ingest the bundled AppFolio sample reports in dependency order.
 
     Safe to call multiple times — documents and entities are upserted, not
     duplicated. Triggers auto-assign and signal pipeline after ingestion.
     """
-    if not _SAMPLE_DIR.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Sample reports directory not found: {_SAMPLE_DIR}",
-        )
+    result = await seed_service.seed_from_reports()
 
-    reports_ingested: list[dict[str, Any]] = []
-    errors: list[str] = []
-    total_entities = 0
+    if not result.ok and not result.reports_ingested:
+        detail = result.errors[0] if result.errors else "Seed failed"
+        raise IngestionError(detail)
 
-    for filename in _REPORT_ORDER:
-        path = _SAMPLE_DIR / filename
-        if not path.exists():
-            errors.append(f"Missing: {filename}")
-            logger.warning("seed_report_missing", filename=filename, path=str(path))
-            continue
-
-        try:
-            content = path.read_bytes()
-            result = await ingest.ingest_upload(filename, content, "", manager=None)
-            reports_ingested.append(
-                {
-                    "filename": filename,
-                    "report_type": result.report_type,
-                    "rows": result.doc.row_count,
-                    "entities": result.entities_extracted,
-                    "relationships": result.relationships_extracted,
-                }
-            )
-            total_entities += result.entities_extracted
-            logger.info(
-                "seed_report_ingested",
-                filename=filename,
-                report_type=result.report_type,
-                rows=result.doc.row_count,
-                entities=result.entities_extracted,
-            )
-        except Exception as exc:
-            msg = f"{filename}: {exc}"
-            errors.append(msg)
-            logger.exception("seed_report_failed", filename=filename)
-
-    # Auto-assign: wire properties to managers from embedded tags
-    assigned = 0
-    try:
-        assign_result = await auto_assign.auto_assign()
-        assigned = assign_result.assigned
-        logger.info("seed_auto_assign_complete", assigned=assigned)
-    except Exception:
-        logger.exception("seed_auto_assign_failed")
-
-    # Run signal pipeline so the dashboard lights up
-    signals_produced = 0
-    try:
-        sig_result = await container.signal_pipeline.run_all()
-        signals_produced = sig_result.produced
-        logger.info("seed_signals_complete", produced=signals_produced)
-    except Exception:
-        logger.exception("seed_signals_failed")
-
-    # Count managers and properties now in the store
-    managers = await container.property_store.list_managers()
-    properties = await container.property_store.list_properties()
-
-    return SeedResult(
-        ok=len(errors) == 0,
-        reports_ingested=reports_ingested,
-        managers_created=len(managers),
-        properties_created=len(properties),
-        auto_assigned=assigned,
-        signals_produced=signals_produced,
-        errors=errors,
+    return SeedResponse(
+        ok=result.ok,
+        reports_ingested=result.reports_ingested,
+        managers_created=result.managers_created,
+        properties_created=result.properties_created,
+        auto_assigned=result.auto_assigned,
+        signals_produced=result.signals_produced,
+        history_snapshots=result.history_snapshots,
+        errors=result.errors,
     )
-
-
-@router.post("/demo", response_model=DemoSeedResult)
-async def seed_demo(
-    container: Container = Depends(get_container),
-) -> DemoSeedResult:
-    """Load synthetic demo data (Alice Chen / Bob Diaz — Portland)."""
-    from remi.cli.seed import seed_into
-
-    try:
-        summary = await seed_into(container.property_store)
-        await container.signal_pipeline.run_all()
-        await container.embedding_pipeline.run_full()
-        return DemoSeedResult(ok=True, summary=summary)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc

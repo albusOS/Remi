@@ -10,7 +10,7 @@ The director's core question: **which of my managers needs my attention, and why
 # Install with dev dependencies
 uv sync --extra dev
 
-# Start the API server with demo data
+# Start the API server (seed from AppFolio reports)
 uv run remi serve --seed
 
 # Start the frontend (separate terminal)
@@ -33,11 +33,11 @@ uv run remi trace list                # Recent reasoning traces
 
 ## Architecture
 
-REMI is built on four layers. Each has a single job.
+REMI is built on four layers. Each has a single job. The `Container` (in `config/container.py`) is pure wiring — it calls factory functions defined in the modules that own the things being built.
 
 ```
 Layer 1 — Facts       src/remi/stores/       Storage adapters (properties, signals, documents, vectors, traces, memory, chat, snapshots)
-Layer 2 — Domain      src/remi/config/       domain.yaml (rulebook), ontology (schema), DI container, settings
+Layer 2 — Domain      src/remi/config/       domain.yaml (rulebook), DI container, settings
 Layer 3 — Signals     src/remi/services/     Entailment engine → signals; pattern detector → hypotheses; domain services
 Layer 4 — Interface   src/remi/api/          FastAPI REST + WebSocket
                       src/remi/cli/          Typer CLI
@@ -52,8 +52,8 @@ Layer 4 — Interface   src/remi/api/          FastAPI REST + WebSocket
 | Layer | What | Where |
 |-------|------|-------|
 | **Domain Rulebook** | What things mean — signal definitions, thresholds, policies, causal chains | `src/remi/config/domain.yaml` |
-| **Ontology** | What types exist and how they relate — object types, link types, constraints | `src/remi/knowledge/ontology/` |
-| **Knowledge Graph** | What actually happened — entities, relationships, observations | `PropertyStore` + `KnowledgeStore` |
+| **Schema** | What types exist and how they relate — object types, link types, constraints | `src/remi/knowledge/ontology/schema.py` |
+| **Knowledge Graph** | What actually happened — entities, relationships, observations | `PropertyStore` + `KnowledgeStore` via `BridgedKnowledgeGraph` |
 
 The **Entailment Engine** evaluates rulebook rules against knowledge graph facts and produces **Signals** — named, evidenced, severity-ranked domain states.
 
@@ -211,7 +211,7 @@ npm run dev    # http://localhost:3000
 
 | Command | Purpose |
 |---------|---------|
-| `remi serve [--seed]` | Start the API server (optionally seed demo data) |
+| `remi serve [--seed]` | Start the API server (optionally ingest AppFolio reports) |
 | `remi dashboard` | Textual TUI dashboard |
 | `remi ai ask <question>` | Ask the director agent |
 | `remi research <question>` | Deep research with the researcher agent |
@@ -242,7 +242,7 @@ npm run dev    # http://localhost:3000
 | `remi trace list` | Recent traces |
 | `remi trace show <id>` | Full span tree |
 | `remi trace spans <id>` | Flat span list |
-| `remi seed` | Seed demo data |
+| `remi seed` | Ingest AppFolio report exports |
 | `remi bench` | Run benchmarks |
 
 ## Module Map
@@ -253,19 +253,25 @@ src/remi/
   agents/       YAML configs — director, researcher, action_planner, report_classifier, knowledge_enricher
   api/          FastAPI routers, schemas, middleware, realtime (WebSocket chat + events)
   cli/          Typer CLI entry points
-  config/       Settings, DI container, domain.yaml (the rulebook)
+  config/       Settings, DI container (pure wiring), domain.yaml (the rulebook)
   db/           Database engine and tables (Postgres support)
   documents/    AppFolio report schema and parsers
-  knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline, ontology
+  knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline
+    ontology/
+      bridge.py    BridgedKnowledgeGraph + build_knowledge_graph() factory
+      schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph()
+      remote.py    RemoteKnowledgeGraph (HTTP client for sandbox processes)
+    composite.py   CompositeProducer + build_signal_pipeline() factory
+    context_builder.py  ContextBuilder + build_context_builder() factory
   llm/          LLM provider ports + adapters (Anthropic, OpenAI, Gemini)
-  models/       Pydantic models — properties, signals, ontology, chat, documents, trace, memory, sandbox, tools
+  models/       Pydantic models + narrow repository protocols (per-entity ABCs)
   observability/ Structured logging (structlog), events, tracer
   sandbox/      Isolated code execution (local subprocess sandbox, data bridge)
-  services/     Domain services — dashboard, manager review, document ingestion, lease/portfolio/property/maintenance queries, rent roll, snapshots, auto-assign
+  services/     Domain services — dashboard, manager review, document ingestion, queries, rent roll, snapshots, auto-assign
   shared/       Cross-cutting primitives — enums, errors, ids, clock, result, paths, text
-  stores/       Storage adapters — properties, signals, documents, vectors, chat, trace, memory, snapshots, Postgres variants
+  stores/       Storage adapters + factory.py (build_property_store, build_document_store, etc.)
   tools/        Agent tool implementations — ontology, documents, memory, sandbox, trace, vectors, actions, workflows
-  vectors/      Embedding pipeline, embedder
+  vectors/      Embedding pipeline, vector store ports + adapters
 ```
 
 ## Data Ingestion
@@ -324,8 +330,12 @@ uv run ruff format src/ tests/
 - Always use `uv add` for dependencies — never `pip install`
 - Use `structlog` for logging — not `print()` or stdlib `logging`
 - Never silently swallow errors — let them raise
+- Never use `typing.TYPE_CHECKING` — if you need it, the dependency is in the wrong place
 - `domain.yaml` is the source of truth for signals, thresholds, and rules — do not hardcode these in Python
 - `src/remi/shared/` is for cross-cutting primitives only — no business logic
+- Factory functions live in the module that defines the thing being built, not in the container
+- New code depends on the narrowest repository protocol (`LeaseRepository`, not `PropertyStore`)
+- Backward-compat aliases get a `# COMPAT:` comment
 
 ## License
 

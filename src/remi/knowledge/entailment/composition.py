@@ -47,9 +47,7 @@ class CompositionProducer(SignalProducer):
 
     async def evaluate(self) -> ProducerResult:
         result = ProducerResult(source=self.name)
-        compositions: list[CompositionRule] = getattr(
-            self._domain, "compositions", []
-        )
+        compositions: list[CompositionRule] = getattr(self._domain, "compositions", [])
         if not compositions:
             return result
 

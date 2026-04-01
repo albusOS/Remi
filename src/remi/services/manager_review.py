@@ -11,7 +11,14 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from remi.models.properties import LeaseStatus, MaintenanceStatus, PropertyStore, UnitStatus
+from remi.models.properties import LeaseStatus, PropertyStore
+from remi.services.unit_metrics import (
+    is_below_market,
+    is_maintenance_open,
+    is_occupied,
+    is_vacant,
+    loss_to_lease,
+)
 
 # ---------------------------------------------------------------------------
 # Response models
@@ -74,7 +81,23 @@ class ManagerSummary(BaseModel):
     top_issues: list[UnitIssue]
 
 
-_BELOW_MARKET_THRESHOLD = 0.03
+class ManagerRanking(BaseModel, frozen=True):
+    manager_id: str
+    name: str
+    total_units: int
+    occupied: int
+    vacant: int
+    occupancy_rate: float
+    total_actual_rent: float
+    total_market_rent: float
+    total_loss_to_lease: float
+    total_vacancy_loss: float
+    delinquent_count: int
+    total_delinquent_balance: float
+    delinquency_rate: float
+    open_maintenance: int
+    expiring_leases_90d: int
+    property_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +137,9 @@ class ManagerReviewService:
         top_issues: list[UnitIssue] = []
 
         # Gather all properties across portfolios concurrently
-        portfolio_props = await asyncio.gather(*[
-            self._ps.list_properties(portfolio_id=p.id) for p in portfolios
-        ])
+        portfolio_props = await asyncio.gather(
+            *[self._ps.list_properties(portfolio_id=p.id) for p in portfolios]
+        )
         all_props_with_portfolio = [
             (prop, portfolio)
             for portfolio, props in zip(portfolios, portfolio_props, strict=True)
@@ -132,42 +155,30 @@ class ManagerReviewService:
             )
             return u, le, m
 
-        prop_data = await asyncio.gather(*[
-            _load_prop(prop.id) for prop, _ in all_props_with_portfolio
-        ])
+        prop_data = await asyncio.gather(
+            *[_load_prop(prop.id) for prop, _ in all_props_with_portfolio]
+        )
 
         for (prop, portfolio), (units, leases, maint) in zip(
-            all_props_with_portfolio, prop_data, strict=True,
+            all_props_with_portfolio,
+            prop_data,
+            strict=True,
         ):
             property_count += 1
 
             p_units = len(units)
-            p_occ = sum(1 for u in units if u.status == UnitStatus.OCCUPIED)
-            p_vac = sum(1 for u in units if u.status == UnitStatus.VACANT)
+            p_occ = sum(1 for u in units if is_occupied(u))
+            p_vac = sum(1 for u in units if is_vacant(u))
             p_market = sum((u.market_rent for u in units), Decimal("0"))
             p_actual = sum((u.current_rent for u in units), Decimal("0"))
-            p_ltl = sum(
-                (
-                    u.market_rent - u.current_rent
-                    for u in units
-                    if u.current_rent < u.market_rent
-                ),
-                Decimal("0"),
-            )
+            p_ltl = sum((loss_to_lease(u) for u in units), Decimal("0"))
             p_vloss = sum(
-                (u.market_rent for u in units if u.status == UnitStatus.VACANT),
+                (u.market_rent for u in units if is_vacant(u)),
                 Decimal("0"),
             )
-            p_open_maint = sum(
-                1
-                for m in maint
-                if m.status in (MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS)
-            )
+            p_open_maint = sum(1 for m in maint if is_maintenance_open(m))
             p_emergency = sum(
-                1
-                for m in maint
-                if m.status in (MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS)
-                and m.priority.value == "emergency"
+                1 for m in maint if is_maintenance_open(m) and m.priority.value == "emergency"
             )
 
             p_expiring = 0
@@ -180,14 +191,7 @@ class ManagerReviewService:
                 elif le.status == LeaseStatus.EXPIRED:
                     p_expired += 1
 
-            p_below = sum(
-                1
-                for u in units
-                if u.market_rent > 0
-                and u.current_rent < u.market_rent
-                and float((u.market_rent - u.current_rent) / u.market_rent)
-                > _BELOW_MARKET_THRESHOLD
-            )
+            p_below = sum(1 for u in units if is_below_market(u))
 
             total_units += p_units
             occupied += p_occ
@@ -228,32 +232,20 @@ class ManagerReviewService:
 
             for u in units:
                 unit_issues: list[str] = []
-                if u.status == UnitStatus.VACANT:
+                if is_vacant(u):
                     unit_issues.append("vacant")
-                if (
-                    u.market_rent > 0
-                    and u.current_rent < u.market_rent
-                    and float((u.market_rent - u.current_rent) / u.market_rent)
-                    > _BELOW_MARKET_THRESHOLD
-                ):
+                if is_below_market(u):
                     unit_issues.append("below_market")
 
                 unit_leases = [le for le in leases if le.unit_id == u.id]
-                active = next(
-                    (le for le in unit_leases if le.status == LeaseStatus.ACTIVE), None
-                )
+                active = next((le for le in unit_leases if le.status == LeaseStatus.ACTIVE), None)
                 if active and 0 < (active.end_date - today).days <= 90:
                     unit_issues.append("expiring_soon")
                 exp = next((le for le in unit_leases if le.status == LeaseStatus.EXPIRED), None)
                 if exp:
                     unit_issues.append("expired_lease")
 
-                unit_maint = [
-                    m
-                    for m in maint
-                    if m.unit_id == u.id
-                    and m.status in (MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS)
-                ]
+                unit_maint = [m for m in maint if m.unit_id == u.id and is_maintenance_open(m)]
                 if unit_maint:
                     unit_issues.append("open_maintenance")
 
@@ -278,9 +270,9 @@ class ManagerReviewService:
         all_tenants = await self._ps.list_tenants()
         delinquent_tenants = [t for t in all_tenants if t.balance_owed > 0]
 
-        delinquent_leases = await asyncio.gather(*[
-            self._ps.list_leases(tenant_id=t.id) for t in delinquent_tenants
-        ])
+        delinquent_leases = await asyncio.gather(
+            *[self._ps.list_leases(tenant_id=t.id) for t in delinquent_tenants]
+        )
 
         delinquent_count = 0
         delinquent_balance = Decimal("0")
@@ -317,9 +309,51 @@ class ManagerReviewService:
 
     async def list_manager_summaries(self) -> list[ManagerSummary]:
         managers = await self._ps.list_managers()
-        results: list[ManagerSummary] = []
-        for m in managers:
-            summary = await self.aggregate_manager(m.id)
-            if summary:
-                results.append(summary)
-        return results
+        summaries = await asyncio.gather(
+            *[self.aggregate_manager(m.id) for m in managers]
+        )
+        return [s for s in summaries if s is not None]
+
+    async def rank_managers(
+        self,
+        sort_by: str = "delinquency_rate",
+        ascending: bool = False,
+        limit: int | None = None,
+    ) -> list[ManagerRanking]:
+        """Return a flat, pre-sorted ranking table of all managers.
+
+        Designed for cross-portfolio comparison queries so the LLM can
+        get a sorted table in a single API call instead of N+1 lookups.
+        """
+        summaries = await self.list_manager_summaries()
+        rows: list[ManagerRanking] = []
+        for s in summaries:
+            delinquency_rate = (
+                round(s.delinquent_count / s.total_units, 4) if s.total_units else 0.0
+            )
+            rows.append(ManagerRanking(
+                manager_id=s.manager_id,
+                name=s.name,
+                total_units=s.total_units,
+                occupied=s.occupied,
+                vacant=s.vacant,
+                occupancy_rate=s.occupancy_rate,
+                total_actual_rent=s.total_actual_rent,
+                total_market_rent=s.total_market_rent,
+                total_loss_to_lease=s.total_loss_to_lease,
+                total_vacancy_loss=s.total_vacancy_loss,
+                delinquent_count=s.delinquent_count,
+                total_delinquent_balance=s.total_delinquent_balance,
+                delinquency_rate=delinquency_rate,
+                open_maintenance=s.open_maintenance,
+                expiring_leases_90d=s.expiring_leases_90d,
+                property_count=s.property_count,
+            ))
+
+        valid_keys = set(ManagerRanking.model_fields.keys())
+        key = sort_by if sort_by in valid_keys else "delinquency_rate"
+        rows.sort(key=lambda r: getattr(r, key, 0), reverse=not ascending)
+
+        if limit and limit > 0:
+            rows = rows[:limit]
+        return rows

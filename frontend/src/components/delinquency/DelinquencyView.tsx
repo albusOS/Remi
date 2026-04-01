@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { fmt$ } from "@/lib/format";
 import { MetricCard } from "@/components/ui/MetricCard";
@@ -9,28 +9,37 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { ManagerFilter } from "@/components/ui/ManagerFilter";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import type { DelinquencyBoard } from "@/lib/types";
+import type { DelinquencyBoard, EntityNoteResponse } from "@/lib/types";
 
-function InlineNoteCell({ tenantId, reportNote }: { tenantId: string; reportNote?: string | null }) {
-  const [userNote, setUserNote] = useState<string | null>(null);
+interface NoteSeed {
+  content: string;
+  id: string | null;
+}
+
+function InlineNoteCell({
+  tenantId,
+  reportNote,
+  seed,
+  onMutate,
+}: {
+  tenantId: string;
+  reportNote?: string | null;
+  seed: NoteSeed | undefined;
+  onMutate: () => void;
+}) {
+  const [userNote, setUserNote] = useState<string | null>(seed?.content ?? null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const [noteId, setNoteId] = useState<string | null>(null);
+  const [noteId, setNoteId] = useState<string | null>(seed?.id ?? null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    api.listEntityNotes("Tenant", tenantId)
-      .then((r) => {
-        if (cancelled) return;
-        const first = r.notes.find((n) => n.provenance === "user_stated");
-        setUserNote(first?.content || "");
-        setNoteId(first?.id || null);
-      })
-      .catch(() => { if (!cancelled) setUserNote(""); });
-    return () => { cancelled = true; };
-  }, [tenantId]);
+    if (seed !== undefined) {
+      setUserNote(seed.content);
+      setNoteId(seed.id);
+    }
+  }, [seed]);
 
   const save = async () => {
     setSaving(true);
@@ -46,6 +55,7 @@ function InlineNoteCell({ tenantId, reportNote }: { tenantId: string; reportNote
       }
       setUserNote(draft);
       setEditing(false);
+      onMutate();
     } catch {
       /* keep editing */
     } finally {
@@ -103,12 +113,39 @@ function InlineNoteCell({ tenantId, reportNote }: { tenantId: string; reportNote
   );
 }
 
+function useBatchNotes(tenantIds: string[]) {
+  const [noteMap, setNoteMap] = useState<Record<string, NoteSeed>>({});
+  const idsKey = tenantIds.join(",");
+
+  const refresh = useCallback(() => {
+    if (!tenantIds.length) return;
+    api.batchEntityNotes("Tenant", tenantIds)
+      .then((r) => {
+        const map: Record<string, NoteSeed> = {};
+        for (const [eid, notes] of Object.entries(r.notes_by_entity)) {
+          const first = notes.find((n: EntityNoteResponse) => n.provenance === "user_stated");
+          map[eid] = { content: first?.content || "", id: first?.id || null };
+        }
+        setNoteMap(map);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return { noteMap, refresh };
+}
+
 export function DelinquencyView() {
   const [managerId, setManagerId] = useState("");
   const { data, loading } = useApiQuery<DelinquencyBoard>(
     () => api.delinquencyBoard(managerId || undefined),
     [managerId]
   );
+
+  const tenantIds = data?.tenants.map((t) => t.tenant_id) ?? [];
+  const { noteMap, refresh: refreshNotes } = useBatchNotes(tenantIds);
 
   return (
     <PageContainer>
@@ -186,7 +223,12 @@ export function DelinquencyView() {
                         </div>
                       </td>
                       <td className="px-4 py-2.5">
-                        <InlineNoteCell tenantId={t.tenant_id} reportNote={t.delinquency_notes} />
+                        <InlineNoteCell
+                          tenantId={t.tenant_id}
+                          reportNote={t.delinquency_notes}
+                          seed={noteMap[t.tenant_id]}
+                          onMutate={refreshNotes}
+                        />
                       </td>
                     </tr>
                   ))}

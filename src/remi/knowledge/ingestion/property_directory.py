@@ -122,7 +122,13 @@ async def ingest_property_directory(
             rows_without_manager += 1
 
         addr = parse_address(addr_raw)
-        await upsert_property_safe(prop_id, prop_name, addr, portfolio_id=portfolio_id)
+        await upsert_property_safe(
+            prop_id,
+            prop_name,
+            addr,
+            portfolio_id=portfolio_id,
+            source_document_id=doc.id,
+        )
 
     logger.info(
         "property_directory_ingest_complete",

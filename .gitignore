@@ -19,7 +19,6 @@ node_modules/
 .DS_Store
 
 # Data — exclude all real PII/client data
-src/remi/data/sample_reports/Alex_Budavich_Reports/
-src/remi/data/sample_reports/*.xlsx
-src/remi/data/sample_reports/*.xls
-src/remi/data/sample_reports/*.csv
+data/sample_reports/**/*.xlsx
+data/sample_reports/**/*.xls
+data/sample_reports/**/*.csv

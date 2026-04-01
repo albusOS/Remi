@@ -10,10 +10,7 @@ it is a pipeline step, not reusable knowledge logic.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
 
 import structlog
 
@@ -22,15 +19,11 @@ from remi.knowledge.composite import CompositeProducer
 from remi.knowledge.ingestion import IngestionService
 from remi.knowledge.pattern_detector import PatternDetector
 from remi.models.documents import Document, DocumentStore
-from remi.models.memory import Entity, KnowledgeStore, Relationship
+from remi.models.memory import KnowledgeStore
 from remi.models.properties import PropertyStore
+from remi.services.enrichment import EnrichFn
 from remi.services.snapshots import SnapshotService
 from remi.vectors.pipeline import EmbeddingPipeline
-
-EnrichFn = Callable[
-    [list[dict[str, Any]], Document, KnowledgeStore],
-    Awaitable[tuple[int, int]],
-]
 
 _log = structlog.get_logger(__name__)
 
@@ -51,6 +44,7 @@ class IngestResult:
     signals_produced: int = 0
     hypotheses_proposed: int = 0
     entities_embedded: int = 0
+    pipeline_warnings: list[str] = field(default_factory=list)
 
 
 class DocumentIngestService:
@@ -85,6 +79,7 @@ class DocumentIngestService:
         content_type: str,
         *,
         manager: str | None = None,
+        run_pipelines: bool = True,
     ) -> IngestResult:
         ct = content_type.lower()
         if ct in _CSV_TYPES or filename.lower().endswith(".csv"):
@@ -115,45 +110,51 @@ class DocumentIngestService:
         signals_produced = 0
         hypotheses_proposed = 0
         entities_embedded = 0
+        pipeline_warnings: list[str] = []
 
-        try:
-            await self._snapshot_service.capture()
-            _log.info("performance_snapshot_captured")
-        except Exception:
-            _log.warning("snapshot_capture_failed", exc_info=True)
+        if run_pipelines:
+            try:
+                await self._snapshot_service.capture()
+                _log.info("performance_snapshot_captured")
+            except Exception as exc:
+                pipeline_warnings.append(f"snapshot_capture: {exc}")
+                _log.warning("snapshot_capture_failed", exc_info=True)
 
-        try:
-            pipeline_result = await self._signal_pipeline.run_all()
-            signals_produced = pipeline_result.produced
-            _log.info(
-                "signal_pipeline_complete",
-                signals_produced=pipeline_result.produced,
-                sources={k: v.produced for k, v in pipeline_result.per_source.items()},
-            )
-        except Exception:
-            _log.warning("signal_pipeline_failed", exc_info=True)
+            try:
+                pipeline_result = await self._signal_pipeline.run_all()
+                signals_produced = pipeline_result.produced
+                _log.info(
+                    "signal_pipeline_complete",
+                    signals_produced=pipeline_result.produced,
+                    sources={k: v.produced for k, v in pipeline_result.per_source.items()},
+                )
+            except Exception as exc:
+                pipeline_warnings.append(f"signal_pipeline: {exc}")
+                _log.warning("signal_pipeline_failed", exc_info=True)
 
-        try:
-            detector_result = await self._pattern_detector.run()
-            hypotheses_proposed = detector_result.proposed
-            _log.info(
-                "pattern_detection_complete",
-                hypotheses_proposed=detector_result.proposed,
-                types_scanned=detector_result.types_scanned,
-            )
-        except Exception:
-            _log.warning("pattern_detection_failed", exc_info=True)
+            try:
+                detector_result = await self._pattern_detector.run()
+                hypotheses_proposed = detector_result.proposed
+                _log.info(
+                    "pattern_detection_complete",
+                    hypotheses_proposed=detector_result.proposed,
+                    types_scanned=detector_result.types_scanned,
+                )
+            except Exception as exc:
+                pipeline_warnings.append(f"pattern_detection: {exc}")
+                _log.warning("pattern_detection_failed", exc_info=True)
 
-        try:
-            embed_result = await self._embedding_pipeline.run_full()
-            entities_embedded = embed_result.embedded
-            _log.info(
-                "embedding_pipeline_complete",
-                embedded=embed_result.embedded,
-                by_type=embed_result.by_type,
-            )
-        except Exception:
-            _log.warning("embedding_pipeline_failed", exc_info=True)
+            try:
+                embed_result = await self._embedding_pipeline.run_full()
+                entities_embedded = embed_result.embedded
+                _log.info(
+                    "embedding_pipeline_complete",
+                    embedded=embed_result.embedded,
+                    by_type=embed_result.by_type,
+                )
+            except Exception as exc:
+                pipeline_warnings.append(f"embedding_pipeline: {exc}")
+                _log.warning("embedding_pipeline_failed", exc_info=True)
 
         return IngestResult(
             doc=doc_with_meta,
@@ -164,57 +165,5 @@ class DocumentIngestService:
             signals_produced=signals_produced,
             hypotheses_proposed=hypotheses_proposed,
             entities_embedded=entities_embedded,
+            pipeline_warnings=pipeline_warnings,
         )
-
-
-async def _parse_and_store(
-    output: Any,
-    namespace: str,
-    kb: KnowledgeStore,
-) -> tuple[int, int]:
-    """Parse the enricher agent's JSON output and write to the KnowledgeStore."""
-    entities_count = 0
-    rels_count = 0
-
-    if isinstance(output, str):
-        try:
-            output = json.loads(output)
-        except (json.JSONDecodeError, TypeError):
-            return 0, 0
-
-    if not isinstance(output, dict):
-        return 0, 0
-
-    for row_data in output.get("rows", []):
-        for ent in row_data.get("entities", []):
-            etype = ent.get("entity_type", "unknown")
-            eid = ent.get("entity_id", "")
-            if not eid:
-                continue
-            await kb.put_entity(
-                Entity(
-                    entity_id=eid,
-                    entity_type=etype,
-                    namespace=namespace,
-                    properties=ent.get("properties", {}),
-                    metadata={"source": "llm_enrichment", "row_index": row_data.get("row_index")},
-                )
-            )
-            entities_count += 1
-
-        for rel in row_data.get("relationships", []):
-            src = rel.get("source_id", "")
-            tgt = rel.get("target_id", "")
-            rtype = rel.get("relation_type", "")
-            if src and tgt and rtype:
-                await kb.put_relationship(
-                    Relationship(
-                        source_id=src,
-                        target_id=tgt,
-                        relation_type=rtype,
-                        namespace=namespace,
-                    )
-                )
-                rels_count += 1
-
-    return entities_count, rels_count

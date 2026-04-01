@@ -14,9 +14,9 @@ from typing import Any
 import structlog
 
 from remi.models.ontology import KnowledgeGraph, KnowledgeLink
-from remi.models.retrieval import Embedder, SearchResult, VectorStore
 from remi.models.signals import Signal, SignalStore
 from remi.observability.events import Event
+from remi.vectors.ports import Embedder, SearchResult, VectorStore
 
 _NAME_FIELDS = ("tenant_name", "property_name", "manager_name")
 
@@ -180,7 +180,9 @@ class GraphRetriever:
         results: list[SearchResult] = []
         for candidate in candidates:
             hits = await self._vs.metadata_text_search(
-                candidate, fields=list(_NAME_FIELDS), limit=limit,
+                candidate,
+                fields=list(_NAME_FIELDS),
+                limit=limit,
             )
             for hit in hits:
                 if hit.entity_id not in seen:
@@ -194,8 +196,8 @@ class GraphRetriever:
 def _extract_name_candidates(question: str) -> list[str]:
     """Extract potential entity names from a question.
 
-    Returns candidates longest-first so that "Alice Chen" is tried
-    before "Alice" alone.
+    Returns candidates longest-first so that "Jake Kraus" is tried
+    before "Jake" alone.
     """
     words = question.split()
     candidates: list[str] = []

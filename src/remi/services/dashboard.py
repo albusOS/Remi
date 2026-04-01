@@ -18,6 +18,7 @@ from remi.models.properties import (
     PropertyStore,
     UnitStatus,
 )
+from remi.services.unit_metrics import is_occupied, is_vacant, loss_to_lease
 
 # ---------------------------------------------------------------------------
 # Response models
@@ -174,21 +175,21 @@ class DashboardQueryService:
         grand_properties = 0
 
         # Gather portfolios for all managers concurrently
-        all_mgr_portfolios = await asyncio.gather(*[
-            self._ps.list_portfolios(manager_id=mgr.id) for mgr in managers_list
-        ])
+        all_mgr_portfolios = await asyncio.gather(
+            *[self._ps.list_portfolios(manager_id=mgr.id) for mgr in managers_list]
+        )
 
         for mgr, portfolios in zip(managers_list, all_mgr_portfolios, strict=True):
             # Gather properties across all portfolios concurrently
-            pf_props = await asyncio.gather(*[
-                self._ps.list_properties(portfolio_id=pf.id) for pf in portfolios
-            ])
+            pf_props = await asyncio.gather(
+                *[self._ps.list_properties(portfolio_id=pf.id) for pf in portfolios]
+            )
             all_props = [prop for props in pf_props for prop in props]
 
             # Gather units for all properties concurrently
-            all_unit_lists = await asyncio.gather(*[
-                self._ps.list_units(property_id=prop.id) for prop in all_props
-            ])
+            all_unit_lists = await asyncio.gather(
+                *[self._ps.list_units(property_id=prop.id) for prop in all_props]
+            )
 
             m_units = 0
             m_occ = 0
@@ -200,20 +201,13 @@ class DashboardQueryService:
             for unit_list in all_unit_lists:
                 for u in unit_list:
                     m_units += 1
-                    if u.status == UnitStatus.OCCUPIED or (
-                        u.occupancy_status and u.occupancy_status == OccupancyStatus.OCCUPIED
-                    ):
+                    if is_occupied(u):
                         m_occ += 1
-                    elif u.status == UnitStatus.VACANT or (
-                        u.occupancy_status
-                        and u.occupancy_status
-                        in (OccupancyStatus.VACANT_RENTED, OccupancyStatus.VACANT_UNRENTED)
-                    ):
+                    elif is_vacant(u):
                         m_vac += 1
                     m_rent += u.current_rent
                     m_market += u.market_rent
-                    if u.current_rent < u.market_rent:
-                        m_ltl += u.market_rent - u.current_rent
+                    m_ltl += loss_to_lease(u)
 
             grand_portfolios += len(portfolios)
             grand_properties += len(all_props)
@@ -258,9 +252,9 @@ class DashboardQueryService:
         tenants = await self._ps.list_tenants()
 
         # Gather all lease lookups concurrently
-        all_lease_lists = await asyncio.gather(*[
-            self._ps.list_leases(tenant_id=t.id) for t in tenants
-        ])
+        all_lease_lists = await asyncio.gather(
+            *[self._ps.list_leases(tenant_id=t.id) for t in tenants]
+        )
 
         tenant_context: dict[str, tuple[str, str]] = {}
         if manager_id:
@@ -307,9 +301,7 @@ class DashboardQueryService:
 
         delinquency_notes: dict[str, str] = {}
         if self._ks is not None:
-            delinquency_notes = await self._load_delinquency_notes(
-                [t.id for t in delinquent]
-            )
+            delinquency_notes = await self._load_delinquency_notes([t.id for t in delinquent])
 
         return DelinquencyBoard(
             total_delinquent=len(delinquent),
@@ -334,9 +326,7 @@ class DashboardQueryService:
             ],
         )
 
-    async def _load_delinquency_notes(
-        self, tenant_ids: list[str]
-    ) -> dict[str, str]:
+    async def _load_delinquency_notes(self, tenant_ids: list[str]) -> dict[str, str]:
         """Read-time join: fetch delinquency_notes from ingested KB entities.
 
         Searches across all ``doc:*`` namespaces for ``appfolio_delinquent_tenant``
@@ -434,18 +424,14 @@ class DashboardQueryService:
         rows: list[RentRollUnit] = []
 
         for u in units:
-            is_occ = u.status == UnitStatus.OCCUPIED or (
-                u.occupancy_status and u.occupancy_status == OccupancyStatus.OCCUPIED
-            )
-            if is_occ:
+            if is_occupied(u):
                 occ += 1
             else:
                 vac += 1
 
             total_rent += u.current_rent
             total_market += u.market_rent
-            if u.current_rent < u.market_rent:
-                total_ltl += u.market_rent - u.current_rent
+            total_ltl += loss_to_lease(u)
 
             unit_leases = [
                 le for le in all_leases if le.unit_id == u.id and le.status == LeaseStatus.ACTIVE
@@ -528,9 +514,7 @@ class DashboardQueryService:
 
         # Batch property lookups
         unique_prop_ids = list({u.property_id for u in filtered_units})
-        props = await asyncio.gather(*[
-            self._ps.get_property(pid) for pid in unique_prop_ids
-        ])
+        props = await asyncio.gather(*[self._ps.get_property(pid) for pid in unique_prop_ids])
         prop_map = {pid: p for pid, p in zip(unique_prop_ids, props, strict=True) if p}
 
         vacant_units: list[VacantUnit] = []
@@ -570,7 +554,7 @@ class DashboardQueryService:
 
     async def _property_ids_for_manager(self, manager_id: str) -> set[str]:
         portfolios = await self._ps.list_portfolios(manager_id=manager_id)
-        pf_props = await asyncio.gather(*[
-            self._ps.list_properties(portfolio_id=pf.id) for pf in portfolios
-        ])
+        pf_props = await asyncio.gather(
+            *[self._ps.list_properties(portfolio_id=pf.id) for pf in portfolios]
+        )
         return {p.id for props in pf_props for p in props}

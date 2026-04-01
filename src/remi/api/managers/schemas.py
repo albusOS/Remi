@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from remi.services.manager_review import ManagerRanking
+
+__all__ = ["ManagerRanking"]
+
 
 class PropertySummary(BaseModel):
     property_id: str
@@ -60,6 +64,12 @@ class ManagerListItem(BaseModel):
 
 class ManagerListResponse(BaseModel):
     managers: list[ManagerListItem]
+
+
+class ManagerRankingsResponse(BaseModel):
+    rankings: list[ManagerRanking]
+    total: int
+    sort_by: str
 
 
 class CreateManagerRequest(BaseModel):

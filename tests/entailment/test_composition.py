@@ -28,7 +28,7 @@ def _make_signal(
     signal_type: str,
     entity_id: str,
     entity_type: str = "PropertyManager",
-    entity_name: str = "Alice Manager",
+    entity_name: str = "Jake Kraus",
     severity: Severity = Severity.HIGH,
 ) -> Signal:
     return Signal(
@@ -63,12 +63,8 @@ def _delinquency_lease_cliff_rule() -> CompositionRule:
 async def test_composition_fires_when_all_constituents_present(
     signal_store: InMemorySignalStore,
 ) -> None:
-    await signal_store.put_signal(
-        _make_signal("DelinquencyConcentration", "mgr-1")
-    )
-    await signal_store.put_signal(
-        _make_signal("LeaseExpirationCliff", "mgr-1")
-    )
+    await signal_store.put_signal(_make_signal("DelinquencyConcentration", "mgr-1"))
+    await signal_store.put_signal(_make_signal("LeaseExpirationCliff", "mgr-1"))
 
     producer = CompositionProducer(
         domain=_make_rulebook(_delinquency_lease_cliff_rule()),
@@ -89,9 +85,7 @@ async def test_composition_fires_when_all_constituents_present(
 async def test_composition_does_not_fire_with_partial_constituents(
     signal_store: InMemorySignalStore,
 ) -> None:
-    await signal_store.put_signal(
-        _make_signal("DelinquencyConcentration", "mgr-1")
-    )
+    await signal_store.put_signal(_make_signal("DelinquencyConcentration", "mgr-1"))
 
     producer = CompositionProducer(
         domain=_make_rulebook(_delinquency_lease_cliff_rule()),
@@ -104,12 +98,8 @@ async def test_composition_does_not_fire_with_partial_constituents(
 async def test_composition_does_not_fire_across_different_entities(
     signal_store: InMemorySignalStore,
 ) -> None:
-    await signal_store.put_signal(
-        _make_signal("DelinquencyConcentration", "mgr-1")
-    )
-    await signal_store.put_signal(
-        _make_signal("LeaseExpirationCliff", "mgr-2")
-    )
+    await signal_store.put_signal(_make_signal("DelinquencyConcentration", "mgr-1"))
+    await signal_store.put_signal(_make_signal("LeaseExpirationCliff", "mgr-2"))
 
     producer = CompositionProducer(
         domain=_make_rulebook(_delinquency_lease_cliff_rule()),
@@ -142,12 +132,8 @@ async def test_composition_fires_on_multiple_entities(
     signal_store: InMemorySignalStore,
 ) -> None:
     for mgr_id in ["mgr-1", "mgr-2"]:
-        await signal_store.put_signal(
-            _make_signal("DelinquencyConcentration", mgr_id)
-        )
-        await signal_store.put_signal(
-            _make_signal("LeaseExpirationCliff", mgr_id)
-        )
+        await signal_store.put_signal(_make_signal("DelinquencyConcentration", mgr_id))
+        await signal_store.put_signal(_make_signal("LeaseExpirationCliff", mgr_id))
 
     producer = CompositionProducer(
         domain=_make_rulebook(_delinquency_lease_cliff_rule()),
@@ -187,12 +173,8 @@ async def test_composition_with_empty_store(
 async def test_composition_uses_data_derived_provenance(
     signal_store: InMemorySignalStore,
 ) -> None:
-    await signal_store.put_signal(
-        _make_signal("DelinquencyConcentration", "mgr-1")
-    )
-    await signal_store.put_signal(
-        _make_signal("LeaseExpirationCliff", "mgr-1")
-    )
+    await signal_store.put_signal(_make_signal("DelinquencyConcentration", "mgr-1"))
+    await signal_store.put_signal(_make_signal("LeaseExpirationCliff", "mgr-1"))
 
     producer = CompositionProducer(
         domain=_make_rulebook(_delinquency_lease_cliff_rule()),
@@ -212,12 +194,8 @@ async def test_composition_works_with_mutable_rulebook(
     mutable = MutableRulebook(base)
     mutable.add_composition(_delinquency_lease_cliff_rule())
 
-    await signal_store.put_signal(
-        _make_signal("DelinquencyConcentration", "mgr-1")
-    )
-    await signal_store.put_signal(
-        _make_signal("LeaseExpirationCliff", "mgr-1")
-    )
+    await signal_store.put_signal(_make_signal("DelinquencyConcentration", "mgr-1"))
+    await signal_store.put_signal(_make_signal("LeaseExpirationCliff", "mgr-1"))
 
     producer = CompositionProducer(domain=mutable, signal_store=signal_store)
     result = await producer.evaluate()

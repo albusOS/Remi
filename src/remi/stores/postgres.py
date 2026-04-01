@@ -111,6 +111,7 @@ def _property_from_row(row: PropertyRow) -> Property:
         ),
         property_type=PropertyType(row.property_type),
         year_built=row.year_built,
+        source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
 
@@ -127,6 +128,7 @@ def _property_to_row(p: Property) -> PropertyRow:
         address_state=p.address.state,
         address_zip_code=p.address.zip_code,
         address_country=p.address.country,
+        source_document_id=p.source_document_id,
         created_at=p.created_at,
     )
 
@@ -147,6 +149,7 @@ def _unit_from_row(row: UnitRow) -> Unit:
         listed_on_website=row.listed_on_website,
         listed_on_internet=row.listed_on_internet,
         floor=row.floor,
+        source_document_id=row.source_document_id,
     )
 
 
@@ -166,6 +169,7 @@ def _unit_to_row(u: Unit) -> UnitRow:
         listed_on_website=u.listed_on_website,
         listed_on_internet=u.listed_on_internet,
         floor=u.floor,
+        source_document_id=u.source_document_id,
     )
 
 
@@ -182,6 +186,7 @@ def _lease_from_row(row: LeaseRow) -> Lease:
         status=LeaseStatus(row.status),
         market_rent=row.market_rent,
         is_month_to_month=row.is_month_to_month,
+        source_document_id=row.source_document_id,
     )
 
 
@@ -198,6 +203,7 @@ def _lease_to_row(le: Lease) -> LeaseRow:
         status=le.status.value,
         market_rent=le.market_rent,
         is_month_to_month=le.is_month_to_month,
+        source_document_id=le.source_document_id,
     )
 
 
@@ -214,6 +220,7 @@ def _tenant_from_row(row: TenantRow) -> Tenant:
         last_payment_date=row.last_payment_date,
         tags=row.tags,
         lease_ids=row.lease_ids,
+        source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
 
@@ -231,6 +238,7 @@ def _tenant_to_row(t: Tenant) -> TenantRow:
         last_payment_date=t.last_payment_date,
         tags=list(t.tags),
         lease_ids=list(t.lease_ids),
+        source_document_id=t.source_document_id,
         created_at=t.created_at,
     )
 
@@ -581,9 +589,7 @@ class PostgresPropertyStore(PropertyStore):
             row = await session.get(TenantRow, tenant_id)
             if not row:
                 return False
-            result = await session.execute(
-                select(LeaseRow).where(LeaseRow.tenant_id == tenant_id)
-            )
+            result = await session.execute(select(LeaseRow).where(LeaseRow.tenant_id == tenant_id))
             for lease in result.scalars().all():
                 await session.delete(lease)
             await session.delete(row)
@@ -638,7 +644,6 @@ class PostgresPropertyStore(PropertyStore):
             return True
 
 
-
 # ---------------------------------------------------------------------------
 # ActionItem conversion helpers
 # ---------------------------------------------------------------------------
@@ -674,5 +679,3 @@ def _action_item_to_row(item: ActionItem) -> ActionItemRow:
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
-
-

@@ -1,86 +1,52 @@
-"""SnapshotService — captures and retrieves PM performance snapshots.
+"""SnapshotService — captures and retrieves PM performance rollups.
 
 After each document upload, a snapshot of every active PM's key metrics
 is recorded with a timestamp.  The frontend uses these to show trends
 (week-over-week occupancy, revenue, delinquency, etc.).
 
-Both manager-level and property-level snapshots are produced in each
-``capture()`` walk and persisted via the injected ``SnapshotStore``.
+Both manager-level and property-level rollups are produced in each
+``capture()`` walk and persisted via the injected ``RollupStore``.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
-
-from remi.models.properties import OccupancyStatus, PropertyStore, UnitStatus
-
-if TYPE_CHECKING:
-    from remi.stores.snapshots import SnapshotStore
-
-
-class ManagerSnapshot(BaseModel, frozen=True):
-    manager_id: str
-    manager_name: str
-    timestamp: datetime
-    property_count: int = 0
-    total_units: int = 0
-    occupied: int = 0
-    vacant: int = 0
-    occupancy_rate: float = 0.0
-    total_rent: float = 0.0
-    total_market_rent: float = 0.0
-    loss_to_lease: float = 0.0
-    delinquent_count: int = 0
-    delinquent_balance: float = 0.0
-
-
-class PropertySnapshot(BaseModel, frozen=True):
-    property_id: str
-    property_name: str
-    manager_id: str
-    manager_name: str
-    timestamp: datetime
-    total_units: int = 0
-    occupied: int = 0
-    vacant: int = 0
-    occupancy_rate: float = 0.0
-    total_rent: float = 0.0
-    total_market_rent: float = 0.0
-    loss_to_lease: float = 0.0
-    maintenance_open: int = 0
-    maintenance_closed: int = 0
-    avg_maintenance_cost: float = 0.0
+from remi.models.properties import PropertyStore
+from remi.models.rollups import ManagerSnapshot, PropertySnapshot, RollupStore
+from remi.services.unit_metrics import is_maintenance_open, is_occupied, is_vacant, loss_to_lease
 
 
 class SnapshotService:
-    """Captures and stores PM and property performance snapshots."""
+    """Captures and stores PM and property performance rollups."""
 
     def __init__(
         self,
         property_store: PropertyStore,
-        snapshot_store: SnapshotStore | None = None,
+        rollup_store: RollupStore | None = None,
     ) -> None:
         self._ps = property_store
-        self._store = snapshot_store
-        # In-memory caches (always kept in sync whether a store is present or not)
-        self._snapshots: list[ManagerSnapshot] = []
-        self._property_snapshots: list[PropertySnapshot] = []
+        self._store = rollup_store
 
     async def capture(self) -> list[ManagerSnapshot]:
         """Take a snapshot of all managers' current metrics.
 
-        Produces both ``ManagerSnapshot`` and ``PropertySnapshot`` rows in a
-        single portfolio walk. Both are persisted via the snapshot store (if
-        configured) and kept in the in-memory cache.
+        Produces both manager and property snapshot DTOs in a single
+        portfolio walk and persists them via the rollup store.
         """
         now = datetime.now(UTC)
         managers = await self._ps.list_managers()
         manager_batch: list[ManagerSnapshot] = []
         property_batch: list[PropertySnapshot] = []
+
+        # Pre-fetch delinquency data once for all managers.
+        all_tenants = await self._ps.list_tenants()
+        delinquent_tenants = [t for t in all_tenants if t.balance_owed > 0]
+        tenant_property_ids: dict[str, set[str]] = {}
+        for t in delinquent_tenants:
+            leases = await self._ps.list_leases(tenant_id=t.id)
+            tenant_property_ids[t.id] = {le.property_id for le in leases if le.property_id}
 
         for mgr in managers:
             portfolios = await self._ps.list_portfolios(manager_id=mgr.id)
@@ -91,12 +57,14 @@ class SnapshotService:
             rent = Decimal("0")
             market = Decimal("0")
             ltl = Decimal("0")
+            mgr_property_ids: set[str] = set()
 
             for pf in portfolios:
                 props = await self._ps.list_properties(portfolio_id=pf.id)
                 prop_count += len(props)
 
                 for prop in props:
+                    mgr_property_ids.add(prop.id)
                     units = await self._ps.list_units(property_id=prop.id)
                     p_occ = 0
                     p_vac = 0
@@ -106,37 +74,24 @@ class SnapshotService:
 
                     for u in units:
                         total_u += 1
-                        if u.status == UnitStatus.OCCUPIED or (
-                            u.occupancy_status == OccupancyStatus.OCCUPIED
-                        ):
+                        if is_occupied(u):
                             occ += 1
                             p_occ += 1
-                        elif u.status == UnitStatus.VACANT or (
-                            u.occupancy_status
-                            and u.occupancy_status
-                            in (OccupancyStatus.VACANT_RENTED, OccupancyStatus.VACANT_UNRENTED)
-                        ):
+                        elif is_vacant(u):
                             vac += 1
                             p_vac += 1
                         rent += u.current_rent
                         market += u.market_rent
                         p_rent += u.current_rent
                         p_market += u.market_rent
-                        if u.current_rent < u.market_rent:
-                            diff = u.market_rent - u.current_rent
-                            ltl += diff
-                            p_ltl += diff
+                        u_ltl = loss_to_lease(u)
+                        ltl += u_ltl
+                        p_ltl += u_ltl
 
                     p_total = p_occ + p_vac
                     maint_requests = await self._ps.list_maintenance_requests(property_id=prop.id)
-                    maint_open = sum(
-                        1 for r in maint_requests
-                        if str(r.status).lower() in ("open", "pending", "in_progress")
-                    )
-                    maint_closed = sum(
-                        1 for r in maint_requests
-                        if str(r.status).lower() in ("closed", "completed", "resolved")
-                    )
+                    maint_open = sum(1 for r in maint_requests if is_maintenance_open(r))
+                    maint_closed = len(maint_requests) - maint_open
                     costs = [float(r.cost) for r in maint_requests if r.cost and float(r.cost) > 0]
                     avg_cost = sum(costs) / len(costs) if costs else 0.0
 
@@ -162,78 +117,75 @@ class SnapshotService:
 
             del_count = 0
             del_balance = Decimal("0")
-            tenants = await self._ps.list_tenants()
-            allowed_pids: set[str] = set()
-            for pf in portfolios:
-                for p in await self._ps.list_properties(portfolio_id=pf.id):
-                    allowed_pids.add(p.id)
-            for t in tenants:
-                if t.balance_owed <= 0:
-                    continue
-                leases = await self._ps.list_leases(tenant_id=t.id)
-                if any(le.property_id in allowed_pids for le in leases):
+            for t in delinquent_tenants:
+                if tenant_property_ids[t.id] & mgr_property_ids:
                     del_count += 1
                     del_balance += t.balance_owed
 
-            snap = ManagerSnapshot(
-                manager_id=mgr.id,
-                manager_name=mgr.name,
-                timestamp=now,
-                property_count=prop_count,
-                total_units=total_u,
-                occupied=occ,
-                vacant=vac,
-                occupancy_rate=round(occ / total_u, 3) if total_u else 0.0,
-                total_rent=float(rent),
-                total_market_rent=float(market),
-                loss_to_lease=float(ltl),
-                delinquent_count=del_count,
-                delinquent_balance=float(del_balance),
+            manager_batch.append(
+                ManagerSnapshot(
+                    manager_id=mgr.id,
+                    manager_name=mgr.name,
+                    timestamp=now,
+                    property_count=prop_count,
+                    total_units=total_u,
+                    occupied=occ,
+                    vacant=vac,
+                    occupancy_rate=round(occ / total_u, 3) if total_u else 0.0,
+                    total_rent=float(rent),
+                    total_market_rent=float(market),
+                    loss_to_lease=float(ltl),
+                    delinquent_count=del_count,
+                    delinquent_balance=float(del_balance),
+                )
             )
-            manager_batch.append(snap)
-
-        self._snapshots.extend(manager_batch)
-        self._property_snapshots.extend(property_batch)
 
         if self._store is not None:
-            self._store.append_manager_snapshots([s.model_dump() for s in manager_batch])
-            self._store.append_property_snapshots([s.model_dump() for s in property_batch])
+            await self._store.append_batch(manager_batch, property_batch)
 
         return manager_batch
 
     # ------------------------------------------------------------------
-    # Manager queries (kept for backward compat with dashboard endpoints)
+    # Manager queries
     # ------------------------------------------------------------------
 
-    def get_history(self, manager_id: str | None = None) -> list[ManagerSnapshot]:
-        """Return stored manager snapshots, optionally filtered by manager."""
-        if manager_id:
-            return [s for s in self._snapshots if s.manager_id == manager_id]
-        return list(self._snapshots)
+    async def get_history(
+        self,
+        manager_id: str | None = None,
+        since: datetime | None = None,
+    ) -> list[ManagerSnapshot]:
+        """Return stored manager rollups, optionally filtered by manager and time."""
+        if self._store is None:
+            return []
+        return await self._store.list_manager_snapshots(manager_id=manager_id, since=since)
 
-    def latest(self, manager_id: str) -> ManagerSnapshot | None:
-        """Most recent manager snapshot."""
-        matching = [s for s in self._snapshots if s.manager_id == manager_id]
-        return matching[-1] if matching else None
+    async def latest(self, manager_id: str) -> ManagerSnapshot | None:
+        """Most recent manager rollup."""
+        if self._store is None:
+            return None
+        return await self._store.latest_manager_snapshot(manager_id)
 
-    def previous(self, manager_id: str) -> ManagerSnapshot | None:
-        """Second-most-recent manager snapshot (for computing deltas)."""
-        matching = [s for s in self._snapshots if s.manager_id == manager_id]
-        return matching[-2] if len(matching) >= 2 else None
+    async def previous(self, manager_id: str) -> ManagerSnapshot | None:
+        """Second-most-recent manager rollup (for computing deltas)."""
+        if self._store is None:
+            return None
+        return await self._store.previous_manager_snapshot(manager_id)
 
     # ------------------------------------------------------------------
     # Property queries
     # ------------------------------------------------------------------
 
-    def get_property_history(
+    async def get_property_history(
         self,
         property_id: str | None = None,
         manager_id: str | None = None,
+        since: datetime | None = None,
     ) -> list[PropertySnapshot]:
-        """Return stored property snapshots with optional filters."""
-        rows = self._property_snapshots
-        if property_id:
-            rows = [s for s in rows if s.property_id == property_id]
-        if manager_id:
-            rows = [s for s in rows if s.manager_id == manager_id]
-        return list(rows)
+        """Return stored property rollups with optional filters."""
+        if self._store is None:
+            return []
+        return await self._store.list_property_snapshots(
+            property_id=property_id,
+            manager_id=manager_id,
+            since=since,
+        )

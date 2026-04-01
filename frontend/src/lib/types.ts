@@ -516,6 +516,50 @@ export interface EntityNoteResponse {
   updated_at?: string | null;
 }
 
+// --- Search ---
+
+export interface SearchHit {
+  entity_id: string;
+  entity_type: string;
+  label: string;
+  title: string;
+  subtitle: string;
+  score: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchHit[];
+  total: number;
+}
+
+// --- Metrics History ---
+
+export interface PropertySnapshot {
+  property_id: string;
+  property_name: string;
+  manager_id: string;
+  manager_name: string;
+  timestamp: string;
+  total_units: number;
+  occupied: number;
+  vacant: number;
+  occupancy_rate: number;
+  total_rent: number;
+  total_market_rent: number;
+  loss_to_lease: number;
+  maintenance_open: number;
+  maintenance_closed: number;
+  avg_maintenance_cost: number;
+}
+
+export interface MetricsHistoryResponse {
+  entity_type: string;
+  total: number;
+  snapshots: (ManagerSnapshot | PropertySnapshot)[];
+}
+
 // --- Agents ---
 
 export interface AgentMeta {

@@ -17,8 +17,8 @@ import structlog
 
 from remi.models.documents import DocumentStore
 from remi.models.properties import PropertyStore
-from remi.models.retrieval import Embedder, EmbeddingRecord, EmbeddingRequest, VectorStore
 from remi.models.signals import SignalStore
+from remi.vectors.ports import Embedder, EmbeddingRecord, EmbeddingRequest, VectorStore
 
 _log = structlog.get_logger(__name__)
 
@@ -187,9 +187,7 @@ class EmbeddingPipeline:
             if mgr.email:
                 parts.append(f"Email: {mgr.email}")
 
-            parts.append(
-                f"Manages {property_count} properties with {total_units} total units"
-            )
+            parts.append(f"Manages {property_count} properties with {total_units} total units")
 
             status_parts: list[str] = []
             if vacancy_count:

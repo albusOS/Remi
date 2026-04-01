@@ -120,11 +120,8 @@ def register_sandbox_tools(
         session_id = args.get("session_id", _DEFAULT_SESSION)
         await _ensure_session(sandbox, session_id)
 
-        try:
-            saved_name = await sandbox.write_file(session_id, filename, content)
-            return {"status": "success", "filename": saved_name}
-        except Exception as exc:
-            return {"error": str(exc)}
+        saved_name = await sandbox.write_file(session_id, filename, content)
+        return {"status": "success", "filename": saved_name}
 
     registry.register(
         "sandbox_write_file",

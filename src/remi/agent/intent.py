@@ -21,18 +21,48 @@ _GREETING_PATTERNS = re.compile(
 )
 _QUESTION_MARK = re.compile(r"\?\s*$")
 
-_ACTION_KEYWORDS = frozenset({
-    "create action", "draft plan", "action plan", "action item",
-    "follow-up", "follow up", "approve plan", "assign",
-})
-_ANALYSIS_KEYWORDS = frozenset({
-    "compare", "analyze", "analysis", "which", "rank", "breakdown",
-    "summarize", "overview", "assess", "evaluate", "review",
-    "underperforming", "top", "worst", "best",
-    "build", "chart", "audit", "report", "trend", "visualization",
-    "export", "write a report", "investigate", "comprehensive",
-    "detailed analysis",
-})
+_ACTION_KEYWORDS = frozenset(
+    {
+        "create action",
+        "draft plan",
+        "action plan",
+        "action item",
+        "follow-up",
+        "follow up",
+        "approve plan",
+        "assign",
+    }
+)
+_ANALYSIS_KEYWORDS = frozenset(
+    {
+        "compare",
+        "analyze",
+        "analysis",
+        "which",
+        "rank",
+        "breakdown",
+        "summarize",
+        "overview",
+        "assess",
+        "evaluate",
+        "review",
+        "underperforming",
+        "top",
+        "worst",
+        "best",
+        "build",
+        "chart",
+        "audit",
+        "report",
+        "trend",
+        "visualization",
+        "export",
+        "write a report",
+        "investigate",
+        "comprehensive",
+        "detailed analysis",
+    }
+)
 
 
 def classify_intent(

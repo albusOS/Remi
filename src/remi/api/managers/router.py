@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query
 
 from remi.api.dependencies import get_manager_review, get_property_store
+from remi.api.schemas import DeletedResponse
 from remi.api.managers.schemas import (
     AssignPropertiesRequest,
     AssignPropertiesResponse,
@@ -12,6 +13,7 @@ from remi.api.managers.schemas import (
     CreateManagerResponse,
     ManagerListItem,
     ManagerListResponse,
+    ManagerRankingsResponse,
     ManagerReviewResponse,
     MergeManagersRequest,
     MergeManagersResponse,
@@ -19,6 +21,7 @@ from remi.api.managers.schemas import (
 )
 from remi.models.properties import Portfolio, PropertyManager, PropertyStore
 from remi.services.manager_review import ManagerReviewService
+from remi.shared.errors import ConflictError, DomainError, NotFoundError
 from remi.shared.text import slugify as _slugify
 
 router = APIRouter(prefix="/managers", tags=["managers"])
@@ -58,6 +61,19 @@ async def list_managers(
     )
 
 
+@router.get("/rankings", response_model=ManagerRankingsResponse)
+async def manager_rankings(
+    sort_by: str = Query(default="delinquency_rate", description="Field to sort by"),
+    ascending: bool = Query(default=False, description="Sort ascending"),
+    limit: int | None = Query(default=None, ge=1, description="Max results"),
+    review: ManagerReviewService = Depends(get_manager_review),
+) -> ManagerRankingsResponse:
+    rows = await review.rank_managers(
+        sort_by=sort_by, ascending=ascending, limit=limit,
+    )
+    return ManagerRankingsResponse(rankings=rows, total=len(rows), sort_by=sort_by)
+
+
 @router.get("/{manager_id}/review", response_model=ManagerReviewResponse)
 async def manager_review(
     manager_id: str,
@@ -65,7 +81,7 @@ async def manager_review(
 ) -> ManagerReviewResponse:
     result = await review.aggregate_manager(manager_id)
     if not result:
-        raise HTTPException(404, f"Manager '{manager_id}' not found")
+        raise NotFoundError("Manager", manager_id)
     return ManagerReviewResponse(**result.model_dump())
 
 
@@ -79,7 +95,7 @@ async def create_manager(
 
     existing = await ps.get_manager(manager_id)
     if existing:
-        raise HTTPException(409, f"Manager '{body.name}' already exists (id={manager_id})")
+        raise ConflictError(f"Manager '{body.name}' already exists (id={manager_id})")
 
     await ps.upsert_manager(
         PropertyManager(
@@ -113,7 +129,7 @@ async def update_manager(
 ) -> CreateManagerResponse:
     mgr = await ps.get_manager(manager_id)
     if not mgr:
-        raise HTTPException(404, f"Manager '{manager_id}' not found")
+        raise NotFoundError("Manager", manager_id)
 
     updates: dict[str, str | None] = {}
     if body.name is not None:
@@ -142,11 +158,11 @@ async def update_manager(
 async def delete_manager(
     manager_id: str,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     deleted = await ps.delete_manager(manager_id)
     if not deleted:
-        raise HTTPException(404, f"Manager '{manager_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("Manager", manager_id)
+    return DeletedResponse()
 
 
 @router.post("/merge", response_model=MergeManagersResponse)
@@ -158,13 +174,13 @@ async def merge_managers(
     source = await ps.get_manager(body.source_manager_id)
     target = await ps.get_manager(body.target_manager_id)
     if not source:
-        raise HTTPException(404, f"Source manager '{body.source_manager_id}' not found")
+        raise NotFoundError("Manager", body.source_manager_id)
     if not target:
-        raise HTTPException(404, f"Target manager '{body.target_manager_id}' not found")
+        raise NotFoundError("Manager", body.target_manager_id)
 
     target_portfolios = await ps.list_portfolios(manager_id=body.target_manager_id)
     if not target_portfolios:
-        raise HTTPException(400, "Target manager has no portfolio")
+        raise DomainError("Target manager has no portfolio")
     target_pf_id = target_portfolios[0].id
 
     source_portfolios = await ps.list_portfolios(manager_id=body.source_manager_id)
@@ -196,11 +212,11 @@ async def assign_properties(
 ) -> AssignPropertiesResponse:
     mgr = await ps.get_manager(manager_id)
     if not mgr:
-        raise HTTPException(404, f"Manager '{manager_id}' not found")
+        raise NotFoundError("Manager", manager_id)
 
     portfolios = await ps.list_portfolios(manager_id=manager_id)
     if not portfolios:
-        raise HTTPException(400, f"Manager '{manager_id}' has no portfolio")
+        raise DomainError(f"Manager '{manager_id}' has no portfolio")
     portfolio_id = portfolios[0].id
 
     assigned = 0

@@ -162,3 +162,41 @@ class ActionItemRow(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
 
 
+class ManagerRollupRow(SQLModel, table=True):
+    __tablename__ = "manager_rollups"
+
+    id: str = Field(primary_key=True)
+    manager_id: str = Field(index=True)
+    manager_name: str
+    captured_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime, index=True)
+    property_count: int = 0
+    total_units: int = 0
+    occupied: int = 0
+    vacant: int = 0
+    occupancy_rate: float = 0.0
+    total_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    total_market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    loss_to_lease: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    delinquent_count: int = 0
+    delinquent_balance: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+
+
+class PropertyRollupRow(SQLModel, table=True):
+    __tablename__ = "property_rollups"
+
+    id: str = Field(primary_key=True)
+    property_id: str = Field(index=True)
+    property_name: str
+    manager_id: str = Field(index=True)
+    manager_name: str
+    captured_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime, index=True)
+    total_units: int = 0
+    occupied: int = 0
+    vacant: int = 0
+    occupancy_rate: float = 0.0
+    total_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    total_market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    loss_to_lease: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    maintenance_open: int = 0
+    maintenance_closed: int = 0
+    avg_maintenance_cost: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))

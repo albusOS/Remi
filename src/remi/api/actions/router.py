@@ -9,11 +9,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from remi.api.dependencies import get_knowledge_graph, get_property_store
+from remi.api.schemas import DeletedResponse
 from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
+from remi.shared.errors import NotFoundError
 from remi.models.properties import (
     ActionItem,
     ActionItemPriority,
@@ -128,7 +130,7 @@ async def update_action_item(
 ) -> ActionItemResponse:
     existing = await ps.get_action_item(item_id)
     if not existing:
-        raise HTTPException(404, f"Action item '{item_id}' not found")
+        raise NotFoundError("ActionItem", item_id)
 
     updates: dict[str, object] = {"updated_at": datetime.now(UTC)}
     if body.title is not None:
@@ -151,11 +153,11 @@ async def update_action_item(
 async def delete_action_item(
     item_id: str,
     ps: PropertyStore = Depends(get_property_store),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     deleted = await ps.delete_action_item(item_id)
     if not deleted:
-        raise HTTPException(404, f"Action item '{item_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("ActionItem", item_id)
+    return DeletedResponse()
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +240,7 @@ async def update_note(
 ) -> NoteResponse:
     existing = await kg.get_object("Note", note_id)
     if not existing:
-        raise HTTPException(404, f"Note '{note_id}' not found")
+        raise NotFoundError("Note", note_id)
 
     now = datetime.now(UTC).isoformat()
     updated_props = {**existing, "content": body.content, "updated_at": now}
@@ -251,12 +253,11 @@ async def update_note(
 async def delete_note(
     note_id: str,
     kg: BridgedKnowledgeGraph = Depends(get_knowledge_graph),
-) -> dict[str, bool]:
+) -> DeletedResponse:
     existing = await kg.get_object("Note", note_id)
     if not existing:
-        raise HTTPException(404, f"Note '{note_id}' not found")
-    ks = kg._ks  # noqa: SLF001
-    deleted = await ks.delete_entity("ontology", note_id)
+        raise NotFoundError("Note", note_id)
+    deleted = await kg.delete_object("Note", note_id)
     if not deleted:
-        raise HTTPException(404, f"Note '{note_id}' not found")
-    return {"deleted": True}
+        raise NotFoundError("Note", note_id)
+    return DeletedResponse()

@@ -12,7 +12,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from remi.models.properties import LeaseStatus, MaintenanceStatus, PropertyStore, UnitStatus
+from remi.models.properties import LeaseStatus, PropertyStore, UnitStatus
+from remi.services.unit_metrics import (
+    is_below_market,
+    is_maintenance_open,
+    is_occupied,
+    is_vacant,
+    loss_to_lease,
+    pct_below_market,
+)
 
 # ---------------------------------------------------------------------------
 # Response models
@@ -77,9 +85,6 @@ class RentRollResult(BaseModel):
     rows: list[RentRollRow]
 
 
-_BELOW_MARKET_THRESHOLD = 3.0  # percent
-
-
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -124,29 +129,22 @@ class RentRollService:
                 tenant = tenant_cache[tid]
 
             open_maint = [
-                mr
-                for mr in all_maintenance
-                if mr.unit_id == unit.id
-                and mr.status in (MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS)
+                mr for mr in all_maintenance if mr.unit_id == unit.id and is_maintenance_open(mr)
             ]
 
             rent_gap = float(unit.current_rent - unit.market_rent)
-            pct_below = (
-                round(float((unit.market_rent - unit.current_rent) / unit.market_rent) * 100, 1)
-                if unit.market_rent > 0 and unit.current_rent < unit.market_rent
-                else 0.0
-            )
+            pct_below = pct_below_market(unit)
 
             days_to_expiry: int | None = None
             if current_lease:
                 days_to_expiry = (current_lease.end_date - today).days
 
             issues: list[str] = []
-            if unit.status == UnitStatus.VACANT:
+            if is_vacant(unit):
                 issues.append("vacant")
             if unit.status == UnitStatus.MAINTENANCE:
                 issues.append("down_for_maintenance")
-            if pct_below > _BELOW_MARKET_THRESHOLD:
+            if is_below_market(unit):
                 issues.append("below_market")
             if current_lease and current_lease.status == LeaseStatus.EXPIRED:
                 issues.append("expired_lease")
@@ -157,9 +155,8 @@ class RentRollService:
 
             total_market += unit.market_rent
             total_actual += unit.current_rent
-            if unit.current_rent < unit.market_rent:
-                total_loss_to_lease += unit.market_rent - unit.current_rent
-            if unit.status == UnitStatus.VACANT:
+            total_loss_to_lease += loss_to_lease(unit)
+            if is_vacant(unit):
                 total_vacancy_loss += unit.market_rent
 
             rows.append(
@@ -216,8 +213,8 @@ class RentRollService:
             property_id=property_id,
             property_name=prop.name,
             total_units=len(units),
-            occupied=sum(1 for u in units if u.status == UnitStatus.OCCUPIED),
-            vacant=sum(1 for u in units if u.status == UnitStatus.VACANT),
+            occupied=sum(1 for u in units if is_occupied(u)),
+            vacant=sum(1 for u in units if is_vacant(u)),
             total_market_rent=float(total_market),
             total_actual_rent=float(total_actual),
             total_loss_to_lease=float(total_loss_to_lease),

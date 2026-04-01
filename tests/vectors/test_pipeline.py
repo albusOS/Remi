@@ -24,11 +24,11 @@ from remi.models.properties import (
     UnitStatus,
 )
 from remi.stores.properties import InMemoryPropertyStore
-from remi.stores.vectors import InMemoryVectorStore
 from remi.vectors.embedder import NoopEmbedder
 from remi.vectors.pipeline import EmbeddingPipeline
+from remi.vectors.store import InMemoryVectorStore
 
-_ADDR = Address(street="100 Main St", city="Portland", state="OR", zip_code="97201")
+_ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 
 
 @pytest.fixture
@@ -60,44 +60,75 @@ def pipeline(
 
 
 async def _seed(ps: InMemoryPropertyStore) -> None:
-    mgr = PropertyManager(id="mgr-1", name="Alice Manager", email="a@test.com")
+    mgr = PropertyManager(id="mgr-1", name="Jake Kraus", email="jake@rivaridge.com")
     await ps.upsert_manager(mgr)
 
-    pf = Portfolio(id="pf-1", manager_id="mgr-1", name="Main Portfolio")
+    pf = Portfolio(id="pf-1", manager_id="mgr-1", name="Kraus Portfolio")
     await ps.upsert_portfolio(pf)
 
-    prop = Property(id="prop-1", portfolio_id="pf-1", name="Oak Tower", address=_ADDR)
+    prop = Property(id="prop-1", portfolio_id="pf-1", name="100 Smithfield St", address=_ADDR)
     await ps.upsert_property(prop)
 
-    await ps.upsert_unit(Unit(
-        id="unit-1", property_id="prop-1", unit_number="101",
-        status=UnitStatus.OCCUPIED, current_rent=Decimal("1200"),
-        market_rent=Decimal("1400"), bedrooms=2, bathrooms=1, sqft=850,
-    ))
-    await ps.upsert_unit(Unit(
-        id="unit-2", property_id="prop-1", unit_number="102",
-        status=UnitStatus.VACANT, days_vacant=45,
-    ))
+    await ps.upsert_unit(
+        Unit(
+            id="unit-1",
+            property_id="prop-1",
+            unit_number="101",
+            status=UnitStatus.OCCUPIED,
+            current_rent=Decimal("1200"),
+            market_rent=Decimal("1400"),
+            bedrooms=2,
+            bathrooms=1,
+            sqft=850,
+        )
+    )
+    await ps.upsert_unit(
+        Unit(
+            id="unit-2",
+            property_id="prop-1",
+            unit_number="102",
+            status=UnitStatus.VACANT,
+            days_vacant=45,
+        )
+    )
 
-    await ps.upsert_tenant(Tenant(
-        id="t-1", name="Bob Renter", status=TenantStatus.CURRENT,
-        balance_owed=Decimal("500"), tags=["late-payer"],
-    ))
-    await ps.upsert_lease(Lease(
-        id="lease-1", tenant_id="t-1", property_id="prop-1", unit_id="unit-1",
-        start_date=date(2024, 1, 1), end_date=date(2025, 12, 31),
-        monthly_rent=Decimal("1200"), status=LeaseStatus.ACTIVE,
-    ))
+    await ps.upsert_tenant(
+        Tenant(
+            id="t-1",
+            name="Carlos Rivera",
+            status=TenantStatus.CURRENT,
+            balance_owed=Decimal("500"),
+            tags=["late-payer"],
+        )
+    )
+    await ps.upsert_lease(
+        Lease(
+            id="lease-1",
+            tenant_id="t-1",
+            property_id="prop-1",
+            unit_id="unit-1",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 12, 31),
+            monthly_rent=Decimal("1200"),
+            status=LeaseStatus.ACTIVE,
+        )
+    )
 
-    await ps.upsert_maintenance_request(MaintenanceRequest(
-        id="maint-1", property_id="prop-1", unit_id="unit-1",
-        title="Leaky faucet in kitchen",
-        description="Kitchen faucet has been dripping for a week. Washer likely needs replacing.",
-        category=MaintenanceCategory.PLUMBING,
-        priority=Priority.MEDIUM,
-        status=MaintenanceStatus.OPEN,
-        created_at=datetime.now(UTC),
-    ))
+    await ps.upsert_maintenance_request(
+        MaintenanceRequest(
+            id="maint-1",
+            property_id="prop-1",
+            unit_id="unit-1",
+            title="Leaky faucet in kitchen",
+            description=(
+                "Kitchen faucet has been dripping for a week. Washer likely needs replacing."
+            ),
+            category=MaintenanceCategory.PLUMBING,
+            priority=Priority.MEDIUM,
+            status=MaintenanceStatus.OPEN,
+            created_at=datetime.now(UTC),
+        )
+    )
 
 
 class TestPipelineEndToEnd:
@@ -184,7 +215,7 @@ class TestPipelineEndToEnd:
         rec = await vector_store.get("vec:tenant:t-1:profile")
         assert rec is not None
         assert "500" in rec.text
-        assert "Bob Renter" in rec.text
+        assert "Carlos Rivera" in rec.text
 
     @pytest.mark.asyncio
     async def test_maintenance_text_includes_description(

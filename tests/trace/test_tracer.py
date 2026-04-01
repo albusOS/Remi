@@ -25,7 +25,8 @@ def tracer(store: InMemoryTraceStore) -> Tracer:
 
 @pytest.mark.asyncio
 async def test_start_trace_creates_root_span(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
     async with tracer.start_trace("test.root") as ctx:
         assert ctx.trace_id is not None
@@ -40,7 +41,8 @@ async def test_start_trace_creates_root_span(
 
 @pytest.mark.asyncio
 async def test_child_spans_form_tree(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
     async with (
         tracer.start_trace("root") as root,
@@ -63,11 +65,17 @@ async def test_child_spans_form_tree(
 
 @pytest.mark.asyncio
 async def test_nested_child_spans(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
-    async with tracer.start_trace("root") as root, root.span(
-        SpanKind.ENTAILMENT, "parent",
-    ) as parent, parent.span(SpanKind.SIGNAL, "grandchild"):
+    async with (
+        tracer.start_trace("root") as root,
+        root.span(
+            SpanKind.ENTAILMENT,
+            "parent",
+        ) as parent,
+        parent.span(SpanKind.SIGNAL, "grandchild"),
+    ):
         pass
 
     spans = await store.list_spans(root.trace_id)
@@ -94,7 +102,8 @@ async def test_contextvars_propagate(tracer: Tracer) -> None:
 
 @pytest.mark.asyncio
 async def test_error_marks_span(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
     with pytest.raises(ValueError, match="boom"):
         async with tracer.start_trace("fail") as ctx:
@@ -108,7 +117,8 @@ async def test_error_marks_span(
 
 @pytest.mark.asyncio
 async def test_set_attribute_and_add_event(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
     async with tracer.start_trace("annotated") as ctx:
         ctx.set_attribute("count", 42)
@@ -123,7 +133,8 @@ async def test_set_attribute_and_add_event(
 
 @pytest.mark.asyncio
 async def test_standalone_span_creates_own_trace(
-    tracer: Tracer, store: InMemoryTraceStore,
+    tracer: Tracer,
+    store: InMemoryTraceStore,
 ) -> None:
     async with tracer.span(SpanKind.ENTAILMENT, "orphan") as ctx:
         pass

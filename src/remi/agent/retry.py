@@ -40,23 +40,29 @@ def _default_transient_exceptions() -> tuple[type[Exception], ...]:
 
     try:
         import anthropic
-        transient.extend([
-            anthropic.APIConnectionError,
-            anthropic.APITimeoutError,
-            anthropic.InternalServerError,
-            anthropic.RateLimitError,
-        ])
+
+        transient.extend(
+            [
+                anthropic.APIConnectionError,
+                anthropic.APITimeoutError,
+                anthropic.InternalServerError,
+                anthropic.RateLimitError,
+            ]
+        )
     except ImportError:
         pass
 
     try:
         import openai
-        transient.extend([
-            openai.APIConnectionError,
-            openai.APITimeoutError,
-            openai.InternalServerError,
-            openai.RateLimitError,
-        ])
+
+        transient.extend(
+            [
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.InternalServerError,
+                openai.RateLimitError,
+            ]
+        )
     except ImportError:
         pass
 

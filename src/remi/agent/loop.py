@@ -6,23 +6,71 @@ iterations may include tool calls.  After the budget is spent the loop
 makes one final LLM call *with tools disabled* so the agent always
 produces a proper synthesis rather than being silently truncated.
 ``max_iterations`` remains as a hard safety ceiling.
+
+When ``cfg.phases`` is non-empty, the loop injects phase-transition
+system messages at cumulative iteration thresholds, nudging the agent
+to advance from one research phase to the next.
+
+Tool calls within a single LLM response are executed **concurrently**
+via ``asyncio.gather`` — independent tool calls don't block each other.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import structlog
 
 from remi.agent.base import Message
-from remi.agent.config import AgentConfig
+from remi.agent.config import AgentConfig, PhaseConfig
 from remi.agent.llm_bridge import OnEventCallback, build_llm_request, stream_llm_response
 from remi.agent.thread import try_parse_json
+from remi.agent.thread_compression import compress_tool_result
 from remi.agent.tool_executor import ToolExecutor
-from remi.llm.ports import LLMProvider, LLMRequest, TokenUsage
+from remi.llm.ports import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
 from remi.observability.tracer import Tracer
 
 logger = structlog.get_logger("remi.agent.loop")
+
+
+def _build_phase_thresholds(
+    phases: list[PhaseConfig],
+) -> list[tuple[int, PhaseConfig]]:
+    """Return (cumulative_iteration, phase) pairs for transition nudges."""
+    thresholds: list[tuple[int, PhaseConfig]] = []
+    cumulative = 0
+    for phase in phases:
+        cumulative += phase.max_iterations
+        thresholds.append((cumulative, phase))
+    return thresholds
+
+
+def _serialize_result(result: object) -> str | int | float | bool:
+    """Serialize a tool result for the emit callback."""
+    if isinstance(result, (str, int, float, bool)):
+        return result
+    return json.dumps(result, default=str)
+
+
+async def _execute_tool_call(
+    tc: ToolCallRequest,
+    iteration: int,
+    tool_executor: ToolExecutor,
+    emit: OnEventCallback,
+) -> Message:
+    """Execute a single tool call with event emission. Returns the tool Message."""
+    await emit(
+        "tool_call",
+        {"tool": tc.name, "arguments": tc.arguments, "call_id": tc.id},
+    )
+    result = await tool_executor.execute(tc, iteration)
+    await emit(
+        "tool_result",
+        {"tool": tc.name, "call_id": tc.id, "result": _serialize_result(result)},
+    )
+    compressed = compress_tool_result(tc.name, result)
+    return Message(role="tool", name=tc.name, tool_call_id=tc.id, content=compressed)
 
 
 async def run_agent_loop(
@@ -35,6 +83,7 @@ async def run_agent_loop(
     tracer: Tracer | None,
     log: structlog.stdlib.BoundLogger,
     max_tool_rounds: int | None = None,
+    routing_provider: LLMProvider | None = None,
 ) -> tuple[list[Message], TokenUsage]:
     """Execute the think-act-observe loop.
 
@@ -42,6 +91,11 @@ async def run_agent_loop(
     After that many tool-using iterations, the next LLM call is sent
     without tools so the model must produce a text response.
     Falls back to ``cfg.max_iterations`` when not set.
+
+    When *routing_provider* is set and ``cfg.tool_routing_model`` is
+    configured, intermediate tool-selection turns (iteration > 0, tools
+    enabled) use the cheaper routing model.  The first call (planning)
+    and final synthesis always use the primary model.
 
     Returns the updated thread and cumulative token usage.
     """
@@ -53,11 +107,39 @@ async def run_agent_loop(
     tool_defs = tool_executor.definitions
     produced_answer = False
 
+    phase_thresholds = _build_phase_thresholds(cfg.phases)
+    next_phase_idx = 0
+    current_phase_name: str | None = cfg.phases[0].name if cfg.phases else None
+
     for iteration in range(hard_cap):
         total_iterations = iteration + 1
 
-        # When the tool budget is spent, disable tools so the LLM
-        # synthesizes a text answer instead of requesting more calls.
+        if phase_thresholds and next_phase_idx < len(phase_thresholds):
+            threshold, phase = phase_thresholds[next_phase_idx]
+            if iteration >= threshold and next_phase_idx + 1 < len(phase_thresholds):
+                next_phase_idx += 1
+                _, next_phase = phase_thresholds[next_phase_idx]
+                current_phase_name = next_phase.name
+                nudge = next_phase.nudge or (
+                    f"Phase transition: you should now be in the "
+                    f"**{next_phase.name}** phase. {next_phase.description}"
+                )
+                thread.append(Message(role="system", content=nudge))
+                log.info(
+                    "phase_transition",
+                    from_phase=phase.name,
+                    to_phase=next_phase.name,
+                    iteration=iteration,
+                )
+                await emit(
+                    "phase",
+                    {
+                        "phase": next_phase.name,
+                        "iteration": iteration,
+                        "description": next_phase.description,
+                    },
+                )
+
         budget_exhausted = tool_rounds_used >= tool_round_budget
         active_tools = None if budget_exhausted else (tool_defs or None)
 
@@ -68,12 +150,32 @@ async def run_agent_loop(
             tools_enabled=active_tools is not None,
             tool_rounds_used=tool_rounds_used,
             tool_round_budget=tool_round_budget,
+            phase=current_phase_name,
         )
 
-        request = build_llm_request(cfg, thread, active_tools)
+        use_routing = (
+            iteration > 0
+            and active_tools is not None
+            and cfg.tool_routing_model
+            and routing_provider is not None
+        )
+        iter_provider = routing_provider if use_routing else provider
+        iter_model = cfg.tool_routing_model if use_routing else None
+
+        if use_routing:
+            log.info(
+                "model_routing",
+                iteration=iteration,
+                routing_model=cfg.tool_routing_model,
+                primary_model=cfg.model,
+            )
+
+        request = build_llm_request(
+            cfg, thread, active_tools, model_override=iter_model,
+        )
 
         response = await stream_llm_response(
-            provider,
+            iter_provider,
             request,
             emit,
             iteration,
@@ -88,6 +190,7 @@ async def run_agent_loop(
             prompt_tokens=response.usage.prompt_tokens,
             completion_tokens=response.usage.completion_tokens,
             has_content=bool(response.content),
+            effective_model=request.model,
         )
 
         if not response.tool_calls:
@@ -98,7 +201,7 @@ async def run_agent_loop(
             produced_answer = True
             break
 
-        tool_rounds_used += 1  # noqa: SIM113 — only incremented on tool-using iterations
+        tool_rounds_used += 1
         thread.append(
             Message(
                 role="assistant",
@@ -106,32 +209,16 @@ async def run_agent_loop(
                 tool_calls=response.tool_calls or None,
             )
         )
-        for tc in response.tool_calls:
-            await emit(
-                "tool_call",
-                {
-                    "tool": tc.name,
-                    "arguments": tc.arguments,
-                    "call_id": tc.id,
-                },
-            )
 
-            result = await tool_executor.execute(tc, iteration)
+        # Execute tool calls concurrently — independent calls don't block each other
+        tool_messages = await asyncio.gather(
+            *[
+                _execute_tool_call(tc, iteration, tool_executor, emit)
+                for tc in response.tool_calls
+            ]
+        )
+        thread.extend(tool_messages)
 
-            thread.append(Message(role="tool", name=tc.name, tool_call_id=tc.id, content=result))
-            await emit(
-                "tool_result",
-                {
-                    "tool": tc.name,
-                    "call_id": tc.id,
-                    "result": result
-                    if isinstance(result, (str, int, float, bool))
-                    else json.dumps(result, default=str),
-                },
-            )
-
-    # Safety net: if the hard cap was hit without an answer (shouldn't
-    # normally happen with the budget logic above), force a synthesis.
     if not produced_answer:
         log.info("hard_cap_synthesis", iterations=total_iterations)
         synth_request = LLMRequest(

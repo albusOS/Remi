@@ -1,26 +1,86 @@
 """OpenAI adapter for the LLM provider port.
 
 Also serves as the base for any OpenAI-compatible API (Ollama, vLLM,
-Together, Groq, etc.) by passing a custom ``base_url``.
+Together, Groq, etc.) by passing a custom ``base_url`` in ProviderConfig.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from remi.llm.ports import LLMProvider, LLMResponse, StreamChunk, TokenUsage, ToolCallRequest
+from remi.llm.ports import (
+    LLMProvider,
+    LLMResponse,
+    ModelCapabilities,
+    ModelPricing,
+    ProviderConfig,
+    StreamChunk,
+    TokenUsage,
+    ToolCallRequest,
+)
 from remi.models.chat import Message
 from remi.models.tools import ToolDefinition
 
+_MODEL_REGISTRY: dict[str, ModelCapabilities] = {
+    "gpt-4o": ModelCapabilities(
+        context_window=128_000,
+        max_output_tokens=16_384,
+        supports_vision=True,
+        pricing=ModelPricing(2.5, 10.0),
+    ),
+    "gpt-4o-mini": ModelCapabilities(
+        context_window=128_000,
+        max_output_tokens=16_384,
+        supports_vision=True,
+        pricing=ModelPricing(0.15, 0.6),
+    ),
+    "gpt-4-turbo": ModelCapabilities(
+        context_window=128_000,
+        max_output_tokens=4_096,
+        supports_vision=True,
+        pricing=ModelPricing(10.0, 30.0),
+    ),
+    "gpt-4.1": ModelCapabilities(
+        context_window=1_047_576,
+        max_output_tokens=32_768,
+        supports_vision=True,
+        pricing=ModelPricing(2.0, 8.0),
+    ),
+    "gpt-4.1-mini": ModelCapabilities(
+        context_window=1_047_576,
+        max_output_tokens=32_768,
+        supports_vision=True,
+        pricing=ModelPricing(0.4, 1.6),
+    ),
+    "gpt-4.1-nano": ModelCapabilities(
+        context_window=1_047_576,
+        max_output_tokens=32_768,
+        supports_vision=True,
+        pricing=ModelPricing(0.1, 0.4),
+    ),
+    "o3-mini": ModelCapabilities(
+        context_window=200_000,
+        max_output_tokens=100_000,
+        supports_vision=False,
+        pricing=ModelPricing(1.1, 4.4),
+    ),
+}
+
+_DEFAULT_CAPABILITIES = ModelCapabilities(
+    context_window=128_000,
+    max_output_tokens=4_096,
+)
+
+_TIKTOKEN_ENCODING = "cl100k_base"
+
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-        self._base_url = base_url
+    def __init__(self, config: ProviderConfig) -> None:
+        self._config = config
         self._client: Any = None
+        self._encoding: Any = None
 
     # -- wire-format translation (REMI → OpenAI) ----------------------------
 
@@ -66,10 +126,24 @@ class OpenAIProvider(LLMProvider):
                 import openai
             except ImportError as exc:
                 raise RuntimeError(
-                    "OpenAI provider requires the 'openai' package: pip install openai"
+                    "OpenAI provider requires the 'openai' package: pip install 'remi[openai]'"
                 ) from exc
-            self._client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+            self._client = openai.AsyncOpenAI(
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+            )
         return self._client
+
+    def _get_encoding(self) -> Any:
+        if self._encoding is None:
+            try:
+                import tiktoken
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Token counting requires the 'tiktoken' package: pip install tiktoken"
+                ) from exc
+            self._encoding = tiktoken.get_encoding(_TIKTOKEN_ENCODING)
+        return self._encoding
 
     # -- LLMProvider interface ------------------------------------------------
 
@@ -195,3 +269,44 @@ class OpenAIProvider(LLMProvider):
                 for tc_data in active_tool_calls.values():
                     yield StreamChunk(type="tool_call_end", tool_call_id=tc_data["id"])
                 yield StreamChunk(type="done", usage=usage)
+
+    def count_tokens(
+        self,
+        messages: list[Message],
+        *,
+        model: str,
+        tools: list[ToolDefinition] | None = None,
+    ) -> int:
+        enc = self._get_encoding()
+        # Per OpenAI's token counting guide: each message has overhead tokens.
+        tokens_per_message = 3
+        total = 0
+        for msg in messages:
+            total += tokens_per_message
+            text = (
+                msg.content
+                if isinstance(msg.content, str)
+                else json.dumps(msg.content, default=str)
+            )
+            total += len(enc.encode(text))
+            if msg.role:
+                total += len(enc.encode(msg.role))
+            if msg.name:
+                total += len(enc.encode(msg.name)) + 1
+        total += 3  # reply priming
+        if tools:
+            for tool in tools:
+                schema_text = json.dumps(tool.to_json_schema(), separators=(",", ":"))
+                total += len(enc.encode(tool.name))
+                total += len(enc.encode(tool.description))
+                total += len(enc.encode(schema_text))
+                total += 5  # per-tool overhead
+        return total
+
+    def model_capabilities(self, model: str) -> ModelCapabilities:
+        if model in _MODEL_REGISTRY:
+            return _MODEL_REGISTRY[model]
+        for prefix, caps in _MODEL_REGISTRY.items():
+            if model.startswith(prefix):
+                return caps
+        return _DEFAULT_CAPABILITIES

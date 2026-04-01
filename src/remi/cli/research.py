@@ -1,8 +1,7 @@
-"""remi research — deep analytical research on the portfolio.
+"""remi research — deep analytical question on the portfolio.
 
-Runs the researcher agent in single-shot mode: loads the full portfolio,
-runs statistical analysis, and produces a structured research report.
-Designed for monthly/quarterly analytical work, not interactive chat.
+Runs the director agent in agent mode with a single-shot question.
+Use for ad-hoc analytical queries from the command line.
 """
 
 from __future__ import annotations
@@ -10,13 +9,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import structlog
 import typer
+
+logger = structlog.get_logger(__name__)
 
 from remi.cli.shared import get_container_async, json_out, use_json
 
 cmd = typer.Typer(
     name="research",
-    help="Run deep portfolio research and produce analytical reports.",
+    help="Run deep portfolio analysis via the director agent.",
     no_args_is_help=True,
 )
 
@@ -52,11 +54,11 @@ async def _run_research(question: str, fmt_json: bool, verbose: bool) -> None:
                 sev = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
                 severity_breakdown[sev] = severity_breakdown.get(sev, 0) + 1
         except Exception:
-            pass
+            logger.debug("signal_fetch_for_display_failed", exc_info=True)
 
         settings = container.settings
         display.show_start(
-            "researcher",
+            "director",
             settings.llm.default_model,
             settings.llm.default_provider,
         )
@@ -72,7 +74,7 @@ async def _run_research(question: str, fmt_json: bool, verbose: bool) -> None:
 
     try:
         answer, run_id = await container.chat_agent.ask(
-            "researcher",
+            "director",
             question,
             mode="agent",
             on_event=on_event,
@@ -88,7 +90,7 @@ async def _run_research(question: str, fmt_json: bool, verbose: bool) -> None:
         json_out(
             {
                 "ok": True,
-                "agent": "researcher",
+                "agent": "director",
                 "run_id": run_id,
                 "question": question,
                 "answer": answer,

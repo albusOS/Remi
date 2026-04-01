@@ -1,0 +1,105 @@
+---
+description: Forward-looking architecture alignment — guides incremental migration toward agent-first, domain-centric design
+globs: ["**/*.py", "**/*.yaml", "**/*.yml"]
+alwaysApply: true
+---
+
+# Architecture Alignment
+
+This codebase is layer-organized today but migrating incrementally toward
+a **domain-centric, agent-first** structure. Every change should move us
+closer — or at minimum not move us further away.
+
+## Target Direction
+
+The long-term target is domain-organized code with hexagonal boundaries:
+each bounded context owns its models, ports (interfaces), adapters, and
+tools in one place. We are **not** rewriting today — we are steering.
+
+## Interface Segregation (active migration)
+
+Repository ports are split into **narrow, per-entity protocols**
+(e.g. `LeaseRepository`, `UnitRepository`). The composite `PropertyStore`
+inherits from all of them for backward compatibility.
+
+- **New code** must depend on the **narrowest** protocol that covers its
+  needs — never on `PropertyStore` when a single-entity protocol suffices.
+- When touching existing code that takes `PropertyStore`, narrow the type
+  annotation if the function only uses methods from one or two protocols.
+
+## Container Discipline
+
+`Container` must stay a **thin wiring layer** — no business logic, no
+factory decisions, no closures. Rules:
+
+- Attributes that are only consumed internally (to build other objects)
+  should be **local variables**, not `self.*` attributes.
+- Factory functions belong in the module that owns the thing being
+  built (e.g. `stores/factory.py`, `knowledge/composite.py`),
+  **not** in `container.py`.
+- Before adding a new attribute, verify it will be read outside
+  `container.py`. If not, it's a local variable.
+
+## Import Rules
+
+- **Never use `typing.TYPE_CHECKING`.** If you need it, the dependency
+  graph is wrong. Fix the design, not the import.
+- All imports must be direct and honest — if you use a type at runtime,
+  import it at the top of the file.
+- No circular import workarounds. If two modules need each other,
+  one of them has the wrong responsibility.
+
+## Error Propagation Rules
+
+- **No silent exception swallowing.** Every `except` block must either
+  re-raise or log at `warning`+ with `exc_info=True`.
+- `except Exception: pass` and `except Exception: continue` are banned.
+- Catch-and-continue in pipelines/batch loops must record failures in
+  a result object (`errors`, `failed_producers`, `pipeline_warnings`).
+- Narrow the exception type — prefer `ValueError`, `TypeError`,
+  `KeyError` over bare `Exception` when the failure mode is known.
+
+## Type Strictness
+
+- **No `dict[str, Any]`** as a return type or parameter — define a
+  Pydantic model or TypedDict.
+- **No `-> Any`** return annotations — be explicit about what is returned.
+- **No `list[dict]`** — model the list items.
+- When touching existing code that uses `Any` or untyped `dict`, narrow
+  the annotation. At minimum, don't add new ones.
+
+## File Size Gates
+
+- **Interface files** (ABCs / Protocols): flag at **8 abstract methods**.
+  Beyond that, the interface likely conflates bounded contexts.
+- **Implementation files**: flag at **300 lines**. Split by entity or
+  responsibility before adding more.
+- **Container**: flag at **250 lines**. Extract factory functions into
+  the owning modules.
+
+## New Modules — Placement Checklist
+
+Before creating a file or adding significant logic, answer:
+
+1. Which **domain entity** does this serve?
+2. Does a narrow repository protocol exist for it? If not, create one.
+3. Does this belong in `stores/` (I/O adapter), `services/` (domain
+   logic), or `tools/` (agent interface)?
+4. Could an LLM discover this capability via `--help` or tool registry?
+   If not, is that acceptable?
+
+## Dead Code Policy
+
+- Do not leave CLI commands that are unreachable from the entry point.
+- Do not leave tool registration functions that are never called.
+- Backward-compat aliases (properties, re-exports) get a `# COMPAT:`
+  comment and a removal date or condition.
+
+## Naming Conventions
+
+- Files that define a class plus its factory: name after the concept,
+  not after lifecycle (`schema.py` not `bootstrap.py`).
+- Factory functions: `build_<thing>()` — lives in the module that
+  defines the thing.
+- Seeding / initialization: `seed_<thing>()` — loads data into an
+  already-constructed object.

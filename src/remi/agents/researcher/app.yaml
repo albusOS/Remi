@@ -27,7 +27,7 @@ modules:
       temperature: 0.2
       max_tokens: 8192
       max_iterations: 30
-      max_history_turns: 4
+      max_history_turns: 10
 
       system_prompt: |
         You are REMI Research — a deep analytical engine for a real estate
@@ -270,6 +270,20 @@ modules:
       output_contract: conversation
       response_format: text
 
+      phases:
+        - name: DATA
+          description: "Load all data into DataFrames via remi_data and verify shapes. Use portfolio_review and delinquency_review to get structured summaries."
+          max_iterations: 5
+          nudge: "PHASE TRANSITION: You should have all data loaded by now. Move to the ANALYZE phase — compute statistics, test hypotheses, run regressions. Do NOT keep loading data."
+        - name: ANALYZE
+          description: "Run statistical analysis, test hypotheses, detect anomalies, compute trends from metrics_history."
+          max_iterations: 15
+          nudge: "PHASE TRANSITION: Analysis time is up. Move to SYNTHESIZE — write your final research_report.md using sandbox_write_file and present findings."
+        - name: SYNTHESIZE
+          description: "Write the final structured report and present key findings."
+          max_iterations: 10
+          nudge: "FINAL PHASE: You must now write and present your research report. Use sandbox_write_file to save research_report.md."
+
       tools:
         - name: sandbox_exec_python
         - name: sandbox_write_file
@@ -281,6 +295,12 @@ modules:
         - name: onto_get
         - name: onto_aggregate
         - name: onto_related
+        - name: onto_timeline
+        - name: onto_schema
+        - name: portfolio_review
+        - name: delinquency_review
+        - name: lease_risk_review
+        - name: snapshot_compare
         - name: document_query
         - name: semantic_search
         - name: memory_store

@@ -27,10 +27,9 @@ from remi.agent.thread import (
     last_assistant_content,
     trim_thread,
 )
-from remi.agent.tool_executor import ToolExecutor, build_tool_set, build_tool_set_for_names
+from remi.agent.tool_executor import ToolExecutor, build_tool_set
 from remi.knowledge.context_builder import extract_signal_references
-from remi.llm.ports import LLMProvider
-from remi.llm.pricing import estimate_cost
+from remi.llm.ports import LLMProvider, estimate_cost
 from remi.models.trace import SpanKind
 from remi.observability.tracer import Tracer, get_current_trace_id
 
@@ -97,6 +96,13 @@ class AgentNode(BaseModule):
         )
 
         provider = _resolve_provider(cfg.provider, context)
+        routing_provider: LLMProvider | None = None
+        if cfg.tool_routing_model:
+            routing_name = cfg.tool_routing_provider or cfg.provider
+            if routing_name and routing_name != cfg.provider:
+                routing_provider = _resolve_provider(routing_name, context)
+            else:
+                routing_provider = provider
         tool_defs, tool_execute = build_tool_set(cfg, context, mode=mode)
         memory = context.deps.memory_store or context.extras.get("memory_store")
         emit: OnEventCallback = (
@@ -107,7 +113,9 @@ class AgentNode(BaseModule):
         thread = build_initial_thread(cfg, inputs)
 
         # --- Intent-based routing ---
-        # Default: inject everything.  Intent can narrow this.
+        # Intent narrows context injection and enforces tool budgets.
+        # Conversation intent disables tools entirely; other intents
+        # apply max_tool_rounds and max_iterations from YAML config.
         injection_phases: set[str] = {"signals", "domain", "graph", "memory"}
         max_tool_rounds: int | None = None
         user_question = _extract_user_question(thread)
@@ -115,17 +123,16 @@ class AgentNode(BaseModule):
         intent_name: str | None = None
         if intent_result is not None:
             intent_name, intent_cfg = intent_result
+            injection_phases = set(intent_cfg.context_injection)
+
+            if intent_name == "conversation":
+                tool_defs, tool_execute = [], None
+                max_tool_rounds = 0
+            elif intent_cfg.max_tool_rounds is not None:
+                max_tool_rounds = intent_cfg.max_tool_rounds
+
             if intent_cfg.max_iterations is not None:
                 cfg = cfg.model_copy(update={"max_iterations": intent_cfg.max_iterations})
-            max_tool_rounds = intent_cfg.max_tool_rounds
-            if intent_cfg.tools:
-                allowed = {t.name for t in cfg.tools_for_mode(mode)}
-                scoped = [n for n in intent_cfg.tools if n in allowed]
-                if scoped:
-                    tool_defs, tool_execute = build_tool_set_for_names(scoped, context)
-            elif max_tool_rounds == 0:
-                tool_defs, tool_execute = [], None
-            injection_phases = set(intent_cfg.context_injection)
 
         log = logger.bind(
             run_id=context.run_id,
@@ -161,7 +168,7 @@ class AgentNode(BaseModule):
                 scope_parts.append("Properties: " + ", ".join(prop_names[:20]))
             scope_parts.append(
                 "\n**You MUST scope all tool calls to this manager.** "
-                f"Always pass `manager_id=\"{mgr_id}\"` to onto_signals, "
+                f'Always pass `manager_id="{mgr_id}"` to onto_signals, '
                 "onto_search, onto_aggregate, semantic_search, and any "
                 "remi_data function that accepts manager_id. "
                 "Only discuss data relevant to this manager's portfolio "
@@ -267,7 +274,7 @@ class AgentNode(BaseModule):
                                 ):
                                     pass
                             except Exception:
-                                pass
+                                logger.debug("signal_injection_tracing_failed", exc_info=True)
 
                 memory_text = await memory_text_coro
 
@@ -283,6 +290,7 @@ class AgentNode(BaseModule):
                 tracer=tracer,
                 log=log,
                 max_tool_rounds=max_tool_rounds,
+                routing_provider=routing_provider,
             )
 
             final = format_output(thread, cfg)

@@ -1,4 +1,10 @@
-"""Merged models module."""
+"""Property management domain models and repository protocols.
+
+DTOs (Pydantic models) define the data shapes.  Narrow repository
+protocols define per-entity storage contracts.  ``PropertyStore`` is a
+composite that inherits every protocol for backward compatibility — new
+code should depend on the narrowest protocol it actually needs.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,10 @@ from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 
 class PropertyType(StrEnum):
@@ -67,6 +77,25 @@ class TenantStatus(StrEnum):
     CURRENT = "current"
     NOTICE = "notice"
     EVICT = "evict"
+
+
+class ActionItemStatus(StrEnum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class ActionItemPriority(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+# ---------------------------------------------------------------------------
+# DTOs
+# ---------------------------------------------------------------------------
 
 
 def _utcnow() -> datetime:
@@ -176,20 +205,6 @@ class MaintenanceRequest(BaseModel, frozen=True):
     vendor: str | None = None
 
 
-class ActionItemStatus(StrEnum):
-    OPEN = "open"
-    IN_PROGRESS = "in_progress"
-    DONE = "done"
-    CANCELLED = "cancelled"
-
-
-class ActionItemPriority(StrEnum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    URGENT = "urgent"
-
-
 class ActionItem(BaseModel, frozen=True):
     """User-created action item tied to a manager, property, or tenant."""
 
@@ -206,46 +221,12 @@ class ActionItem(BaseModel, frozen=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
-class MetricSnapshot(BaseModel, frozen=True):
-    """A single metric observation for a property, portfolio, or manager."""
-
-    entity_type: str
-    entity_id: str
-    metric_name: str
-    value: Decimal
-    period: str
-    recorded_at: datetime = Field(default_factory=_utcnow)
+# ---------------------------------------------------------------------------
+# Narrow repository protocols — one per entity group
+# ---------------------------------------------------------------------------
 
 
-class FinancialSummary(BaseModel, frozen=True):
-    """Aggregated financial performance for a property or portfolio."""
-
-    entity_type: str
-    entity_id: str
-    period: str
-    gross_revenue: Decimal = Decimal("0")
-    operating_expenses: Decimal = Decimal("0")
-    maintenance_costs: Decimal = Decimal("0")
-    noi: Decimal = Decimal("0")
-    occupancy_rate: float = 0.0
-    total_units: int = 0
-    occupied_units: int = 0
-    avg_rent_per_unit: Decimal = Decimal("0")
-    recorded_at: datetime = Field(default_factory=_utcnow)
-
-    @property
-    def vacancy_rate(self) -> float:
-        return 1.0 - self.occupancy_rate
-
-    @property
-    def loss_to_lease(self) -> Decimal:
-        return self.gross_revenue - self.noi - self.operating_expenses - self.maintenance_costs
-
-
-class PropertyStore(abc.ABC):
-    """Read/write access to the core property management entities."""
-
-    # -- Property Managers --
+class ManagerRepository(abc.ABC):
     @abc.abstractmethod
     async def get_manager(self, manager_id: str) -> PropertyManager | None: ...
 
@@ -255,7 +236,11 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_manager(self, manager: PropertyManager) -> None: ...
 
-    # -- Portfolios --
+    @abc.abstractmethod
+    async def delete_manager(self, manager_id: str) -> bool: ...
+
+
+class PortfolioRepository(abc.ABC):
     @abc.abstractmethod
     async def get_portfolio(self, portfolio_id: str) -> Portfolio | None: ...
 
@@ -265,7 +250,8 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_portfolio(self, portfolio: Portfolio) -> None: ...
 
-    # -- Properties --
+
+class PropertyRepository(abc.ABC):
     @abc.abstractmethod
     async def get_property(self, property_id: str) -> Property | None: ...
 
@@ -275,7 +261,11 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_property(self, prop: Property) -> None: ...
 
-    # -- Units --
+    @abc.abstractmethod
+    async def delete_property(self, property_id: str) -> bool: ...
+
+
+class UnitRepository(abc.ABC):
     @abc.abstractmethod
     async def get_unit(self, unit_id: str) -> Unit | None: ...
 
@@ -291,7 +281,8 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_unit(self, unit: Unit) -> None: ...
 
-    # -- Leases --
+
+class LeaseRepository(abc.ABC):
     @abc.abstractmethod
     async def get_lease(self, lease_id: str) -> Lease | None: ...
 
@@ -308,7 +299,8 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_lease(self, lease: Lease) -> None: ...
 
-    # -- Tenants --
+
+class TenantRepository(abc.ABC):
     @abc.abstractmethod
     async def get_tenant(self, tenant_id: str) -> Tenant | None: ...
 
@@ -323,7 +315,11 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_tenant(self, tenant: Tenant) -> None: ...
 
-    # -- Maintenance --
+    @abc.abstractmethod
+    async def delete_tenant(self, tenant_id: str) -> bool: ...
+
+
+class MaintenanceRepository(abc.ABC):
     @abc.abstractmethod
     async def get_maintenance_request(self, request_id: str) -> MaintenanceRequest | None: ...
 
@@ -339,17 +335,8 @@ class PropertyStore(abc.ABC):
     @abc.abstractmethod
     async def upsert_maintenance_request(self, request: MaintenanceRequest) -> None: ...
 
-    # -- Deletes --
-    @abc.abstractmethod
-    async def delete_manager(self, manager_id: str) -> bool: ...
 
-    @abc.abstractmethod
-    async def delete_property(self, property_id: str) -> bool: ...
-
-    @abc.abstractmethod
-    async def delete_tenant(self, tenant_id: str) -> bool: ...
-
-    # -- Action Items --
+class ActionItemRepository(abc.ABC):
     @abc.abstractmethod
     async def get_action_item(self, item_id: str) -> ActionItem | None: ...
 
@@ -368,3 +355,23 @@ class PropertyStore(abc.ABC):
 
     @abc.abstractmethod
     async def delete_action_item(self, item_id: str) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
+# Composite — backward-compatible union of all protocols
+# ---------------------------------------------------------------------------
+
+
+class PropertyStore(  # COMPAT: existing code depends on this composite
+    ManagerRepository,
+    PortfolioRepository,
+    PropertyRepository,
+    UnitRepository,
+    LeaseRepository,
+    TenantRepository,
+    MaintenanceRepository,
+    ActionItemRepository,
+):
+    """Full property store — prefer narrow per-entity protocols in new code."""
+
+    pass

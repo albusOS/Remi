@@ -291,10 +291,7 @@ class TestCircularImports:
         g = _build_import_graph()
         cycles = _find_cycles(g.all_toplevel)
         if cycles:
-            report = [
-                f"Found {len(cycles)} circular cycle(s) "
-                f"(including TYPE_CHECKING imports):\n"
-            ]
+            report = [f"Found {len(cycles)} circular cycle(s) (including TYPE_CHECKING imports):\n"]
             for cycle in sorted(cycles, key=len, reverse=True):
                 report.append(_format_cycle(cycle, g.module_to_file, g.all_toplevel))
                 report.append("")
@@ -308,8 +305,7 @@ class TestCircularImports:
         full_cycles = _find_cycles(g.full)
 
         deferred_only = [
-            c for c in full_cycles
-            if c not in runtime_cycles and c not in all_tl_cycles
+            c for c in full_cycles if c not in runtime_cycles and c not in all_tl_cycles
         ]
         if deferred_only:
             import warnings
