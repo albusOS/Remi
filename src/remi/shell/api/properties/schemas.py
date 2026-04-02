@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.queries.properties import (
+from remi.domain.queries.properties import (
     PropertyDetail,
     PropertyDetailUnit,
     PropertyListItem,
 )
-from remi.queries.rent_roll import (
+from remi.domain.queries.rent_roll import (
     LeaseInRentRoll,
     MaintenanceInRentRoll,
     RentRollResult,

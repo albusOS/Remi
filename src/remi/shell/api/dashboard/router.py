@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from remi.queries.rollups import ManagerSnapshot, PropertySnapshot
+from remi.domain.queries.rollups import ManagerSnapshot, PropertySnapshot
 from remi.types.errors import NotFoundError
 from remi.shell.api.dashboard.schemas import (
     AutoAssignResponse,
@@ -14,9 +14,9 @@ from remi.shell.api.dashboard.schemas import (
     SnapshotsResponse,
     UnassignedProperty,
 )
-from remi.portfolio.protocols import PropertyStore
-from remi.queries.auto_assign import AutoAssignService
-from remi.queries.dashboard import (
+from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.queries.auto_assign import AutoAssignService
+from remi.domain.queries.dashboard import (
     DashboardQueryService,
     DelinquencyBoard,
     LeaseCalendar,
@@ -24,7 +24,7 @@ from remi.queries.dashboard import (
     RentRollView,
     VacancyTracker,
 )
-from remi.queries.snapshots import SnapshotService
+from remi.domain.queries.snapshots import SnapshotService
 from remi.shell.api.dependencies import (
     get_auto_assign_service,
     get_dashboard_service,

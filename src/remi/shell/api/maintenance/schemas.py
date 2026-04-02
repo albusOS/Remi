@@ -6,7 +6,7 @@ Only envelope wrappers are defined in this module.
 
 from __future__ import annotations
 
-from remi.queries.maintenance import (
+from remi.domain.queries.maintenance import (
     MaintenanceItem,
     MaintenanceListResult,
     MaintenanceSummaryResult,

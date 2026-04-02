@@ -11,9 +11,9 @@ from decimal import Decimal
 
 import pytest
 
-from remi.evaluators.engine import EntailmentEngine
-from remi.ontology.schema import load_domain_yaml
-from remi.portfolio.models import (
+from remi.domain.evaluators.engine import EntailmentEngine
+from remi.domain.ontology.schema import load_domain_yaml
+from remi.domain.portfolio.models import (
     Address,
     Lease,
     LeaseStatus,
@@ -27,12 +27,12 @@ from remi.portfolio.models import (
     Unit,
     UnitStatus,
 )
-from remi.queries.rollups import ManagerSnapshot
-from remi.signals import DomainRulebook
-from remi.queries.snapshots import SnapshotService
-from remi.stores.mem import InMemoryPropertyStore
-from remi.stores.rollups import InMemoryRollupStore
-from remi.signals.mem import InMemorySignalStore
+from remi.domain.queries.rollups import ManagerSnapshot
+from remi.agent.signals import DomainRulebook
+from remi.domain.queries.snapshots import SnapshotService
+from remi.domain.stores.mem import InMemoryPropertyStore
+from remi.domain.stores.rollups import InMemoryRollupStore
+from remi.agent.signals.mem import InMemorySignalStore
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 

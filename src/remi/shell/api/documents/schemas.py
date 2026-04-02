@@ -11,6 +11,10 @@ class KnowledgeInfo(BaseModel):
     entities_extracted: int
     relationships_extracted: int
     ambiguous_rows: int
+    rows_accepted: int = 0
+    rows_rejected: int = 0
+    rows_skipped: int = 0
+    validation_warnings: list[str] = []
 
 
 class UploadResponse(BaseModel):

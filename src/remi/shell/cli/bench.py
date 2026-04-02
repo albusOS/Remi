@@ -93,7 +93,7 @@ async def _bench(
     )
     console.print("[dim]Bootstrapping container…[/dim]")
 
-    from remi.observe.logging import configure_logging
+    from remi.agent.observe.logging import configure_logging
 
     configure_logging(level="WARNING", format="console")
 

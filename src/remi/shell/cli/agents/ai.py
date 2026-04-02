@@ -116,7 +116,7 @@ async def _run_single(
         )
     else:
         if display:
-            from remi.observe.types import get_current_trace_id
+            from remi.agent.observe.types import get_current_trace_id
 
             display.show_done(trace_id=get_current_trace_id())
         if answer:
@@ -210,7 +210,7 @@ async def _run_interactive(
                 continue
 
             if not quiet:
-                from remi.observe.types import get_current_trace_id
+                from remi.agent.observe.types import get_current_trace_id
 
                 display.show_done(trace_id=get_current_trace_id())
 

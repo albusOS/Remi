@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.queries.leases import ExpiringLeaseItem
+from remi.domain.queries.leases import ExpiringLeaseItem
 
 __all__ = [
     "ExpiringLeaseItem",

@@ -6,90 +6,85 @@ alwaysApply: true
 
 # Architecture Alignment
 
-Two halves (generic capabilities + real estate product) plus a
-composition root. The directory tree is the documentation.
-The generic/RE boundary is visible in `ls`.
+REMI is an agent operating system — a runtime that lets an AI agent
+monitor a director's book of business, detect situations, and act
+autonomously. Four top-level packages: `agent/` (OS kernel — all AI
+infrastructure), `domain/` (real estate product), `types/` (shared
+vocabulary), `shell/` (composition root). The directory tree is the
+documentation.
 
-## Package Placement — the Two Halves
+## Package Placement
 
-### Domain-Agnostic (could power any domain)
+### The Agent (`agent/` — all AI infrastructure)
+
+| Subpackage | What it is | Depends on |
+|---|-----|---|
+| `agent/llm/` | LLM provider ports + adapters | `types/` |
+| `agent/vectors/` | Embedding ports + adapters | `types/` |
+| `agent/sandbox/` | Code execution ports + adapters | `types/` |
+| `agent/observe/` | Logging, tracing | `types/` |
+| `agent/signals/` | Signal framework — types, stores, producers, pattern mining, graduation | `types/`, `agent/graph/` |
+| `agent/ingestion/` | Generic LLM pipeline runner | `agent/llm/` |
+| `agent/graph/` | Knowledge graph — types, bridge, retriever | `agent/vectors/`, `types/` |
+| `agent/documents/` | Document types, stores, parsers | `agent/db/` |
+| `agent/db/` | Database engine + tables | `types/` |
+| `agent/runtime/` | LLM execution loop, tool dispatch, streaming | `agent/llm/`, `agent/observe/` |
+| `agent/context/` | Perception, context building, intent | `agent/signals/`, `agent/graph/`, `agent/vectors/` |
+| `agent/conversation/` | Thread management, compression | `agent/llm/` |
+| `agent/tools/` | Domain-agnostic tool implementations | `agent/sandbox/`, `agent/vectors/`, `agent/observe/` |
+
+### The Domain (`domain/` — real estate product)
+
+| Subpackage | What it is | Depends on |
+|---|-----|---|
+| `domain/portfolio/` | Entity DTOs, protocols, rules | `types/` |
+| `domain/stores/` | RE persistence adapters | `domain/portfolio/`, `agent/db/` |
+| `domain/queries/` | RE query services | `domain/portfolio/`, `domain/stores/` |
+| `domain/evaluators/` | RE signal producers (delinquency, lease, etc.) | `domain/portfolio/`, `domain/stores/`, `agent/signals/` |
+| `domain/ingestion/` | RE inbound data pipeline | `domain/portfolio/`, `domain/stores/`, `agent/documents/`, `agent/ingestion/` |
+| `domain/ontology/` | RE knowledge graph schema | `agent/graph/` |
+| `domain/search/` | RE-aware hybrid search | `agent/graph/`, `agent/vectors/` |
+| `domain/tools/` | RE agent capabilities | `domain/queries/`, `domain/evaluators/`, `domain/ingestion/`, `domain/ontology/`, `domain/search/` |
+| `domain/configs/` | RE agent YAML manifests | `agent/` |
+
+### Shared Vocabulary
 
 | Package | What it is | Depends on |
-|---------|-----------|------------|
+|---|-----|---|
 | `types/` | Pure vocabulary — ids, clock, errors, enums | nothing |
-| `db/` | Database engine + tables | `types/` |
-| `llm/` | LLM provider ports + adapters | `types/` |
-| `vectors/` | Embedding ports + adapters | `types/` |
-| `sandbox/` | Code execution ports + adapters | `types/` |
-| `observe/` | Logging, tracing | `types/` |
-| `signals/` | Signal framework — types, stores, engine | `types/` |
-| `graph/` | Knowledge graph — types, bridge, retriever | `vectors/`, `types/` |
-| `documents/` | Document types, stores, parsers | `types/` |
-| `agent/` | LLM runtime, context building, perception | `signals/`, `graph/`, `vectors/`, `llm/`, `sandbox/`, `observe/` |
-
-### Real Estate (the product)
-
-| Package | What it is | Depends on |
-|---------|-----------|------------|
-| `portfolio/` | Entity DTOs, protocols, rules | `types/` |
-| `stores/` | RE persistence adapters | `portfolio/`, `db/` |
-| `queries/` | RE query services | `portfolio/`, `stores/` |
-| `evaluators/` | RE signal producers | `portfolio/`, `stores/`, `signals/` |
-| `ingestion/` | RE inbound data pipeline | `portfolio/`, `stores/`, `documents/`, `signals/` |
-| `ontology/` | RE knowledge graph schema | `graph/` |
-| `search/` | RE-aware hybrid search | `graph/`, `vectors/`, `signals/` |
-| `tools/` | RE agent capabilities | `queries/`, `evaluators/`, `ingestion/`, `ontology/`, `search/` |
-| `configs/` | RE agent YAML manifests | `agent/` |
 
 ### Composition Root
 
 | Package | What it is | Depends on |
-|---------|-----------|------------|
+|---|-----|---|
 | `shell/` | DI container, settings, API mountpoint, CLI | everything |
 
 ## New Modules — Placement Checklist
 
 Before creating a file or adding significant logic, answer:
 
-1. **Which half?**
-   - Could this work for healthcare/logistics? → Generic capability
-   - Does it mention Property, Unit, Tenant, Lease? → Real estate
+1. **Which of the four?**
+   - AI infrastructure (LLM, embeddings, sandbox, tracing, signals,
+     graph, documents, execution) -> `agent/`
+   - Property management business logic -> `domain/`
+   - Pure primitives, no I/O -> `types/`
+   - HTTP routes, CLI, DI wiring -> `shell/`
 
-2. **Which package?**
-   - Pure primitives, no I/O → `types/`
-   - Database machinery → `db/`
-   - LLM provider interaction → `llm/`
-   - Embedding, vector search → `vectors/`
-   - Code execution → `sandbox/`
-   - Logging, tracing → `observe/`
-   - Signal framework → `signals/`
-   - Knowledge graph framework → `graph/`
-   - Document framework → `documents/`
-   - LLM runtime, context, perception → `agent/`
-   - RE entity DTOs, protocols, rules → `portfolio/`
-   - RE persistence → `stores/`
-   - RE analytical views → `queries/`
-   - RE signal producers → `evaluators/`
-   - RE inbound data → `ingestion/`
-   - RE graph schema → `ontology/`
-   - RE search → `search/`
-   - RE agent tools → `tools/`
-   - RE agent configs → `configs/`
-   - HTTP routes → `shell/api/`
-   - CLI commands → `shell/cli/`
-   - Wiring only → `shell/config/container.py`
+2. **Which subpackage?** (see tables above)
 
-3. **Hexagonal rule:** Does this code import a concrete infrastructure
-   library (`psycopg2`, `openai`, `anthropic`, `docker`, etc.)?
-   Each package owns its own adapters (e.g. `llm/openai.py`).
-   Only `shell/config/container.py` wires them.
+3. **Dependency direction:** `domain/` imports from `agent/` — never
+   the reverse. `shell/` imports from both. `types/` imports nothing.
 
-4. **Discoverability:** Could an LLM discover this capability via
+4. **Hexagonal rule:** Concrete infrastructure libraries (`psycopg2`,
+   `openai`, `anthropic`, `docker`) live in adapter files within the
+   owning subpackage. Only `shell/config/container.py` wires them.
+
+5. **Discoverability:** Could an LLM discover this capability via
    the directory tree, `--help`, or tool registry?
 
 ## Interface Segregation
 
-Repository ports live in `portfolio/protocols.py` as **narrow,
+Repository ports live in `domain/portfolio/protocols.py` as **narrow,
 per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
 
 - **New code** must depend on the **narrowest** protocol.
@@ -100,7 +95,7 @@ per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
 
 `shell/config/container.py` must stay a **thin wiring layer**.
 
-- Attributes only consumed internally → local variables, not `self.*`.
+- Attributes only consumed internally -> local variables, not `self.*`.
 - Factory functions belong in the module that owns the thing being built.
 - Before adding a new `self.*` attribute, verify it will be read externally.
 
@@ -110,6 +105,7 @@ per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
   graph is wrong.
 - All imports must be direct and honest.
 - No circular import workarounds.
+- `domain/` imports from `agent/` — never the reverse.
 
 ## Error Propagation Rules
 
@@ -137,11 +133,11 @@ per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
 Types flow **inward** — outer packages import from inner packages.
 
 | Location | Owns | Examples |
-|----------|------|----------|
-| `portfolio/models.py` | Entity DTOs | `Property`, `Unit`, `Lease` |
-| `queries/*.py` | Service read-models | `RentRollResult`, `PortfolioOverview` |
+|----|---|----|
+| `domain/portfolio/models.py` | Entity DTOs | `Property`, `Unit`, `Lease` |
+| `domain/queries/*.py` | Service read-models | `RentRollResult`, `PortfolioOverview` |
 | `shell/api/*/schemas.py` | Re-exports + HTTP-only types | Request bodies, envelope wrappers |
-| CLI commands | nothing — format what services return | `model_dump()` → render |
+| CLI commands | nothing — format what services return | `model_dump()` -> render |
 
 ### Write operations
 

@@ -23,7 +23,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from remi.shell.api.realtime.chat_runner import build_chat_dispatcher
 from remi.shell.api.realtime.connection_manager import manager
 from remi.shell.api.realtime.jsonrpc import JsonRpcError, JsonRpcResponse
-from remi.observe.events import Event
+from remi.agent.observe.events import Event
 
 router = APIRouter(tags=["ws"])
 logger = structlog.get_logger("remi.ws")

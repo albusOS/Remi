@@ -98,7 +98,7 @@ async def _run_research(question: str, fmt_json: bool, verbose: bool) -> None:
         )
     else:
         if display:
-            from remi.observe.types import get_current_trace_id
+            from remi.agent.observe.types import get_current_trace_id
 
             display.show_done(trace_id=get_current_trace_id())
         if answer:

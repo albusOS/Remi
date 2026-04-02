@@ -2,11 +2,11 @@
 
 ## What This System Is
 
-REMI is an AI platform for directors of property management. A director oversees multiple property managers, each running portfolios of 15-40 properties. Her job is not to manage properties — it is to manage managers. Her core question, every day, is:
+REMI is an **agent operating system** for directors of property management. A director oversees multiple property managers, each running portfolios of 15-40 properties. Her job is not to manage properties — it is to manage managers. Her core question, every day, is:
 
 > **Which of my managers needs my attention, and why?**
 
-REMI answers that question before she asks it. It monitors the book of business, detects situations that require the director's judgment, and provides an AI agent that can explain, investigate, and recommend — grounded in actual data and domain expertise.
+REMI answers that question before she asks it. To the director it feels like a PM dashboard with a very capable autonomous assistant. Under the hood it is a layered agent OS — domain ontology, signal engine, knowledge graph, and LLM runtime — all wired so the agent can reason over real portfolio data. It monitors the book of business, detects situations that require the director's judgment, and provides an AI agent that can explain, investigate, and recommend — grounded in actual data and domain expertise.
 
 ---
 

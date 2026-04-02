@@ -1,6 +1,8 @@
 # REMI — Real Estate Management Intelligence
 
-AI platform for directors of property management. REMI monitors the book of business, detects situations that require the director's judgment, and provides an AI agent that can explain, investigate, and recommend — grounded in actual data and domain expertise.
+An agent operating system for directors of property management. REMI is the runtime that lets an AI agent monitor the book of business, detect situations that require the director's judgment, and autonomously explain, investigate, and recommend — grounded in actual portfolio data and a typed real estate ontology.
+
+To the director it feels like a capable autonomous assistant sitting beside them. Under the hood it is a layered agent OS: domain ontology, signal engine, knowledge graph, and LLM runtime — all wired together so the agent can reason over real data.
 
 The director's core question: **which of my managers needs my attention, and why?**
 
@@ -33,17 +35,19 @@ uv run remi trace list                # Recent reasoning traces
 
 ## Architecture
 
-REMI is built on four layers. Each has a single job. The `Container` (in `config/container.py`) is pure wiring — it calls factory functions defined in the modules that own the things being built.
+REMI is an agent operating system built on four packages. Each has a single job. The directory tree *is* the architecture — an LLM navigating the codebase can infer what exists from `ls` alone.
 
 ```
-Layer 1 — Facts       src/remi/stores/       Storage adapters (properties, signals, documents, vectors, traces, memory, chat, snapshots)
-Layer 2 — Domain      src/remi/config/       domain.yaml (rulebook), DI container, settings
-Layer 3 — Signals     src/remi/services/     Entailment engine → signals; pattern detector → hypotheses; domain services
-Layer 4 — Interface   src/remi/api/          FastAPI REST + WebSocket
-                      src/remi/cli/          Typer CLI
-                      src/remi/agent/        Agent loop, LLM bridge, tool executor
-                      frontend/              Next.js dashboard
+src/remi/
+  agent/       AI infrastructure — LLM runtime, signals, graph, vectors, sandbox, documents, tracing
+  domain/      Real estate product — portfolio models, queries, evaluators, ingestion, ontology, search, tools
+  types/       Shared vocabulary — ids, clock, errors, enums, result, text
+  shell/       Composition root — DI container, settings, API, CLI
 ```
+
+Dependency direction: `domain/` imports from `agent/` — never the reverse. `shell/` wires both. `types/` imports nothing.
+
+The `Container` (in `shell/config/container.py`) is pure wiring — it calls factory functions defined in the modules that own the things being built.
 
 **Key constraint:** The LLM agent does NOT detect signals — the entailment engine does. The LLM explains, connects, recommends, and codifies.
 
@@ -51,8 +55,8 @@ Layer 4 — Interface   src/remi/api/          FastAPI REST + WebSocket
 
 | Layer | What | Where |
 |-------|------|-------|
-| **Domain Rulebook** | What things mean — signal definitions, thresholds, policies, causal chains | `src/remi/config/domain.yaml` |
-| **Schema** | What types exist and how they relate — object types, link types, constraints | `src/remi/knowledge/ontology/schema.py` |
+| **Domain Rulebook** | What things mean — signal definitions, thresholds, policies, causal chains | `shell/config/domain.yaml` |
+| **Ontology** | What entity types exist and how they relate — typed properties, structural links, constraints | `domain/ontology/schema.py` |
 | **Knowledge Graph** | What actually happened — entities, relationships, observations | `PropertyStore` + `KnowledgeStore` via `BridgedKnowledgeGraph` |
 
 The **Entailment Engine** evaluates rulebook rules against knowledge graph facts and produces **Signals** — named, evidenced, severity-ranked domain states.
@@ -98,7 +102,7 @@ Defined in `domain.yaml`, detected by the entailment engine.
 
 ## Agents
 
-Two conversational agents, declared via YAML in `src/remi/agents/`.
+Two conversational agents, declared via YAML in `domain/configs/`.
 
 | Agent | Purpose | Mode |
 |-------|---------|------|
@@ -110,12 +114,10 @@ Internal agents (not user-facing):
 | Agent | Purpose |
 |-------|---------|
 | **Action Planner** (`action_planner/app.yaml`) | Sub-agent that produces structured JSON action plans |
-| **Report Classifier** (`report_classifier/app.yaml`) | Classifies uploaded report types |
-| **Knowledge Enricher** (`knowledge_enricher/app.yaml`) | Classifies ambiguous document rows into typed knowledge graph entities |
 
 ## Tools
 
-Tools registered in `src/remi/tools/`, available to agents:
+Tools registered in `domain/tools/`, available to agents:
 
 ### Knowledge Graph (12 tools)
 
@@ -249,57 +251,70 @@ npm run dev    # http://localhost:3000
 
 ```
 src/remi/
-  agent/        AgentNode, loop, intent classifier, LLM bridge, tool executor
-  agents/       YAML configs — director, researcher, action_planner, report_classifier, knowledge_enricher
-  api/          FastAPI routers, schemas, middleware, realtime (WebSocket chat + events)
-  cli/          Typer CLI entry points
-  config/       Settings, DI container (pure wiring), domain.yaml (the rulebook)
-  db/           Database engine and tables (Postgres support)
-  documents/    AppFolio report schema and parsers
-  knowledge/    Context builder, graph retriever, entailment engine, ingestion pipeline
-    ingestion/
-      schema.py    ReportSchema definitions + unified ingest_report() loop
-      managers.py  Frequency-based manager classification + ManagerResolver
-      service.py   IngestionService — report type detection + schema dispatch
-      generic.py   Fallback for unrecognized report types
-      helpers.py   Address parsing, occupancy mapping
-    ontology/
-      bridge.py    BridgedKnowledgeGraph + build_knowledge_graph() factory
-      schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph()
-      remote.py    RemoteKnowledgeGraph (HTTP client for sandbox processes)
-    composite.py   CompositeProducer + build_signal_pipeline() factory
-    context_builder.py  ContextBuilder + build_context_builder() factory
-  llm/          LLM provider ports + adapters (Anthropic, OpenAI, Gemini)
-  models/       Pydantic models + narrow repository protocols (per-entity ABCs)
-  observability/ Structured logging (structlog), events, tracer
-  sandbox/      Isolated code execution (local subprocess sandbox, data bridge)
-  services/     Domain services — dashboard, manager review, document ingestion, queries, rent roll, snapshots, auto-assign
-  shared/       Cross-cutting primitives — enums, errors, ids, clock, result, paths, text
-  stores/       Storage adapters + factory.py (build_property_store, build_document_store, etc.)
-  tools/        Agent tool implementations — ontology, documents, memory, sandbox, trace, vectors, actions, workflows
-  vectors/      Embedding pipeline, vector store ports + adapters
+
+── agent/           AI infrastructure — the agent operating system kernel
+  llm/              LLM provider ports + adapters (Anthropic, OpenAI, Gemini)
+  vectors/          Embedding ports + adapters
+  sandbox/          Code execution ports + adapters (local, Docker)
+  observe/          Structured logging (structlog), tracing
+  signals/          Signal framework — types, stores, producers, pattern mining
+  graph/            Knowledge graph — types, bridge, retriever
+  documents/        Document types, stores, parsers
+  db/               Database engine + table metadata
+  runtime/          LLM execution loop, tool dispatch, streaming
+  context/          Perception, context builder, intent classification
+  conversation/     Thread management, compression
+  ingestion/        Generic LLM pipeline runner (YAML-driven steps)
+  tools/            Domain-agnostic tools (sandbox, vectors, memory, trace)
+
+── domain/          Real estate product intelligence
+  portfolio/        Entity DTOs (Property, Unit, Tenant, Lease, etc.), protocols, business rules
+  stores/           RE persistence adapters (in-memory, Postgres)
+  queries/          RE query services (dashboard, rent roll, leases, maintenance, etc.)
+  evaluators/       RE signal producers (delinquency, lease, maintenance, portfolio, etc.)
+  ingestion/        RE inbound data pipeline — ontology-driven resolver
+    resolver.py     Schema-driven: LLM rows → domain models → PropertyStore + KnowledgeStore
+    service.py      IngestionService — orchestrates LLM pipeline + resolver
+    pipeline.py     DocumentIngestService — upload → parse → ingest → signal → embed
+    managers.py     Frequency-based manager classification + ManagerResolver
+    seed.py         Batch ingestion of sample report exports
+    embedding.py    Post-ingestion embedding pipeline
+    validation.py   Row-level validation
+    adapters/       Platform-specific schema hints (AppFolio)
+  ontology/         RE knowledge graph schema — entity types, structural links
+  search/           RE-aware hybrid search + pattern detection
+  tools/            RE agent capabilities (register_all_tools)
+  configs/          RE agent YAML manifests (director, researcher, action_planner, document_ingestion)
+
+── types/           Shared vocabulary — ids, clock, errors, enums, result, text
+
+── shell/           Composition root
+  config/           DI container, settings, domain.yaml
+  api/              FastAPI routers, schemas, middleware, WebSocket
+  cli/              Typer CLI entry points
 ```
 
 ## Data Ingestion
 
-REMI ingests AppFolio report exports (XLSX/CSV). Ingestion is **schema-driven** — each
-report type is a declarative `ReportSchema` in `knowledge/ingestion/schema.py`.
+REMI ingests property management report exports (XLSX/CSV). Ingestion is **ontology-driven** — the domain ontology in `domain/ontology/schema.py` defines entity types and their fields, and the LLM extraction pipeline uses this schema directly in its prompts.
 
 ### Pipeline
 
 1. Upload via `POST /api/v1/documents/upload` or `remi seed`
-2. Report type detected via scored column fingerprinting (`appfolio_schema.py`), LLM fallback for unknowns
-3. Schema-driven `ingest_report()` extracts KB entities, relationships, and domain models
-4. Entities written to the knowledge graph
-5. Entailment engine runs — produces signals
-6. Embedding pipeline runs — enables semantic search
+2. Three-step LLM pipeline (classify → extract → enrich) with ontology schemas injected as context
+3. Schema-driven resolver maps extracted rows directly to typed domain models (no intermediate event layer)
+4. Domain models persisted to PropertyStore + mirrored to KnowledgeStore
+5. Performance snapshot captured
+6. Entailment engine runs — produces signals
+7. Pattern detector runs — proposes hypotheses
+8. Embedding pipeline runs — enables semantic search
 
 ### Report categories
 
 | Category | Reports | Creates Managers? |
 |----------|---------|-------------------|
 | **Migration** | Property Directory | Yes — frequency-based classification separates real managers from operational tags |
-| **Recurring** | Delinquency, Rent Roll, Lease Expiration | No — consumes existing property-to-portfolio mappings |
+| **Recurring** | Delinquency, Rent Roll, Lease Expiration, Work Orders | No — consumes existing property-to-portfolio mappings |
 
 `AutoAssignService` assigns unassigned properties to *existing* managers only — it never creates new ones.
 
@@ -348,7 +363,7 @@ uv run ruff format src/ tests/
 - Never silently swallow errors — let them raise
 - Never use `typing.TYPE_CHECKING` — if you need it, the dependency is in the wrong place
 - `domain.yaml` is the source of truth for signals, thresholds, and rules — do not hardcode these in Python
-- `src/remi/shared/` is for cross-cutting primitives only — no business logic
+- `types/` is for cross-cutting primitives only — no business logic
 - Factory functions live in the module that defines the thing being built, not in the container
 - New code depends on the narrowest repository protocol (`LeaseRepository`, not `PropertyStore`)
 - Backward-compat aliases get a `# COMPAT:` comment

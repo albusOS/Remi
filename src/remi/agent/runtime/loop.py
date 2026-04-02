@@ -23,8 +23,8 @@ from remi.agent.runtime.deps import OnEventCallback
 from remi.agent.runtime.llm_bridge import build_llm_request, stream_llm_response
 from remi.agent.runtime.tool_executor import ToolExecutor
 from remi.agent.types import Message
-from remi.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
-from remi.observe.types import Tracer
+from remi.agent.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
+from remi.agent.observe.types import Tracer
 
 logger = structlog.get_logger("remi.agent.loop")
 

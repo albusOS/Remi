@@ -60,9 +60,19 @@ export function DocumentsView() {
 
       const mgrNote = selectedManager ? ` → ${selectedManager}` : "";
 
-      setUploadMsg(
-        `${result.filename}: ${result.row_count} rows · ${result.report_type.replace(/_/g, " ")} · ${result.knowledge.entities_extracted} entities extracted${mgrNote}`
-      );
+      const k = result.knowledge;
+      const parts = [
+        `${result.filename}: ${result.row_count} rows`,
+        result.report_type.replace(/_/g, " "),
+        `${k.entities_extracted} entities extracted`,
+      ];
+      if (k.rows_rejected > 0) {
+        parts.push(`${k.rows_rejected} rows rejected`);
+      }
+      if (k.rows_skipped > 0) {
+        parts.push(`${k.rows_skipped} rows skipped`);
+      }
+      setUploadMsg(parts.join(" · ") + mgrNote);
 
       // Auto-assign only makes sense for self-tagging report types (those
       // with a Tags column) when no manager was explicitly selected.

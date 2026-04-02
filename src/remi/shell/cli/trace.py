@@ -12,7 +12,7 @@ from typing import Any
 
 import typer
 
-from remi.observe.types import Span
+from remi.agent.observe.types import Span
 from remi.shell.cli.shared import get_container_async, json_out, use_json
 
 cmd = typer.Typer(

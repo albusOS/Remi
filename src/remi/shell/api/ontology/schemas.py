@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from remi.graph.types import KnowledgeProvenance
+from remi.agent.graph.types import KnowledgeProvenance
 
 # -- Shared -------------------------------------------------------------------
 

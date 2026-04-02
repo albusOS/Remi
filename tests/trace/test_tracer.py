@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from remi.observe.types import SpanKind, SpanStatus
-from remi.observe.types import (
+from remi.agent.observe.types import SpanKind, SpanStatus
+from remi.agent.observe.types import (
     Tracer,
     get_current_span_id,
     get_current_trace_id,
 )
-from remi.observe.mem import InMemoryTraceStore
+from remi.agent.observe.mem import InMemoryTraceStore
 
 
 @pytest.fixture

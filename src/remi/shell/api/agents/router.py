@@ -8,9 +8,9 @@ import structlog
 import yaml
 from fastapi import APIRouter, Depends
 
-from remi.observe.events import Event
+from remi.agent.observe.events import Event
 from remi.types.paths import AGENTS_DIR
-from remi.llm.factory import LLMProviderFactory
+from remi.agent.llm.factory import LLMProviderFactory
 from remi.shell.api.dependencies import get_provider_factory, get_settings
 from remi.shell.config.settings import RemiSettings
 

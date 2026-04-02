@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from remi.sandbox.docker import DockerSandbox
-from remi.sandbox.types import ExecStatus
+from remi.agent.sandbox.docker import DockerSandbox
+from remi.agent.sandbox.types import ExecStatus
 
 
 def _docker_available() -> bool:

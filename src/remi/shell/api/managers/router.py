@@ -19,9 +19,9 @@ from remi.shell.api.managers.schemas import (
     MergeManagersResponse,
     UpdateManagerRequest,
 )
-from remi.portfolio.models import Portfolio, PropertyManager
-from remi.portfolio.protocols import PropertyStore
-from remi.queries.managers import ManagerReviewService
+from remi.domain.portfolio.models import Portfolio, PropertyManager
+from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.queries.managers import ManagerReviewService
 from remi.shell.api.dependencies import get_manager_review, get_property_store
 from remi.shell.api.schemas import DeletedResponse
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from remi.graph.types import ObjectTypeDef, PropertyDef
+from remi.agent.graph.types import ObjectTypeDef, PropertyDef
 from remi.types.errors import NotFoundError
 from remi.shell.api.ontology.schemas import (
     AggregateRequest,
@@ -25,7 +25,7 @@ from remi.shell.api.ontology.schemas import (
     SearchResponse,
     TimelineResponse,
 )
-from remi.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.bridge import BridgedKnowledgeGraph
 from remi.shell.api.dependencies import get_knowledge_graph
 
 router = APIRouter(prefix="/ontology", tags=["ontology"])

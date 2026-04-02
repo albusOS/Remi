@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from remi.queries.maintenance import (
+from remi.domain.queries.maintenance import (
     MaintenanceListResult,
     MaintenanceQueryService,
     MaintenanceSummaryResult,

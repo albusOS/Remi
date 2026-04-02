@@ -7,10 +7,10 @@ from typing import Any, Protocol
 
 from remi.agent.context.builder import ContextBuilder
 from remi.agent.types import ToolRegistry
-from remi.graph.stores import MemoryStore
-from remi.llm.factory import LLMProviderFactory
-from remi.observe.types import Tracer
-from remi.signals import DomainRulebook, SignalStore
+from remi.agent.graph.stores import MemoryStore
+from remi.agent.llm.factory import LLMProviderFactory
+from remi.agent.observe.types import Tracer
+from remi.agent.signals import DomainRulebook, SignalStore
 
 
 class OnEventCallback(Protocol):

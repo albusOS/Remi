@@ -81,7 +81,7 @@ async def _rent_analysis(property_id: str | None, fmt_json: bool) -> None:
                 )
         return
 
-    from remi.portfolio.models import UnitStatus
+    from remi.domain.portfolio.models import UnitStatus
 
     container = get_container()
     if property_id:

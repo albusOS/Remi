@@ -11,9 +11,9 @@ import structlog
 from remi.agent.config import AgentConfig
 from remi.agent.runtime.deps import OnEventCallback as OnEventCallback  # noqa: F401
 from remi.agent.types import Message, ToolDefinition
-from remi.llm.types import LLMProvider, LLMRequest, LLMResponse, TokenUsage, ToolCallRequest
-from remi.observe.events import Event
-from remi.observe.types import SpanKind, Tracer
+from remi.agent.llm.types import LLMProvider, LLMRequest, LLMResponse, TokenUsage, ToolCallRequest
+from remi.agent.observe.events import Event
+from remi.agent.observe.types import SpanKind, Tracer
 
 logger = structlog.get_logger("remi.agent.llm")
 

@@ -8,14 +8,14 @@ from remi.agent.context.rendering import (
     render_graph_context,
 )
 from remi.agent.types import Message
-from remi.graph.types import KnowledgeLink
-from remi.signals import DomainRulebook, Severity, Signal
+from remi.agent.graph.types import KnowledgeLink
+from remi.agent.signals import DomainRulebook, Severity, Signal
 from remi.types.text import estimate_tokens, truncate_to_tokens
 from remi.agent.context.builder import ContextBuilder
 from remi.agent.context.frame import ContextFrame
-from remi.graph.retriever import ResolvedEntity
-from remi.ontology.schema import load_domain_yaml
-from remi.signals.mem import InMemorySignalStore
+from remi.agent.graph.retriever import ResolvedEntity
+from remi.domain.ontology.schema import load_domain_yaml
+from remi.agent.signals.mem import InMemorySignalStore
 
 # -- token utilities ----------------------------------------------------------
 

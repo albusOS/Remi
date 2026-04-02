@@ -342,7 +342,7 @@ async def _codify(
     fmt_json: bool,
 ) -> None:
     _assert_writable()
-    from remi.graph.types import KnowledgeProvenance
+    from remi.agent.graph.types import KnowledgeProvenance
 
     container = await get_container_async()
     data_dict = parse_params(raw_data) if raw_data else {}
@@ -392,7 +392,7 @@ async def _define(
     fmt_json: bool,
 ) -> None:
     _assert_writable()
-    from remi.graph.types import KnowledgeProvenance, ObjectTypeDef, PropertyDef
+    from remi.agent.graph.types import KnowledgeProvenance, ObjectTypeDef, PropertyDef
 
     container = await get_container_async()
     props: list[PropertyDef] = []

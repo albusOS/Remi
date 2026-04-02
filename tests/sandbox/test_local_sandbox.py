@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from remi.sandbox.types import ExecStatus
-from remi.sandbox.local import LocalSandbox
+from remi.agent.sandbox.types import ExecStatus
+from remi.agent.sandbox.local import LocalSandbox
 
 
 @pytest.fixture

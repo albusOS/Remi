@@ -120,7 +120,15 @@ export const api = {
       row_count: number;
       report_type: string;
       columns: string[];
-      knowledge: { entities_extracted: number; relationships_extracted: number; ambiguous_rows: number };
+      knowledge: {
+        entities_extracted: number;
+        relationships_extracted: number;
+        ambiguous_rows: number;
+        rows_accepted: number;
+        rows_rejected: number;
+        rows_skipped: number;
+        validation_warnings: string[];
+      };
     }>;
   },
 

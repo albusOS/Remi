@@ -15,25 +15,25 @@ from fastapi import Depends, Request
 
 from remi.agent.runtime.runner import ChatAgentService
 from remi.agent.types import ChatSessionStore
-from remi.documents.types import DocumentStore
-from remi.graph.stores import KnowledgeStore
-from remi.signals import FeedbackStore, SignalStore
-from remi.signals.composite import CompositeProducer
-from remi.ingestion.pipeline import DocumentIngestService
-from remi.ingestion.seed import SeedService
-from remi.graph.bridge import BridgedKnowledgeGraph
-from remi.search.service import SearchService
-from remi.portfolio.protocols import PropertyStore
-from remi.queries.auto_assign import AutoAssignService
-from remi.queries.dashboard import DashboardQueryService
-from remi.queries.leases import LeaseQueryService
-from remi.queries.maintenance import MaintenanceQueryService
-from remi.queries.managers import ManagerReviewService
-from remi.queries.portfolios import PortfolioQueryService
-from remi.queries.properties import PropertyQueryService
-from remi.queries.rent_roll import RentRollService
-from remi.queries.snapshots import SnapshotService
-from remi.llm.factory import LLMProviderFactory
+from remi.agent.documents.types import DocumentStore
+from remi.agent.graph.stores import KnowledgeStore
+from remi.agent.signals import FeedbackStore, SignalStore
+from remi.agent.signals.composite import CompositeProducer
+from remi.domain.ingestion.pipeline import DocumentIngestService
+from remi.domain.ingestion.seed import SeedService
+from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.domain.search.service import SearchService
+from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.queries.auto_assign import AutoAssignService
+from remi.domain.queries.dashboard import DashboardQueryService
+from remi.domain.queries.leases import LeaseQueryService
+from remi.domain.queries.maintenance import MaintenanceQueryService
+from remi.domain.queries.managers import ManagerReviewService
+from remi.domain.queries.portfolios import PortfolioQueryService
+from remi.domain.queries.properties import PropertyQueryService
+from remi.domain.queries.rent_roll import RentRollService
+from remi.domain.queries.snapshots import SnapshotService
+from remi.agent.llm.factory import LLMProviderFactory
 from remi.shell.config.container import Container
 from remi.shell.config.settings import RemiSettings
 

@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 
 import structlog
 
-from remi.observe.events import Event
+from remi.agent.observe.events import Event
 from remi.types.errors import (
     LLMConnectionError,
     LLMRateLimitError,

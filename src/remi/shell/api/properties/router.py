@@ -11,11 +11,11 @@ from remi.shell.api.properties.schemas import (
     UnitListResponse,
     UpdatePropertyRequest,
 )
-from remi.queries.rent_roll import RentRollResult
-from remi.portfolio.models import Address, UnitStatus
-from remi.portfolio.protocols import PropertyStore
-from remi.queries.properties import PropertyQueryService
-from remi.queries.rent_roll import RentRollService
+from remi.domain.queries.rent_roll import RentRollResult
+from remi.domain.portfolio.models import Address, UnitStatus
+from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.queries.properties import PropertyQueryService
+from remi.domain.queries.rent_roll import RentRollService
 from remi.shell.api.dependencies import (
     get_property_query,
     get_property_store,

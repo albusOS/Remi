@@ -1,10 +1,11 @@
-"""remi documents — list and query uploaded documents."""
+"""remi documents — list, query, and ingest uploaded documents."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json as _json
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -12,7 +13,61 @@ import typer
 from remi.shell.cli import http as _http
 from remi.shell.cli.shared import get_container, json_out, ser, use_json
 
-cmd = typer.Typer(name="documents", help="List and query uploaded documents.", no_args_is_help=True)
+cmd = typer.Typer(name="documents", help="List, query, and ingest documents.", no_args_is_help=True)
+
+_CONTENT_TYPES: dict[str, str] = {
+    ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".pdf": "application/pdf",
+}
+
+
+@cmd.command("ingest")
+def ingest(
+    file: Path = typer.Argument(..., help="Path to the document file to ingest"),
+    manager: str | None = typer.Option(None, "--manager", "-m", help="Manager tag override"),
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    """Ingest a document through the LLM extraction pipeline."""
+    if not file.exists():
+        typer.echo(f"File not found: {file}", err=True)
+        raise typer.Exit(1)
+    asyncio.run(_ingest(file, manager, use_json(json_output)))
+
+
+async def _ingest(file: Path, manager: str | None, fmt_json: bool) -> None:
+    content = file.read_bytes()
+    content_type = _CONTENT_TYPES.get(file.suffix.lower(), "application/octet-stream")
+
+    container = get_container()
+    await container.ensure_bootstrapped()
+
+    result = await container.document_ingest.ingest_upload(
+        file.name,
+        content,
+        content_type,
+        manager=manager,
+    )
+
+    if fmt_json:
+        json_out({
+            "doc_id": result.doc.id,
+            "filename": result.doc.filename,
+            "report_type": result.report_type,
+            "entities_extracted": result.entities_extracted,
+            "relationships_extracted": result.relationships_extracted,
+            "signals_produced": result.signals_produced,
+            "pipeline_warnings": result.pipeline_warnings,
+        })
+    else:
+        typer.echo(f"\nIngested: {result.doc.filename}")
+        typer.echo(f"  Report type:    {result.report_type}")
+        typer.echo(f"  Entities:       {result.entities_extracted}")
+        typer.echo(f"  Relationships:  {result.relationships_extracted}")
+        typer.echo(f"  Signals:        {result.signals_produced}")
+        if result.pipeline_warnings:
+            typer.echo(f"  Warnings: {', '.join(result.pipeline_warnings)}", err=True)
 
 
 @cmd.command("list")

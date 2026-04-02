@@ -240,7 +240,7 @@ class RemiDashboard(App):  # type: ignore[type-arg]
     @work(exclusive=True, thread=False)
     async def _boot(self) -> None:
         self._log_activity("  [dim]Bootstrapping container…[/dim]")
-        from remi.observe.logging import configure_logging
+        from remi.agent.observe.logging import configure_logging
         from remi.shell.config.container import Container
         from remi.shell.config.settings import load_settings
 

@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from remi.graph.bridge import BridgedKnowledgeGraph
-from remi.portfolio.models import (
+from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.domain.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     Address,
@@ -22,12 +22,12 @@ from remi.portfolio.models import (
     Unit,
     UnitStatus,
 )
-from remi.queries.dashboard import DashboardQueryService
-from remi.queries.managers import ManagerReviewService
-from remi.graph.mem import InMemoryKnowledgeStore
-from remi.stores.mem import InMemoryPropertyStore
-from remi.tools.registry import InMemoryToolRegistry
-from remi.tools.workflows import register_workflow_tools
+from remi.domain.queries.dashboard import DashboardQueryService
+from remi.domain.queries.managers import ManagerReviewService
+from remi.agent.graph.mem import InMemoryKnowledgeStore
+from remi.domain.stores.mem import InMemoryPropertyStore
+from remi.agent.tools.registry import InMemoryToolRegistry
+from remi.domain.tools.workflows import register_workflow_tools
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 TODAY = date.today()

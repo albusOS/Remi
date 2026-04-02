@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from remi.shell.api.agents.router import router as agents_router
 from remi.shell.api.realtime.router import router as realtime_router
-from remi.observe.events import Event
+from remi.agent.observe.events import Event
 from remi.shell.api.documents.router import router as documents_router
 from remi.shell.api.ontology.router import router as ontology_router
 from remi.shell.api.search_routes.router import router as search_router
@@ -31,7 +31,7 @@ from remi.shell.api.portfolios.router import router as portfolios_router
 from remi.shell.api.properties.router import router as properties_router
 from remi.shell.api.tenants.router import router as tenants_router
 from remi.shell.api.units.router import router as units_router
-from remi.observe.logging import configure_logging
+from remi.agent.observe.logging import configure_logging
 from remi.shell.api.error_handler import install_error_handlers
 from remi.shell.api.middleware import RequestIDMiddleware
 from remi.shell.config.container import Container

@@ -1,4 +1,9 @@
-"""Base module contract — the plugin interface every module must implement."""
+"""Base module contract — the plugin interface every module must implement.
+
+Concrete module kinds:
+  - ``AgentNode`` (kind: agent) — full LLM think-act-observe loop
+  - ``InputModule`` (kind: input) — pass-through entry point for graph pipelines
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,7 @@ from remi.agent.types import Message
 
 __all__ = [
     "BaseModule",
+    "InputModule",
     "Message",
     "ModuleDescription",
     "ModuleOutput",
@@ -106,3 +112,21 @@ class BaseModule(abc.ABC):
             kind=self.kind,
             config_keys=list(self.config.keys()),
         )
+
+
+class InputModule(BaseModule):
+    """Pass-through entry point for graph pipelines (kind: input).
+
+    Receives the pipeline's initial input and forwards it unchanged as a
+    ``ModuleOutput`` so the first real agent node can consume it via the
+    edge map.
+    """
+
+    kind = "input"
+
+    async def run(
+        self,
+        inputs: dict[str, Any],
+        context: RuntimeContext,
+    ) -> ModuleOutput:
+        return ModuleOutput(value=inputs.get("input", inputs))

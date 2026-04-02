@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from remi.types.errors import NotFoundError
-from remi.portfolio.protocols import PropertyStore
+from remi.domain.portfolio.protocols import PropertyStore
 from remi.shell.api.dependencies import get_property_store
 from remi.shell.api.schemas import DeletedResponse, UpdatedResponse
 

@@ -36,7 +36,7 @@ async def _list_requests(property_id: str | None, status_str: str | None, fmt_js
         data = _http.get(f"/maintenance{qs}")
         items = data.get("requests", [])
     else:
-        from remi.portfolio.models import MaintenanceStatus
+        from remi.domain.portfolio.models import MaintenanceStatus
 
         container = get_container()
         status = MaintenanceStatus(status_str) if status_str else None

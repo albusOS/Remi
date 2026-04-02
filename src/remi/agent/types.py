@@ -1,7 +1,7 @@
 """Agent types — chat session management, tool registry, and memory ports.
 
 Wire types (Message, ToolCallRequest, ToolDefinition, ToolArg) live in
-``remi.llm.types`` — this module re-exports them for backward compatibility
+``remi.agent.llm.types`` — this module re-exports them for backward compatibility
 and adds the agent-specific session / registry contracts.
 """
 
@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from remi.llm.types import Message, ToolArg, ToolCallRequest, ToolDefinition
+from remi.agent.llm.types import Message, ToolArg, ToolCallRequest, ToolDefinition
 
 # Re-export so existing `from remi.agent.types import Message` still works
 __all__ = [

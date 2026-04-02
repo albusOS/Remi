@@ -12,16 +12,16 @@ from typing import Any
 import structlog
 
 from remi.agent.context.frame import ContextFrame
-from remi.signals import CausalChain, DomainRulebook, MutableRulebook, Policy, Signal
+from remi.agent.signals import CausalChain, DomainRulebook, MutableRulebook, Policy, Signal
 from remi.types.text import estimate_tokens
-from remi.vectors.types import Embedder
+from remi.agent.vectors.types import Embedder
 
 _log = structlog.get_logger(__name__)
 
 
 def render_domain_context(domain: Any) -> str:
     """Render the TBox into a compact system message block."""
-    from remi.signals import DomainRulebook
+    from remi.agent.signals import DomainRulebook
 
     if isinstance(domain, MutableRulebook):
         pass

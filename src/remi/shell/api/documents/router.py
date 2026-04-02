@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from remi.documents.types import DocumentStore
-from remi.types.errors import DomainError, NotFoundError
+from remi.agent.documents.types import DocumentStore
+from remi.domain.ingestion.pipeline import DocumentIngestService
+from remi.shell.api.dependencies import get_document_ingest, get_document_store
 from remi.shell.api.documents.schemas import (
     DeleteResponse,
     DocumentDetail,
@@ -15,8 +16,7 @@ from remi.shell.api.documents.schemas import (
     KnowledgeInfo,
     UploadResponse,
 )
-from remi.ingestion.pipeline import DocumentIngestService
-from remi.shell.api.dependencies import get_document_ingest, get_document_store
+from remi.types.errors import DomainError, NotFoundError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -60,6 +60,10 @@ async def upload_document(
             entities_extracted=result.entities_extracted,
             relationships_extracted=result.relationships_extracted,
             ambiguous_rows=result.ambiguous_rows,
+            rows_accepted=result.rows_accepted,
+            rows_rejected=result.rows_rejected,
+            rows_skipped=result.rows_skipped,
+            validation_warnings=result.validation_warnings,
         ),
     )
 

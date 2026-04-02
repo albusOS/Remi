@@ -1,0 +1,218 @@
+apiVersion: remi/v1
+kind: Pipeline
+
+metadata:
+  name: document-ingestion
+  version: "2.0.0"
+  description: >
+    Three-stage document ingestion pipeline. Runs entirely outside the chat
+    runtime — each step is a direct LLMProvider.complete() call.
+
+    Stage 1 (classify): cheap, fast model identifies report type and maps
+    columns to canonical field names derived from the domain ontology.
+
+    Stage 2 (extract): capable model uses the classification + ontology
+    entity schemas to extract every row into typed JSON. Row types match
+    ontology entity type names (Unit, Tenant, Lease, Property, etc.).
+
+    Stage 3 (enrich): if the extractor flagged any rows as unknown type,
+    a second capable model call attempts to identify what those rows
+    represent using the full ontology schema. Unknown rows that still
+    cannot be classified are preserved as raw_row events for human review.
+
+  tags: [ingestion, extraction, internal]
+  domain: real-estate
+  audience: system
+  chat: false
+
+steps:
+  # ---------------------------------------------------------------------------
+  # Step 1 — Classify
+  # Fast, cheap model. Identifies report type and maps columns.
+  # ---------------------------------------------------------------------------
+  - id: classify
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    temperature: 0.0
+    max_tokens: 1024
+    response_format: json
+    system_prompt: |
+      You are a real-estate data classification agent.
+
+      You will receive a JSON payload with:
+        - column_names: header columns of an uploaded report
+        - sample_rows: up to 5 data rows
+        - known_types: known report type identifiers with plain-English descriptions
+
+      DOMAIN ONTOLOGY — known entity types and their fields:
+      {context.entity_schemas}
+
+      Your job:
+      1. Identify the report type using a known type identifier, or invent a
+         descriptive snake_case identifier if none match (e.g. "vendor_invoice").
+      2. Map EVERY column name to a canonical snake_case field name that matches
+         the ontology field names above. Use property_address for the property
+         column (it gets resolved to a Property entity downstream).
+
+      Known report types and their primary entity:
+        rent_roll         → Unit rows (with occupancy, rent, vacancy data)
+        delinquency       → Tenant rows (with balance owed, aging buckets)
+        lease_expiration  → Lease rows (with dates, rent vs market rent)
+        property_directory → Property rows (with manager, address)
+        work_order        → MaintenanceRequest rows (with category, status, cost)
+
+      Property name convention: some platforms encode addresses as
+      "Name - Full Address, City, State ZIP". Extract just the name part.
+
+      RESPOND ONLY WITH VALID JSON — no markdown, no prose:
+      {
+        "report_type": "rent_roll",
+        "confidence": 0.95,
+        "reasoning": "one sentence",
+        "column_map": {
+          "Property": "property_address",
+          "Unit": "unit_number",
+          "BD/BA": "bd_ba"
+        }
+      }
+
+    input_template: |
+      {input}
+
+  # ---------------------------------------------------------------------------
+  # Step 2 — Extract
+  # Capable model. Full row extraction using the column map from step 1.
+  # ---------------------------------------------------------------------------
+  - id: extract
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    temperature: 0.0
+    max_tokens: 16384
+    response_format: json
+    system_prompt: |
+      You are a real-estate data extraction agent.
+
+      DOMAIN ONTOLOGY — extract rows into these entity types:
+      {context.entity_schemas}
+
+      You receive:
+        - classification: the output of the classify step (report_type, column_map)
+        - document: the original payload (column_names, all_rows)
+
+      Use the column_map to translate raw column names to canonical field names.
+      Extract EVERY data row. Rules:
+
+      SKIP section header rows — rows where the primary address/name field
+      contains an occupancy label instead of an address. For rent_roll, track
+      the current section label (Current / Notice-Rented / Notice-Unrented /
+      Vacant-Rented / Vacant-Unrented) and apply it to subsequent unit rows as
+      occupancy_status.
+
+      SKIP summary rows — rows that contain unit counts like "136 Units" or
+      portfolio totals.
+
+      Property name: extract from address using "Name - Full Address" pattern.
+      If the address is "1018 Woodbourne Ave - 1018 Woodbourne Ave Pittsburgh PA",
+      the name is "1018 Woodbourne Ave".
+
+      Row types — use the ontology entity type name:
+        rent_roll rows        → type: "Unit"
+        delinquency rows      → type: "Tenant"  (include balance fields)
+        lease_expiration rows  → type: "Lease"   (include tenant_name, dates)
+        property_directory     → type: "Property"
+        work_order rows       → type: "MaintenanceRequest"
+        anything unrecognized → type: "raw_row", preserve all fields as-is
+
+      Each row MUST include:
+        - type: the entity type name from the ontology
+        - property_address: the full property address string
+        - All fields from the ontology schema that are present in the data
+
+      Null policy: use null for missing or unparseable values — never omit the
+      field, never fabricate a value.
+
+      RESPOND ONLY WITH VALID JSON:
+      {
+        "report_type": "rent_roll",
+        "platform": "appfolio",
+        "rows": [
+          {
+            "type": "Unit",
+            "property_address": "1018 Woodbourne Avenue - 1018 Woodbourne Avenue Pittsburgh, PA 15226",
+            "property_name": "1018 Woodbourne Avenue",
+            "unit_number": "1",
+            "occupancy_status": "occupied",
+            "bedrooms": 3,
+            "bathrooms": 1.0,
+            "market_rent": null,
+            "current_rent": 950.00,
+            "days_vacant": null
+          }
+        ],
+        "unknown_rows": []
+      }
+
+    input_template: |
+      Classification result:
+      {steps.classify}
+
+      Document to extract:
+      {input}
+
+  # ---------------------------------------------------------------------------
+  # Step 3 — Enrich
+  # Only runs when the extractor produced unknown_rows.
+  # Attempts to identify what unrecognized rows represent using schema context.
+  # ---------------------------------------------------------------------------
+  - id: enrich
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    temperature: 0.1
+    max_tokens: 8192
+    response_format: json
+    system_prompt: |
+      You are a real-estate knowledge graph enrichment agent.
+
+      DOMAIN ONTOLOGY — known entity types:
+      {context.entity_schemas}
+
+      You receive:
+        - extraction: the extract step output (report_type, rows, unknown_rows)
+        - The unknown_rows are data rows that the extractor could not map to
+          a known domain type.
+
+      Your job: for each unknown row, determine what real-estate entity or
+      concept it represents, and produce a structured entity record.
+
+      Use entity type names from the ontology above when the row matches a
+      known type. If a row represents something genuinely new (vendor invoice,
+      inspection record, etc.) invent a descriptive entity_type in PascalCase.
+
+      If a row is truly noise (page headers, blank rows, etc.) set
+      entity_type to "noise" and it will be discarded.
+
+      RESPOND ONLY WITH VALID JSON:
+      {
+        "enriched_rows": [
+          {
+            "row_index": 0,
+            "entity_type": "Tenant",
+            "entity_id": "tenant:john-doe:1018-woodbourne",
+            "properties": {"name": "John Doe", "status": "current"},
+            "relationships": [
+              {
+                "source_id": "tenant:john-doe:1018-woodbourne",
+                "target_id": "unit:1018-woodbourne:1",
+                "relation_type": "COVERS"
+              }
+            ]
+          }
+        ]
+      }
+
+    input_template: |
+      Extraction result:
+      {steps.extract}
+
+      Unknown rows to enrich:
+      {input}

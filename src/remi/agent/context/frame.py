@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from remi.graph.retriever import ResolvedEntity
-from remi.graph.types import KnowledgeLink
-from remi.signals import CausalChain, Policy, Signal
+from remi.agent.graph.retriever import ResolvedEntity
+from remi.agent.graph.types import KnowledgeLink
+from remi.agent.signals import CausalChain, Policy, Signal
 
 
 @dataclass

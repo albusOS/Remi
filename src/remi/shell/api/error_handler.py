@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from remi.observe.events import Event
+from remi.agent.observe.events import Event
 from remi.types.errors import (
     AgentConfigError,
     AppNotFoundError,

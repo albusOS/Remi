@@ -34,8 +34,8 @@ from remi.agent.runtime.deps import OnEventCallback, RuntimeContext
 from remi.agent.runtime.llm_bridge import OnEventCallback as _OnEvent  # noqa: F811,F401
 from remi.agent.runtime.loop import run_agent_loop
 from remi.agent.runtime.tool_executor import ToolExecutor, build_tool_set
-from remi.llm.types import LLMProvider, estimate_cost
-from remi.observe.types import SpanKind, Tracer, get_current_trace_id
+from remi.agent.llm.types import LLMProvider, estimate_cost
+from remi.agent.observe.types import SpanKind, Tracer, get_current_trace_id
 
 logger = structlog.get_logger("remi.agent")
 

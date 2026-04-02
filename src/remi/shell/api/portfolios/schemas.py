@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.queries.portfolios import (
+from remi.domain.queries.portfolios import (
     PortfolioListItem,
     PortfolioSummaryResult,
     PropertyInPortfolio,

@@ -72,68 +72,65 @@ it worse.
 - Do not write tests that just confirm a function returns without crashing
 - Ask before writing tests if the value isn't obvious
 
-## Architecture: Two Halves + Shell
+## Architecture: An Agent Operating System
 
 Full architecture rationale: `docs/architecture.md`
 
-The codebase has two halves and a composition root. The directory tree
-is the primary documentation. The generic/RE boundary is visible in `ls`.
+REMI is an agent operating system — the runtime that lets an AI agent
+monitor a director's book of business, detect situations, and act. To
+the end user it feels like a PM dashboard with a very capable autonomous
+assistant. Under the hood it is four packages; the directory tree is the
+primary documentation.
 
 ```
 src/remi/
 
-  # ── Domain-agnostic capabilities ───────────────────────────
-  # Each is self-contained. Could power any domain.
-  
-  types/       Pure vocabulary — ids, clock, errors, enums, result, text
-  db/          Database engine + table metadata
-  llm/         LLM provider ports + adapters (OpenAI, Anthropic, Gemini)
-  vectors/     Embedding ports + adapters, pipeline
-  sandbox/     Code execution ports + adapters (local, Docker)
-  observe/     Structured logging (structlog), tracing
-  signals/     Signal types, stores, engine, composite
-  graph/       Knowledge graph types, bridge, retriever
-  documents/   Document types, stores, parsers
-  agent/       LLM runtime: loop, node, context builder, perception, tools
+  agent/           # Agent OS kernel — all AI infrastructure
+    llm/           LLM provider ports + adapters
+    vectors/       Embedding ports + adapters
+    sandbox/       Code execution ports + adapters
+    observe/       Structured logging, tracing
+    signals/       Signal types, stores, producers, pattern mining, graduation
+    graph/         Knowledge graph types, bridge, retriever
+    documents/     Document types, stores, parsers
+    db/            Database engine + tables
+    runtime/       Execution loop, tool dispatch, streaming
+    context/       Perception, context builder, intent
+    ingestion/     Generic LLM pipeline runner
+    conversation/  Thread management, compression
+    tools/         Domain-agnostic tool implementations
 
-  # ── Real estate (the product) ──────────────────────────────
-  # Replace this section to build a different product.
-  
-  portfolio/   Entity DTOs + protocols + business rules (~3 files)
-  stores/      RE persistence adapters (mem, pg, rollups)
-  queries/     RE query services (dashboard, rent roll, leases, etc.)
-  evaluators/  RE signal producers (delinquency, lease, maintenance, etc.)
-  ingestion/   RE inbound data pipeline (parse → extract → persist → enrich)
-  ontology/    RE knowledge graph schema + remote client
-  search/      RE-aware hybrid search + pattern detection
-  tools/       RE agent capabilities (conversational agent tools)
-  configs/     RE agent YAML manifests (director, researcher, etc.)
+  domain/          # Real estate product intelligence
+    portfolio/     Entity DTOs + protocols + rules
+    stores/        RE persistence adapters (mem, pg, rollups)
+    queries/       RE query services (dashboard, rent roll, etc.)
+    evaluators/    RE signal producers (generic producers in agent/signals/)
+    ingestion/     RE inbound data pipeline
+    ontology/      RE knowledge graph schema
+    search/        RE-aware hybrid search + patterns
+    tools/         RE agent capabilities
+    configs/       RE agent YAML manifests
 
-  # ── Composition root ───────────────────────────────────────
-  
-  shell/       DI container, settings, domain.yaml, API mountpoint, CLI
+  types/           # Shared vocabulary — ids, clock, errors, enums
+
+  shell/           # Composition root — DI container, settings, API, CLI
 ```
 
 **State the intended package before creating a new file or adding significant logic.**
 
-**Hexagonal boundary:** Generic code imports ports (ABCs/types.py) only —
-never `psycopg2`, `openai`, `anthropic`, `docker`, etc. directly.
-`shell/config/container.py` is the *only* file that knows both sides.
-
-**Agent-first discoverability:** File paths, API routes, and module names are
-part of the domain vocabulary. An LLM navigating this codebase must be able to
-infer what exists from the directory tree alone.
+**Dependency direction:** `domain/` imports from `agent/` — never the
+reverse. `shell/` imports from both. `types/` imports nothing.
 
 **Two agent modes — know which you are building for:**
-- *Code-first agents* run inside `sandbox/` as isolated subprocesses.
+- *Code-first agents* run inside `agent/sandbox/` as isolated subprocesses.
   They call REMI through `remi_data` (a stdlib HTTP bridge injected at session
   start). Their tool registry IS the API.
 - *Conversational agents* run inside the REMI process. They call domain services
-  through `tools/`. Their tool registry is `tools/__init__.py`.
+  through `domain/tools/`. Their tool registry is `domain/tools/__init__.py`.
 
 ## Repository Protocols
 
-Port interfaces for storage live in `portfolio/protocols.py` as
+Port interfaces for storage live in `domain/portfolio/protocols.py` as
 **narrow, per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
 
 - **New code must depend on the narrowest protocol** that covers its needs.
@@ -144,7 +141,7 @@ Port interfaces for storage live in `portfolio/protocols.py` as
 
 ## Boundary Model Discipline
 
-- **`queries/` owns read-models** (e.g. `RentRollResult`, `PortfolioOverview`).
+- **`domain/queries/` owns read-models** (e.g. `RentRollResult`, `PortfolioOverview`).
 - **`shell/api/` schemas re-export** from queries — no duplicate Pydantic classes.
   Only HTTP-specific types (request bodies, envelope wrappers) are defined in `shell/api/`.
 - **CLI delegates** to queries/services and renders the result — no inline store queries.
@@ -162,13 +159,13 @@ Port interfaces for storage live in `portfolio/protocols.py` as
 
 Each module owns the factory for the thing it defines:
 
-- `signals/composite.py` → `build_signal_pipeline()`
-- `graph/bridge.py` → `build_knowledge_graph()`
-- `agent/context_builder.py` → `build_context_builder()`
-- `stores/factory.py` → `build_property_store()`, `build_rollup_store()`
-- `llm/factory.py` → `build_provider_factory()`
-- `vectors/embedder.py` → `build_embedder()`
-- `sandbox/factory.py` → `build_sandbox()`
+- `agent/signals/composite.py` -> `build_signal_pipeline()`
+- `agent/graph/bridge.py` -> `build_knowledge_graph()`
+- `agent/context/builder.py` -> `build_context_builder()`
+- `domain/stores/factory.py` -> `build_property_store()`, `build_rollup_store()`
+- `agent/llm/factory.py` -> `build_provider_factory()`
+- `agent/vectors/embedder.py` -> `build_embedder()`
+- `agent/sandbox/factory.py` -> `build_sandbox()`
 
 `container.py` calls these — it does not inline assembly.
 
@@ -187,80 +184,89 @@ Each module owns the factory for the thing it defines:
 ```
 src/remi/
 
+── agent/ ───────────────────────────────────────────────────────────────────
+  types, config, mem
+
+  ── agent/llm/ ─────────────────────────────────────────────────────────────
+    types, openai, anthropic, gemini, factory
+
+  ── agent/vectors/ ─────────────────────────────────────────────────────────
+    types, embedder, store
+
+  ── agent/sandbox/ ─────────────────────────────────────────────────────────
+    types, local, docker, policy, bridge, factory
+
+  ── agent/observe/ ─────────────────────────────────────────────────────────
+    types, logging, events, mem
+
+  ── agent/signals/ ─────────────────────────────────────────────────────────
+    enums, signal, tbox, stores, feedback, hypothesis, composite, mem
+    evaluation, composition, statistical, pattern, graduation
+
+  ── agent/graph/ ───────────────────────────────────────────────────────────
+    types, stores, bridge, retriever, mem, remote
+
+  ── agent/documents/ ───────────────────────────────────────────────────────
+    types, parsers, mem, pg
+
+  ── agent/db/ ──────────────────────────────────────────────────────────────
+    engine, tables
+
+  ── agent/runtime/ ─────────────────────────────────────────────────────────
+    runner, loop, node, llm_bridge, tool_executor, retry, base, deps
+
+  ── agent/context/ ─────────────────────────────────────────────────────────
+    builder, rendering, frame, intent
+
+  ── agent/conversation/ ────────────────────────────────────────────────────
+    thread, compression
+
+  ── agent/ingestion/ ────────────────────────────────────────────────────────
+    runner (generic LLM pipeline runner)
+
+  ── agent/tools/ ───────────────────────────────────────────────────────────
+    sandbox, http, memory, vectors, delegation, trace, registry
+
+── domain/ ──────────────────────────────────────────────────────────────────
+
+  ── domain/portfolio/ ──────────────────────────────────────────────────────
+    models, protocols, rules
+
+  ── domain/stores/ ─────────────────────────────────────────────────────────
+    mem, pg/, rollups, factory
+
+  ── domain/queries/ ────────────────────────────────────────────────────────
+    dashboard, rent_roll, leases, properties, portfolios, maintenance
+    managers, snapshots, metrics, rollups, auto_assign
+
+  ── domain/evaluators/ ─────────────────────────────────────────────────────
+    delinquency, existence, lease, maintenance, portfolio
+    threshold, trend, pipeline, engine
+
+  ── domain/ingestion/ ──────────────────────────────────────────────────────
+    resolver (schema-driven: LLM rows → domain models → stores + KB)
+    service (IngestionService — orchestrates LLM pipeline + resolver)
+    pipeline (DocumentIngestService — upload → parse → ingest → signal → embed)
+    managers, seed, embedding, validation, adapters/ (appfolio/)
+
+  ── domain/ontology/ ───────────────────────────────────────────────────────
+    schema, bridge
+
+  ── domain/search/ ─────────────────────────────────────────────────────────
+    service
+
+  ── domain/tools/ ──────────────────────────────────────────────────────────
+    __init__ (register_all_tools), ontology, documents, search
+    actions, workflows, snapshots
+
+  ── domain/configs/ ────────────────────────────────────────────────────────
+    director/, researcher/, action_planner/, document_ingestion/
+
 ── types/ ───────────────────────────────────────────────────────────────────
   ids, clock, errors, enums, result, text
 
-── db/ ──────────────────────────────────────────────────────────────────────
-  engine, tables
-
-── llm/ ─────────────────────────────────────────────────────────────────────
-  types (ports), openai, anthropic, gemini, factory
-
-── vectors/ ─────────────────────────────────────────────────────────────────
-  types (ports), embedder, store, pipeline, tokens
-
-── sandbox/ ─────────────────────────────────────────────────────────────────
-  types (ports), local, docker, policy, bridge, factory
-
-── observe/ ─────────────────────────────────────────────────────────────────
-  types, logging, tracer, mem
-
-── signals/ ─────────────────────────────────────────────────────────────────
-  types (Signal, SignalDefinition, DomainRulebook, Policy)
-  stores (SignalStore, FeedbackStore, HypothesisStore ABCs)
-  engine (generic dispatch), composite, mem
-
-── graph/ ───────────────────────────────────────────────────────────────────
-  types (KnowledgeGraph, Entity, Relationship ABCs)
-  bridge, retriever, mem
-
-── documents/ ───────────────────────────────────────────────────────────────
-  types (Document, DocumentStore ABCs), parsers, mem, pg
-
-── agent/ ───────────────────────────────────────────────────────────────────
-  types (ToolRegistry, ToolDefinition, Message, ChatSession ABCs)
-  runner, loop, node, llm_bridge, tool_executor, thread
-  context_builder (perception), context_rendering, context
-  intent, config, retry, base, registry, mem
-
-── portfolio/ ───────────────────────────────────────────────────────────────
-  models (Property, Unit, Tenant, Lease, Manager, Portfolio DTOs)
-  protocols (narrow repo ABCs)
-  rules (occupancy, vacancy, loss-to-lease helpers)
-
-── stores/ ──────────────────────────────────────────────────────────────────
-  mem, pg, rollups, factory
-
-── queries/ ─────────────────────────────────────────────────────────────────
-  dashboard, rent_roll, leases, properties, portfolios, maintenance
-  managers, snapshots, metrics, auto_assign
-
-── evaluators/ ──────────────────────────────────────────────────────────────
-  delinquency, existence, lease, maintenance, portfolio
-  threshold, trend, composition, statistical, base
-
-── ingestion/ ───────────────────────────────────────────────────────────────
-  pipeline, service, engine, seed, enrichment, llm_adapters
-  managers, generic, adapters/ (appfolio/, registry)
-
-── ontology/ ────────────────────────────────────────────────────────────────
-  schema, remote
-
-── search/ ──────────────────────────────────────────────────────────────────
-  service, pattern, graduation
-
-── tools/ ───────────────────────────────────────────────────────────────────
-  __init__ (register_all_tools), ontology, documents, search, vectors
-  sandbox, actions, memory, trace, http, workflows, delegation, snapshots
-
-── configs/ ─────────────────────────────────────────────────────────────────
-  director/, researcher/, knowledge_enricher/, report_classifier/,
-  action_planner/
-
 ── shell/ ───────────────────────────────────────────────────────────────────
   config/   container, settings, domain.yaml
-  api/      main (mountpoint), dependencies, middleware, error_handler,
-            schemas, + all route modules
-  cli/      main (mountpoint), shared, banner, live_display, http,
-            + all CLI modules
+  api/      main, dependencies, middleware, error_handler, schemas, routes
+  cli/      main, shared, banner, + all CLI modules
 ```

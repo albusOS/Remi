@@ -34,10 +34,6 @@ Every exception must either **propagate** or be **logged at warning+ with
 - `except (KeyboardInterrupt, EOFError)` in CLI interactive loops
 - `except Exception` that logs at `warning`/`error` with `exc_info=True` **and** surfaces the failure to the caller
 
-**Batch/pipeline catch-and-continue** must:
-1. Log at `warning` with `exc_info=True`
-2. Record the failure in a result object the caller can inspect
-
 Use `structlog` for all logging, not `print` or `logging` directly.
 
 ## Type Safety — No `Any`, No Untyped `dict`
@@ -55,43 +51,23 @@ Use `structlog` for all logging, not `print` or `logging` directly.
 - Tests should cover real failure modes and edge cases
 - Ask before writing tests if the value isn't obvious
 
-## Architecture: Two Halves + Shell
+## Architecture: Four Packages
 
 Full rationale: `docs/architecture.md`
 
-The generic/RE boundary is visible in `ls`. Everything above `portfolio/`
-is domain-agnostic. Everything from `portfolio/` through `configs/` is
-real estate. `shell/` is the composition root.
-
 ```
 src/remi/
-
-  # ── Domain-agnostic capabilities ───────────────────────────
-  types/       Pure vocabulary — ids, clock, errors, enums, result, text
-  db/          Database engine + table metadata
-  llm/         LLM provider ports + adapters
-  vectors/     Embedding ports + adapters, pipeline
-  sandbox/     Code execution ports + adapters
-  observe/     Structured logging, tracing
-  signals/     Signal types, stores, engine, composite
-  graph/       Knowledge graph types, bridge, retriever
-  documents/   Document types, stores, parsers
-  agent/       LLM runtime, context builder, perception, conversation
-
-  # ── Real estate (the product) ──────────────────────────────
-  portfolio/   Entity DTOs + protocols + business rules
-  stores/      RE persistence adapters (mem, pg, rollups)
-  queries/     RE query services (dashboard, rent roll, etc.)
-  evaluators/  RE signal producers (delinquency, lease, etc.)
-  ingestion/   RE inbound data pipeline
-  ontology/    RE knowledge graph schema
-  search/      RE-aware hybrid search + patterns
-  tools/       RE agent capabilities
-  configs/     RE agent YAML manifests
-
-  # ── Composition root ───────────────────────────────────────
-  shell/       DI container, settings, domain.yaml, API, CLI
+  agent/     # AI infrastructure — LLM, vectors, sandbox, tracing, signals,
+             # graph, documents, DB, runtime, context, conversation,
+             # ingestion runner, tools
+  domain/    # RE product — portfolio, stores, queries, evaluators, ingestion,
+             # ontology, search, tools, configs
+  types/     # Shared vocabulary — ids, clock, errors, enums
+  shell/     # Composition root — DI container, settings, API, CLI
 ```
+
+**Dependency direction:** `domain/` imports from `agent/` — never the reverse.
+`shell/` imports from both. `types/` imports nothing.
 
 **When creating or moving code, say which package it belongs to before placing it.**
 
@@ -104,29 +80,18 @@ The LLM's job is abductive reasoning: explain, connect, recommend, codify.
 |------|------|
 | `src/remi/shell/config/domain.yaml` | Source of truth for signal definitions, thresholds, rules |
 | `src/remi/shell/config/container.py` | DI container — wires everything |
-| `src/remi/configs/director/app.yaml` | Director agent manifest |
-| `src/remi/configs/researcher/app.yaml` | Researcher agent manifest |
-| `src/remi/agent/node.py` | AgentNode — config-driven think-act-observe loop |
-| `src/remi/signals/engine.py` | Entailment engine — evaluates rules, produces signals |
-| `src/remi/ingestion/service.py` | IngestionService — report type detection + dispatch |
-| `src/remi/ingestion/managers.py` | Manager classification + ManagerResolver |
-| `src/remi/agent/context_builder.py` | Assembles agent context from graph + signals |
-| `src/remi/graph/retriever.py` | Retrieves entities and relationships from the graph |
-| `src/remi/queries/dashboard.py` | Computes director dashboard state from signals |
-| `src/remi/queries/managers.py` | Manager performance review logic |
-| `src/remi/queries/auto_assign.py` | Assigns unassigned properties to existing managers |
+| `src/remi/domain/configs/director/app.yaml` | Director agent manifest |
+| `src/remi/domain/configs/researcher/app.yaml` | Researcher agent manifest |
+| `src/remi/agent/runtime/node.py` | AgentNode — config-driven think-act-observe loop |
+| `src/remi/domain/evaluators/engine.py` | Entailment engine — evaluates rules, produces signals |
+| `src/remi/domain/ingestion/service.py` | IngestionService — report type detection + dispatch |
+| `src/remi/domain/ingestion/managers.py` | Manager classification + ManagerResolver |
+| `src/remi/agent/context/builder.py` | Assembles agent context from graph + signals |
+| `src/remi/agent/graph/retriever.py` | Retrieves entities and relationships from the graph |
+| `src/remi/domain/queries/dashboard.py` | Computes director dashboard state from signals |
+| `src/remi/domain/queries/managers.py` | Manager performance review logic |
+| `src/remi/domain/queries/auto_assign.py` | Assigns unassigned properties to existing managers |
 | `src/remi/types/errors.py` | Shared error types |
-
-## Ingestion Pipeline
-
-Ingestion is **schema-driven**. Adding a new report type = adding a schema
-definition, not a handler file.
-
-**Two categories:**
-- **Migration** (Property Directory): creates managers + properties. Uses frequency-based
-  classification to separate real manager names from operational tags.
-- **Recurring** (Delinquency, Rent Roll, Lease Expiration): creates/updates units, tenants,
-  leases. Never creates managers — consumes existing property-to-portfolio mappings.
 
 ## When Making Structural Decisions
 
@@ -134,4 +99,4 @@ definition, not a handler file.
 - Before adding logic to an existing file, flag if it's growing beyond a single responsibility
 - Prefer small focused modules
 - `types/` is for primitives only — no business logic there
-- `queries/` is for domain query logic that isn't part of the agent loop
+- `domain/queries/` is for domain query logic that isn't part of the agent loop

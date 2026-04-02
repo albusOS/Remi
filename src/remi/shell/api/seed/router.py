@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from remi.types.errors import IngestionError
-from remi.ingestion.seed import IngestedReport, SeedService
+from remi.domain.ingestion.seed import IngestedReport, SeedService
 from remi.shell.api.dependencies import get_seed_service
 
 router = APIRouter(prefix="/seed", tags=["seed"])

@@ -21,7 +21,7 @@ from remi.shell.api.realtime.jsonrpc import (
 from remi.agent.runtime.runner import ChatAgentService
 from remi.agent.types import ChatSessionStore
 from remi.types.errors import SessionNotFoundError, ValidationError
-from remi.sandbox.types import Sandbox
+from remi.agent.sandbox.types import Sandbox
 
 logger = structlog.get_logger("remi.chat_runner")
 

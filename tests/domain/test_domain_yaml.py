@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from remi.ontology.schema import load_domain_yaml
-from remi.signals import (
+from remi.domain.ontology.schema import load_domain_yaml
+from remi.domain.portfolio.models import EntityType
+from remi.agent.signals import (
     CausalChain,
     Deontic,
     DomainRulebook,
-    EntityType,
     Horizon,
     InferenceRule,
     Policy,

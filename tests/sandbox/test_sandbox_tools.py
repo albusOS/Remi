@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from remi.sandbox.types import ExecStatus
-from remi.sandbox.local import LocalSandbox
-from remi.tools.registry import InMemoryToolRegistry
-from remi.tools.sandbox import register_sandbox_tools
+from remi.agent.sandbox.types import ExecStatus
+from remi.agent.sandbox.local import LocalSandbox
+from remi.agent.tools.registry import InMemoryToolRegistry
+from remi.agent.tools.sandbox import register_sandbox_tools
 
 
 @pytest.fixture

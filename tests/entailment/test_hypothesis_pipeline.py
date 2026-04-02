@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import pytest
 
-from remi.search.graduation import HypothesisGraduator
-from remi.graph.bridge import BridgedKnowledgeGraph
-from remi.search.pattern import PatternDetector
-from remi.portfolio.models import Unit, UnitStatus
-from remi.signals import (
+from remi.agent.signals.graduation import HypothesisGraduator
+from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.signals.pattern import PatternDetector
+from remi.domain.portfolio.models import Unit, UnitStatus
+from remi.agent.signals import (
     DomainRulebook,
     Hypothesis,
     HypothesisKind,
     HypothesisStatus,
     MutableRulebook,
 )
-from remi.graph.mem import InMemoryKnowledgeStore
-from remi.stores.mem import InMemoryPropertyStore
-from remi.signals.mem import InMemoryHypothesisStore
+from remi.agent.graph.mem import InMemoryKnowledgeStore
+from remi.domain.stores.mem import InMemoryPropertyStore
+from remi.agent.signals.mem import InMemoryHypothesisStore
 
 # -- Fixtures -----------------------------------------------------------------
 
@@ -61,7 +61,7 @@ def hypothesis_store() -> InMemoryHypothesisStore:
 
 @pytest.fixture
 def domain() -> DomainRulebook:
-    from remi.ontology.schema import load_domain_yaml
+    from remi.domain.ontology.schema import load_domain_yaml
 
     return DomainRulebook.from_yaml(load_domain_yaml())
 
@@ -180,14 +180,14 @@ def test_mutable_domain_add_signal(
     mutable_domain: MutableRulebook,
     domain: DomainRulebook,
 ) -> None:
-    from remi.signals import (
-        EntityType,
+    from remi.agent.signals import (
         Horizon,
         InferenceRule,
         RuleCondition,
         Severity,
         SignalDefinition,
     )
+    from remi.domain.portfolio.models import EntityType
 
     new_defn = SignalDefinition(
         name="learned_high_rent",
@@ -217,7 +217,7 @@ def test_mutable_domain_add_signal(
 def test_mutable_domain_add_causal_chain(
     mutable_domain: MutableRulebook,
 ) -> None:
-    from remi.signals import CausalChain
+    from remi.agent.signals import CausalChain
 
     chain = CausalChain(
         cause="Unit.sqft",
@@ -562,6 +562,6 @@ async def test_full_hypothesis_lifecycle(
 
 
 async def _bootstrap(knowledge_graph: BridgedKnowledgeGraph) -> None:
-    from remi.ontology.schema import seed_knowledge_graph
+    from remi.domain.ontology.schema import seed_knowledge_graph
 
     await seed_knowledge_graph(knowledge_graph)

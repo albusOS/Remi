@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from remi.signals import FeedbackStore, SignalStore
-from remi.signals.signal import Signal
+from remi.agent.signals import FeedbackStore, SignalStore
+from remi.agent.signals.signal import Signal
 from remi.types.errors import NotFoundError
 from remi.shell.api.signals.schemas import (
     EntailmentResponse,
@@ -20,7 +20,7 @@ from remi.shell.api.signals.schemas import (
     SignalSummary,
     SourceResult,
 )
-from remi.signals.composite import CompositeProducer
+from remi.agent.signals.composite import CompositeProducer
 from remi.shell.api.dependencies import (
     get_feedback_store,
     get_signal_pipeline,
@@ -121,7 +121,7 @@ async def record_feedback(
     """Record feedback on a signal."""
     import uuid
 
-    from remi.signals import SignalFeedback, SignalOutcome
+    from remi.agent.signals import SignalFeedback, SignalOutcome
 
     signal = await ss.get_signal(signal_id)
     if signal is None:

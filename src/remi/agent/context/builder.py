@@ -19,13 +19,13 @@ from remi.agent.context.rendering import (
     render_graph_context,
 )
 from remi.agent.types import Message
-from remi.graph.retriever import GraphRetriever
-from remi.graph.stores import KnowledgeGraph
-from remi.observe.events import Event
-from remi.observe.types import SpanKind, Tracer
-from remi.signals import DomainRulebook, MutableRulebook, SignalStore
+from remi.agent.graph.retriever import GraphRetriever
+from remi.agent.graph.stores import KnowledgeGraph
+from remi.agent.observe.events import Event
+from remi.agent.observe.types import SpanKind, Tracer
+from remi.agent.signals import DomainRulebook, MutableRulebook, SignalStore
 from remi.types.text import estimate_tokens, truncate_to_tokens
-from remi.vectors.types import Embedder, VectorStore
+from remi.agent.vectors.types import Embedder, VectorStore
 
 _log = structlog.get_logger(__name__)
 

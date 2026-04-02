@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.queries.rollups import ManagerSnapshot, PropertySnapshot
-from remi.queries.dashboard import (
+from remi.domain.queries.rollups import ManagerSnapshot, PropertySnapshot
+from remi.domain.queries.dashboard import (
     DelinquencyBoard,
     DelinquentTenant,
     ExpiringLease,

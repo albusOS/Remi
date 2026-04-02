@@ -11,57 +11,56 @@ from __future__ import annotations
 
 from typing import Any
 
+from remi.agent.context.builder import build_context_builder
+from remi.agent.mem import InMemoryChatSessionStore
 from remi.agent.runtime.retry import RetryPolicy
 from remi.agent.runtime.runner import ChatAgentService
-from remi.tools import register_all_tools
-from remi.tools.delegation import AgentInvoker, register_delegation_tools
-from remi.tools.registry import InMemoryToolRegistry
-from remi.tools.snapshots import register_snapshot_tools
-from remi.tools.workflows import SubAgentInvoker, register_workflow_tools
-from remi.agent.types import ChatSessionStore
-from remi.documents.types import DocumentStore
-from remi.graph.stores import KnowledgeStore
-from remi.signals import DomainRulebook, FeedbackStore, MutableRulebook, SignalStore
-from remi.agent.types import ToolRegistry
-from remi.observe.types import Tracer, TraceStore
-from remi.vectors.types import Embedder, VectorStore
-from remi.evaluators.pipeline import build_signal_pipeline
-from remi.agent.context.builder import build_context_builder
-from remi.ingestion.service import IngestionService
-from remi.ingestion.llm_adapters import make_classify_fn, make_enrich_fn
-from remi.ingestion.pipeline import DocumentIngestService
-from remi.ingestion.seed import SeedService
-from remi.graph.bridge import BridgedKnowledgeGraph
-from remi.ontology.bridge import build_knowledge_graph
-from remi.ontology.schema import load_domain_yaml, seed_knowledge_graph
-from remi.search.pattern import PatternDetector
-from remi.search.service import SearchService
-from remi.portfolio.protocols import PropertyStore
-from remi.queries.auto_assign import AutoAssignService
-from remi.queries.dashboard import DashboardQueryService
-from remi.queries.leases import LeaseQueryService
-from remi.queries.maintenance import MaintenanceQueryService
-from remi.queries.managers import ManagerReviewService
-from remi.queries.portfolios import PortfolioQueryService
-from remi.queries.properties import PropertyQueryService
-from remi.queries.rent_roll import RentRollService
-from remi.queries.snapshots import SnapshotService
-from remi.llm.factory import LLMProviderFactory, build_provider_factory
-from remi.sandbox.factory import build_sandbox
-from remi.sandbox.types import Sandbox
-from remi.agent.mem import InMemoryChatSessionStore
-from remi.stores.factory import build_document_store, build_property_store, build_rollup_store
-from remi.graph.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
-from remi.signals.mem import (
+from remi.agent.types import ChatSessionStore, ToolRegistry
+from remi.agent.documents.types import DocumentStore
+from remi.domain.evaluators.pipeline import build_signal_pipeline
+from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
+from remi.agent.graph.stores import KnowledgeStore
+from remi.domain.ingestion.embedding import EmbeddingPipeline
+from remi.agent.ingestion.runner import IngestionPipelineRunner
+from remi.domain.ingestion.pipeline import DocumentIngestService
+from remi.domain.ingestion.seed import SeedService
+from remi.domain.ingestion.service import IngestionService
+from remi.agent.llm.factory import LLMProviderFactory, build_provider_factory
+from remi.agent.observe.mem import InMemoryTraceStore
+from remi.agent.observe.types import Tracer, TraceStore
+from remi.domain.ontology.bridge import build_knowledge_graph
+from remi.domain.ontology.schema import load_domain_yaml, seed_knowledge_graph
+from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.queries.auto_assign import AutoAssignService
+from remi.domain.queries.dashboard import DashboardQueryService
+from remi.domain.queries.leases import LeaseQueryService
+from remi.domain.queries.maintenance import MaintenanceQueryService
+from remi.domain.queries.managers import ManagerReviewService
+from remi.domain.queries.portfolios import PortfolioQueryService
+from remi.domain.queries.properties import PropertyQueryService
+from remi.domain.queries.rent_roll import RentRollService
+from remi.domain.queries.snapshots import SnapshotService
+from remi.agent.sandbox.factory import build_sandbox
+from remi.agent.sandbox.types import Sandbox
+from remi.agent.signals.pattern import PatternDetector
+from remi.domain.search.service import SearchService
+from remi.shell.config.settings import RemiSettings
+from remi.agent.signals import DomainRulebook, FeedbackStore, MutableRulebook, SignalStore
+from remi.agent.signals.mem import (
     InMemoryFeedbackStore,
     InMemoryHypothesisStore,
     InMemorySignalStore,
 )
-from remi.observe.mem import InMemoryTraceStore
-from remi.vectors.embedder import build_embedder
-from remi.ingestion.embedding import EmbeddingPipeline
-from remi.vectors.store import InMemoryVectorStore
-from remi.shell.config.settings import RemiSettings
+from remi.domain.stores.factory import build_document_store, build_property_store, build_rollup_store
+from remi.domain.tools import register_all_tools
+from remi.agent.tools.delegation import AgentInvoker, register_delegation_tools
+from remi.agent.tools.registry import InMemoryToolRegistry
+from remi.domain.tools.snapshots import register_snapshot_tools
+from remi.domain.tools.workflows import SubAgentInvoker, register_workflow_tools
+from remi.agent.vectors.embedder import build_embedder
+from remi.agent.vectors.store import InMemoryVectorStore
+from remi.agent.vectors.types import Embedder, VectorStore
 
 
 class Container:
@@ -125,10 +124,15 @@ class Container:
         )
 
         # -- Services ----------------------------------------------------------
+        pipeline_runner = IngestionPipelineRunner(
+            provider_factory=self.provider_factory,
+            default_provider=self.settings.llm.default_provider,
+            default_model=self.settings.llm.default_model,
+        )
         ingestion_service = IngestionService(
             knowledge_store=self.knowledge_store,
             property_store=self.property_store,
-            classify_fn=make_classify_fn(lambda: self.chat_agent, self.settings.secrets),
+            pipeline_runner=pipeline_runner,
         )
         self.dashboard_service = DashboardQueryService(
             property_store=self.property_store,
@@ -172,23 +176,6 @@ class Container:
         # -- Search service ----------------------------------------------------
         self.search_service = SearchService(self.vector_store, self.embedder)
 
-        # -- Tools (phase 1 — before chat_agent exists) ------------------------
-        _api_base = f"http://127.0.0.1:{self.settings.api.port}"
-        register_all_tools(
-            self.tool_registry,
-            knowledge_graph=self.knowledge_graph,
-            document_store=self.document_store,
-            property_store=self.property_store,
-            memory_store=memory_store,
-            signal_store=self.signal_store,
-            vector_store=self.vector_store,
-            embedder=self.embedder,
-            trace_store=self.trace_store,
-            sandbox=self.sandbox,
-            search_service=self.search_service,
-            api_base_url=_api_base,
-        )
-
         # -- Document ingestion ------------------------------------------------
         self.document_ingest = DocumentIngestService(
             document_store=self.document_store,
@@ -199,7 +186,24 @@ class Container:
             signal_pipeline=self.signal_pipeline,
             pattern_detector=pattern_detector,
             embedding_pipeline=self.embedding_pipeline,
-            enrich_fn=make_enrich_fn(lambda: self.chat_agent, self.settings.secrets),
+        )
+
+        # -- Tools (phase 1 — before chat_agent exists) ------------------------
+        _api_base = f"http://127.0.0.1:{self.settings.api.port}"
+        register_all_tools(
+            self.tool_registry,
+            knowledge_graph=self.knowledge_graph,
+            document_store=self.document_store,
+            document_ingest=self.document_ingest,
+            property_store=self.property_store,
+            memory_store=memory_store,
+            signal_store=self.signal_store,
+            vector_store=self.vector_store,
+            embedder=self.embedder,
+            trace_store=self.trace_store,
+            sandbox=self.sandbox,
+            search_service=self.search_service,
+            api_base_url=_api_base,
         )
 
         # -- Seed service ------------------------------------------------------
@@ -262,7 +266,7 @@ class Container:
     async def ensure_bootstrapped(self) -> None:
         if self._bootstrap_pending:
             if self._db_engine is not None:
-                from remi.db.engine import create_tables
+                from remi.agent.db.engine import create_tables
 
                 await create_tables(self._db_engine)
             await seed_knowledge_graph(self.knowledge_graph)

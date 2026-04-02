@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from remi.signals.feedback import SignalFeedback
+from remi.agent.signals.feedback import SignalFeedback
 
 
 class SignalSummary(BaseModel, frozen=True):

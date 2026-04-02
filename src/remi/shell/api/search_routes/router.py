@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from remi.search.service import SearchHit, SearchService
+from remi.domain.search.service import SearchHit, SearchService
 from remi.shell.api.dependencies import get_search_service
 
 router = APIRouter(prefix="/search", tags=["search"])

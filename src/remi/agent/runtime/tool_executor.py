@@ -11,8 +11,8 @@ import structlog
 from remi.agent.config import AgentConfig
 from remi.agent.runtime.deps import RuntimeContext
 from remi.agent.types import ToolDefinition
-from remi.llm.types import ToolCallRequest
-from remi.observe.types import SpanKind, Tracer
+from remi.agent.llm.types import ToolCallRequest
+from remi.agent.observe.types import SpanKind, Tracer
 
 
 class ToolExecuteFn(Protocol):
@@ -62,7 +62,7 @@ class ToolExecutor:
         else:
             result = await self._run(tc)
 
-        has_error = isinstance(result, dict) and "error" in result
+        has_error = isinstance(result, dict) and bool(result.get("error"))
         self._log.info(
             "tool_call_done",
             tool=tc.name,
