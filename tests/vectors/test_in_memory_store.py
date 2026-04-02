@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from remi.vectors.ports import EmbeddingRecord
+from remi.vectors.types import EmbeddingRecord
 from remi.vectors.store import InMemoryVectorStore
 
 

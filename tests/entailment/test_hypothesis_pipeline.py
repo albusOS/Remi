@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import pytest
 
-from remi.knowledge.graduation import HypothesisGraduator
-from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
-from remi.knowledge.pattern_detector import PatternDetector
-from remi.models.properties import Unit, UnitStatus
-from remi.models.signals import (
+from remi.search.graduation import HypothesisGraduator
+from remi.graph.bridge import BridgedKnowledgeGraph
+from remi.search.pattern import PatternDetector
+from remi.portfolio.models import Unit, UnitStatus
+from remi.signals import (
     DomainRulebook,
     Hypothesis,
     HypothesisKind,
     HypothesisStatus,
     MutableRulebook,
 )
-from remi.stores.memory import InMemoryKnowledgeStore
-from remi.stores.properties import InMemoryPropertyStore
-from remi.stores.signals import InMemoryHypothesisStore
+from remi.graph.mem import InMemoryKnowledgeStore
+from remi.stores.mem import InMemoryPropertyStore
+from remi.signals.mem import InMemoryHypothesisStore
 
 # -- Fixtures -----------------------------------------------------------------
 
@@ -61,7 +61,7 @@ def hypothesis_store() -> InMemoryHypothesisStore:
 
 @pytest.fixture
 def domain() -> DomainRulebook:
-    from remi.knowledge.ontology.schema import load_domain_yaml
+    from remi.ontology.schema import load_domain_yaml
 
     return DomainRulebook.from_yaml(load_domain_yaml())
 
@@ -180,7 +180,7 @@ def test_mutable_domain_add_signal(
     mutable_domain: MutableRulebook,
     domain: DomainRulebook,
 ) -> None:
-    from remi.models.signals import (
+    from remi.signals import (
         EntityType,
         Horizon,
         InferenceRule,
@@ -217,7 +217,7 @@ def test_mutable_domain_add_signal(
 def test_mutable_domain_add_causal_chain(
     mutable_domain: MutableRulebook,
 ) -> None:
-    from remi.models.signals import CausalChain
+    from remi.signals import CausalChain
 
     chain = CausalChain(
         cause="Unit.sqft",
@@ -562,6 +562,6 @@ async def test_full_hypothesis_lifecycle(
 
 
 async def _bootstrap(knowledge_graph: BridgedKnowledgeGraph) -> None:
-    from remi.knowledge.ontology.schema import seed_knowledge_graph
+    from remi.ontology.schema import seed_knowledge_graph
 
     await seed_knowledge_graph(knowledge_graph)

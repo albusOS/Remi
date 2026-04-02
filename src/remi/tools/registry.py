@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remi.models.tools import ToolDefinition, ToolFn, ToolRegistry
+from remi.agent.types import ToolDefinition, ToolFn, ToolRegistry
 
 
 class InMemoryToolRegistry(ToolRegistry):

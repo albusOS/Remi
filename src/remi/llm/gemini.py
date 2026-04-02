@@ -10,18 +10,18 @@ import json
 import uuid
 from typing import Any
 
-from remi.llm.ports import (
+from remi.llm.types import (
     LLMProvider,
     LLMResponse,
+    Message,
     ModelCapabilities,
     ModelPricing,
     ProviderConfig,
     TokenUsage,
     ToolCallRequest,
+    ToolDefinition,
 )
-from remi.models.chat import Message
-from remi.models.tools import ToolDefinition
-from remi.vectors.tokens import CHARS_PER_TOKEN
+from remi.types.text import CHARS_PER_TOKEN
 
 _MODEL_REGISTRY: dict[str, ModelCapabilities] = {
     "gemini-2.0-flash": ModelCapabilities(

@@ -12,9 +12,14 @@ import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from remi.models.ontology import KnowledgeGraph
-from remi.models.properties import ActionItem, ActionItemPriority, ActionItemStatus, PropertyStore
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.graph.stores import KnowledgeGraph
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.portfolio.models import (
+    ActionItem,
+    ActionItemPriority,
+    ActionItemStatus,
+)
+from remi.portfolio.protocols import PropertyStore
 
 
 def register_action_tools(

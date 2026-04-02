@@ -13,16 +13,16 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from remi.models.ontology import KnowledgeGraph
-from remi.models.properties import (
+from remi.graph.stores import KnowledgeGraph
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     ActionItemStatus,
-    PropertyStore,
 )
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
-from remi.services.dashboard import DashboardQueryService
-from remi.services.manager_review import ManagerReviewService
+from remi.portfolio.protocols import PropertyStore
+from remi.queries.dashboard import DashboardQueryService
+from remi.queries.managers import ManagerReviewService
 
 
 class SubAgentInvoker(Protocol):
@@ -109,8 +109,8 @@ def register_workflow_tools(
         board = await ds.delinquency_board(manager_id=manager_id)
         result: dict[str, Any] = board.model_dump(mode="json")
 
-        notes_by_tenant: dict[str, list[dict]] = {}
-        actions_by_tenant: dict[str, list[dict]] = {}
+        notes_by_tenant: dict[str, list[dict[str, Any]]] = {}
+        actions_by_tenant: dict[str, list[dict[str, Any]]] = {}
         for t in board.tenants:
             tid = t.tenant_id
             tenant_notes = await kg.search_objects(

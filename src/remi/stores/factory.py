@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.config.settings import RemiSettings
-from remi.models.documents import DocumentStore
-from remi.models.properties import PropertyStore
-from remi.models.rollups import RollupStore
-from remi.stores.documents import InMemoryDocumentStore
+from remi.documents.types import DocumentStore
+from remi.queries.rollups import RollupStore
+from remi.portfolio.protocols import PropertyStore
+from remi.documents.mem import InMemoryDocumentStore
 from remi.stores.rollups import InMemoryRollupStore, PostgresRollupStore
+from remi.types.config import RemiSettings
 
 
 def build_property_store(
@@ -24,7 +24,7 @@ def build_property_store(
     The engine and session factory are exposed so the container can share
     them with other Postgres-backed stores and the bootstrap lifecycle.
     """
-    from remi.stores.properties import InMemoryPropertyStore
+    from remi.stores.mem import InMemoryPropertyStore
 
     backend = settings.state_store.backend
     if backend == "postgres":
@@ -35,7 +35,7 @@ def build_property_store(
                 "state_store.dsn is configured."
             )
         from remi.db.engine import async_session_factory, create_async_engine_from_url
-        from remi.stores.postgres import PostgresPropertyStore
+        from remi.stores.pg import PostgresPropertyStore
 
         engine = create_async_engine_from_url(dsn)
         session_factory = async_session_factory(engine)
@@ -47,7 +47,7 @@ def build_property_store(
 def build_document_store(session_factory: Any | None) -> DocumentStore:
     """Return a Postgres or in-memory document store."""
     if session_factory is not None:
-        from remi.stores.postgres_documents import PostgresDocumentStore
+        from remi.documents.pg import PostgresDocumentStore
 
         return PostgresDocumentStore(session_factory)
     return InMemoryDocumentStore()

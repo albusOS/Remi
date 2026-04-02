@@ -72,99 +72,195 @@ it worse.
 - Do not write tests that just confirm a function returns without crashing
 - Ask before writing tests if the value isn't obvious
 
-## Architecture: Layer Placement
+## Architecture: Two Halves + Shell
 
-Before placing code in a file, identify which layer it belongs to:
+Full architecture rationale: `docs/architecture.md`
+
+The codebase has two halves and a composition root. The directory tree
+is the primary documentation. The generic/RE boundary is visible in `ls`.
 
 ```
-Layer 1 — Facts       src/remi/stores/       Storage adapters only — no business logic
-Layer 2 — Domain      src/remi/config/       domain.yaml, settings, DI container
-Layer 3 — Signals     src/remi/services/     Domain logic, query services, signal computation
-Layer 4 — Interface   src/remi/api/          FastAPI routers — thin, delegate to services
-                      src/remi/cli/          Typer commands — thin, delegate to services
-                      src/remi/agent/        Agent loop, LLM bridge, tool executor
+src/remi/
+
+  # ── Domain-agnostic capabilities ───────────────────────────
+  # Each is self-contained. Could power any domain.
+  
+  types/       Pure vocabulary — ids, clock, errors, enums, result, text
+  db/          Database engine + table metadata
+  llm/         LLM provider ports + adapters (OpenAI, Anthropic, Gemini)
+  vectors/     Embedding ports + adapters, pipeline
+  sandbox/     Code execution ports + adapters (local, Docker)
+  observe/     Structured logging (structlog), tracing
+  signals/     Signal types, stores, engine, composite
+  graph/       Knowledge graph types, bridge, retriever
+  documents/   Document types, stores, parsers
+  agent/       LLM runtime: loop, node, context builder, perception, tools
+
+  # ── Real estate (the product) ──────────────────────────────
+  # Replace this section to build a different product.
+  
+  portfolio/   Entity DTOs + protocols + business rules (~3 files)
+  stores/      RE persistence adapters (mem, pg, rollups)
+  queries/     RE query services (dashboard, rent roll, leases, etc.)
+  evaluators/  RE signal producers (delinquency, lease, maintenance, etc.)
+  ingestion/   RE inbound data pipeline (parse → extract → persist → enrich)
+  ontology/    RE knowledge graph schema + remote client
+  search/      RE-aware hybrid search + pattern detection
+  tools/       RE agent capabilities (conversational agent tools)
+  configs/     RE agent YAML manifests (director, researcher, etc.)
+
+  # ── Composition root ───────────────────────────────────────
+  
+  shell/       DI container, settings, domain.yaml, API mountpoint, CLI
 ```
 
-**State the intended layer before creating a new file or adding significant logic.**
+**State the intended package before creating a new file or adding significant logic.**
+
+**Hexagonal boundary:** Generic code imports ports (ABCs/types.py) only —
+never `psycopg2`, `openai`, `anthropic`, `docker`, etc. directly.
+`shell/config/container.py` is the *only* file that knows both sides.
+
+**Agent-first discoverability:** File paths, API routes, and module names are
+part of the domain vocabulary. An LLM navigating this codebase must be able to
+infer what exists from the directory tree alone.
+
+**Two agent modes — know which you are building for:**
+- *Code-first agents* run inside `sandbox/` as isolated subprocesses.
+  They call REMI through `remi_data` (a stdlib HTTP bridge injected at session
+  start). Their tool registry IS the API.
+- *Conversational agents* run inside the REMI process. They call domain services
+  through `tools/`. Their tool registry is `tools/__init__.py`.
 
 ## Repository Protocols
 
-Port interfaces for storage are split into **narrow, per-entity protocols**
-(e.g. `LeaseRepository`, `UnitRepository`, `ManagerRepository`).
-`PropertyStore` is a composite that inherits all of them.
+Port interfaces for storage live in `portfolio/protocols.py` as
+**narrow, per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
 
 - **New code must depend on the narrowest protocol** that covers its needs.
-- When touching existing code that takes `PropertyStore`, narrow the type
+- When touching existing code that takes a composite store, narrow the type
   if the function only uses one or two entity groups.
+- Mutating methods return `WriteResult[Entity]` with a `WriteOutcome`
+  discriminator (`CREATED`, `UPDATED`, `NOOP`).
+
+## Boundary Model Discipline
+
+- **`queries/` owns read-models** (e.g. `RentRollResult`, `PortfolioOverview`).
+- **`shell/api/` schemas re-export** from queries — no duplicate Pydantic classes.
+  Only HTTP-specific types (request bodies, envelope wrappers) are defined in `shell/api/`.
+- **CLI delegates** to queries/services and renders the result — no inline store queries.
+- **No `SomeApiType(**service_result.model_dump())`** between identical types.
 
 ## Container Discipline
 
-`Container` is pure wiring — no business logic, no factory decisions.
+`shell/config/container.py` is pure wiring — no business logic, no factory decisions.
 
 - Only attributes read **outside** `container.py` may be `self.*`.
-  Everything else is a local variable.
-- Before adding a new `self.*` attribute, verify it will be read
-  externally. If not, make it a local.
-- Do not add factory functions inside `container.py`. Factories belong
-  in the module that owns the thing being built.
+- Before adding a new `self.*` attribute, verify it will be read externally.
+- Factory functions belong in the module that owns the thing being built.
 
 ## Factory Pattern
 
 Each module owns the factory for the thing it defines:
 
-- `knowledge/ontology/bridge.py` → `build_knowledge_graph()`
-- `knowledge/composite.py` → `build_signal_pipeline()`
-- `knowledge/context_builder.py` → `build_context_builder()`
-- `stores/factory.py` → `build_property_store()`, `build_document_store()`, etc.
+- `signals/composite.py` → `build_signal_pipeline()`
+- `graph/bridge.py` → `build_knowledge_graph()`
+- `agent/context_builder.py` → `build_context_builder()`
+- `stores/factory.py` → `build_property_store()`, `build_rollup_store()`
 - `llm/factory.py` → `build_provider_factory()`
 - `vectors/embedder.py` → `build_embedder()`
+- `sandbox/factory.py` → `build_sandbox()`
 
-When creating a new subsystem that requires multi-object assembly, add a
-`build_*` factory in the module that defines the top-level object.
-The container calls these factories — it does not inline the assembly.
+`container.py` calls these — it does not inline assembly.
 
 ## Key Constraints
 
-- `src/remi/config/domain.yaml` is the source of truth for signal definitions, thresholds, and rules — do not hardcode these values in Python
-- The LLM agent does NOT detect signals — the entailment engine does. The LLM explains, connects, recommends, and codifies.
-- `src/remi/shared/` is for cross-cutting primitives only (enums, errors, ids, clock) — no business logic
+- `shell/config/domain.yaml` is the source of truth for signal definitions,
+  thresholds, and rules — do not hardcode these values in Python
+- The LLM agent does NOT detect signals — the entailment engine does.
+  The LLM explains, connects, recommends, and codifies.
+- `types/` is for cross-cutting primitives only — no business logic
 - Prefer small focused modules over accumulating logic in an existing file
-- When a file is growing beyond a single clear responsibility, flag it before adding more
+- When a file is growing beyond a single clear responsibility, flag it
 
 ## Module Map
 
 ```
-agent/        AgentNode, loop, intent classifier, LLM bridge, tool executor
-agents/       App YAML configs (director, knowledge_enricher, report_classifier)
-api/          FastAPI routers
-cli/          Typer CLI
-config/       Settings, DI container, domain.yaml
-knowledge/    Context builder, graph retriever, entailment, ingestion
-  ingestion/
-    schema.py    ReportSchema definitions + unified ingest_report() loop
-    managers.py  Frequency-based manager classification + ManagerResolver
-    service.py   IngestionService — report type detection + schema dispatch
-    generic.py   Fallback for unrecognized report types
-    helpers.py   Address parsing, occupancy mapping
-  ontology/
-    bridge.py    BridgedKnowledgeGraph + build_knowledge_graph factory
-    schema.py    REMI domain schema (core types, link types) + seed_knowledge_graph
-    remote.py    RemoteKnowledgeGraph (HTTP client for sandbox)
-  composite.py   CompositeProducer + build_signal_pipeline factory
-  context_builder.py  ContextBuilder + build_context_builder factory
-llm/          LLM provider ports + adapters
-models/       Pydantic DTOs + narrow repository protocols (ABCs)
-sandbox/      Isolated code execution (bounded context with own ports)
-  ports.py    Sandbox ABC, ExecResult, ExecStatus, SandboxSession
-  local.py    LocalSandbox — subprocess fallback
-  docker.py   DockerSandbox — container-based execution
-  policy.py   Subprocess env builder, dangerous-command blocklist
-  factory.py  build_sandbox(settings) — selects backend
-  data_bridge.py  remi_data.py source injected into each session
-services/     Domain services
-stores/       Storage adapters (implementations of model ABCs)
-  factory.py  build_property_store, build_document_store, build_rollup_store
-tools/        Agent tool implementations
-vectors/      Embedding pipeline, vector store ports + adapters
-shared/       Cross-cutting primitives only
+src/remi/
+
+── types/ ───────────────────────────────────────────────────────────────────
+  ids, clock, errors, enums, result, text
+
+── db/ ──────────────────────────────────────────────────────────────────────
+  engine, tables
+
+── llm/ ─────────────────────────────────────────────────────────────────────
+  types (ports), openai, anthropic, gemini, factory
+
+── vectors/ ─────────────────────────────────────────────────────────────────
+  types (ports), embedder, store, pipeline, tokens
+
+── sandbox/ ─────────────────────────────────────────────────────────────────
+  types (ports), local, docker, policy, bridge, factory
+
+── observe/ ─────────────────────────────────────────────────────────────────
+  types, logging, tracer, mem
+
+── signals/ ─────────────────────────────────────────────────────────────────
+  types (Signal, SignalDefinition, DomainRulebook, Policy)
+  stores (SignalStore, FeedbackStore, HypothesisStore ABCs)
+  engine (generic dispatch), composite, mem
+
+── graph/ ───────────────────────────────────────────────────────────────────
+  types (KnowledgeGraph, Entity, Relationship ABCs)
+  bridge, retriever, mem
+
+── documents/ ───────────────────────────────────────────────────────────────
+  types (Document, DocumentStore ABCs), parsers, mem, pg
+
+── agent/ ───────────────────────────────────────────────────────────────────
+  types (ToolRegistry, ToolDefinition, Message, ChatSession ABCs)
+  runner, loop, node, llm_bridge, tool_executor, thread
+  context_builder (perception), context_rendering, context
+  intent, config, retry, base, registry, mem
+
+── portfolio/ ───────────────────────────────────────────────────────────────
+  models (Property, Unit, Tenant, Lease, Manager, Portfolio DTOs)
+  protocols (narrow repo ABCs)
+  rules (occupancy, vacancy, loss-to-lease helpers)
+
+── stores/ ──────────────────────────────────────────────────────────────────
+  mem, pg, rollups, factory
+
+── queries/ ─────────────────────────────────────────────────────────────────
+  dashboard, rent_roll, leases, properties, portfolios, maintenance
+  managers, snapshots, metrics, auto_assign
+
+── evaluators/ ──────────────────────────────────────────────────────────────
+  delinquency, existence, lease, maintenance, portfolio
+  threshold, trend, composition, statistical, base
+
+── ingestion/ ───────────────────────────────────────────────────────────────
+  pipeline, service, engine, seed, enrichment, llm_adapters
+  managers, generic, adapters/ (appfolio/, registry)
+
+── ontology/ ────────────────────────────────────────────────────────────────
+  schema, remote
+
+── search/ ──────────────────────────────────────────────────────────────────
+  service, pattern, graduation
+
+── tools/ ───────────────────────────────────────────────────────────────────
+  __init__ (register_all_tools), ontology, documents, search, vectors
+  sandbox, actions, memory, trace, http, workflows, delegation, snapshots
+
+── configs/ ─────────────────────────────────────────────────────────────────
+  director/, researcher/, knowledge_enricher/, report_classifier/,
+  action_planner/
+
+── shell/ ───────────────────────────────────────────────────────────────────
+  config/   container, settings, domain.yaml
+  api/      main (mountpoint), dependencies, middleware, error_handler,
+            schemas, + all route modules
+  cli/      main (mountpoint), shared, banner, live_display, http,
+            + all CLI modules
 ```

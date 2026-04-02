@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 import structlog
 
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
 
 logger = structlog.get_logger("remi.tools.delegation")
 

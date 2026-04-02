@@ -10,9 +10,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from remi.models.rollups import ManagerSnapshot
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
-from remi.services.snapshots import SnapshotService
+from remi.queries.rollups import ManagerSnapshot
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.queries.snapshots import SnapshotService
 
 
 def _avg_snapshots(snapshots: list[ManagerSnapshot]) -> dict[str, float]:

@@ -7,11 +7,11 @@ from decimal import Decimal
 
 import pytest
 
-from remi.knowledge.entailment.engine import EntailmentEngine
-from remi.models.properties import Lease, LeaseStatus, Tenant, TenantStatus, Unit, UnitStatus
-from remi.models.signals import Provenance, Severity, Signal
-from remi.stores.properties import InMemoryPropertyStore
-from remi.stores.signals import InMemorySignalStore
+from remi.evaluators.engine import EntailmentEngine
+from remi.portfolio.models import Lease, LeaseStatus, Tenant, TenantStatus, Unit, UnitStatus
+from remi.signals import Provenance, Severity, Signal
+from remi.stores.mem import InMemoryPropertyStore
+from remi.signals.mem import InMemorySignalStore
 from tests.conftest import seed_basic_portfolio
 
 REQUIRED_EVIDENCE_FIELDS: dict[str, set[str]] = {

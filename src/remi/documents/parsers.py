@@ -1,14 +1,29 @@
-"""Document parsers — CSV and Excel file ingestion."""
+"""File parsers for the ingestion pipeline.
+
+Converts raw file bytes into a ``Document`` (tabular rows + column names).
+This is the inbound I/O boundary for uploaded files — all file-format
+knowledge lives here and nowhere else.
+
+Public surface:
+  parse_document(filename, content, content_type) -> Document
+      Single entry point.  Detects format from content_type + extension and
+      delegates to the appropriate parser.  Raises ValueError for unsupported
+      types — callers should not branch on content_type themselves.
+
+  parse_csv / parse_excel
+      Exposed for direct use in tests and seeding scripts.
+"""
 
 from __future__ import annotations
 
 import csv
+import datetime as _dt
 import io
 import re
 import uuid
 from typing import Any
 
-from remi.models.documents import Document
+from remi.documents.types import Document
 
 # Patterns that indicate a row is report metadata (title, export info, filters)
 # rather than a real column header row.
@@ -19,8 +34,44 @@ _METADATA_PATTERNS = re.compile(
     re.I,
 )
 
-# Minimum number of non-null cells for a row to be considered a real header.
 _MIN_HEADER_CELLS = 3
+
+_CSV_CONTENT_TYPES = frozenset({"text/csv", "application/csv"})
+_EXCEL_CONTENT_TYPES = frozenset({
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+})
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def parse_document(filename: str, content: bytes, content_type: str) -> Document:
+    """Parse uploaded file bytes into a Document.
+
+    Format is determined by content_type first, filename extension second.
+    Raises ``ValueError`` for unsupported types so callers never need to
+    branch on content_type themselves.
+    """
+    ct = content_type.lower()
+    name = filename.lower()
+
+    if ct in _CSV_CONTENT_TYPES or name.endswith(".csv"):
+        return parse_csv(filename, content)
+    if ct in _EXCEL_CONTENT_TYPES or name.endswith((".xlsx", ".xls")):
+        return parse_excel(filename, content)
+
+    raise ValueError(
+        f"Unsupported file type: {content_type!r}. "
+        "Supported formats: CSV (.csv), Excel (.xlsx, .xls)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Format-specific parsers
+# ---------------------------------------------------------------------------
 
 
 def parse_csv(filename: str, content: bytes | str) -> Document:
@@ -46,12 +97,11 @@ def parse_csv(filename: str, content: bytes | str) -> Document:
 
 
 def parse_excel(filename: str, content: bytes) -> Document:
-    """Parse an Excel file (.xlsx) into a Document.
+    """Parse an Excel file (.xlsx / .xls) into a Document.
 
     Handles report-style exports (AppFolio, Yardi, etc.) that prepend several
     rows of metadata before the real column header.  The parser scans forward
-    to find the first row that looks like a genuine header, skipping title /
-    filter rows automatically.
+    to find the first row that looks like a genuine header.
 
     Requires the openpyxl optional dependency.
     """
@@ -59,7 +109,8 @@ def parse_excel(filename: str, content: bytes) -> Document:
         from openpyxl import load_workbook
     except ImportError as exc:
         raise ImportError(
-            "openpyxl is required for Excel parsing. Install with: pip install remi[documents]"
+            "openpyxl is required for Excel parsing. "
+            "Install with: pip install remi[documents]"
         ) from exc
 
     content_type_xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -88,8 +139,7 @@ def parse_excel(filename: str, content: bytes) -> Document:
     columns = [str(h).strip() if h is not None else f"col_{i}" for i, h in enumerate(header)]
 
     rows: list[dict[str, Any]] = []
-    for raw_row in all_rows[header_idx + 1 :]:
-        # Skip completely empty rows (section dividers / totals spacers)
+    for raw_row in all_rows[header_idx + 1:]:
         if all(c is None for c in raw_row):
             continue
         row_dict = {}
@@ -107,16 +157,13 @@ def parse_excel(filename: str, content: bytes) -> Document:
     )
 
 
-def _find_header_row(rows: list[tuple[Any, ...]]) -> int:
-    """Return the index of the first row that looks like a real column header.
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-    Strategy:
-    1. Skip rows that are clearly report metadata (match _METADATA_PATTERNS or
-       have only one non-null cell).
-    2. Accept the first row with >= _MIN_HEADER_CELLS non-null string cells
-       that does NOT look like a data row (i.e. no datetime / numeric values
-       in the first few cells — those belong to data rows).
-    """
+
+def _find_header_row(rows: list[tuple[Any, ...]]) -> int:
+    """Return the index of the first row that looks like a real column header."""
     for idx, row in enumerate(rows):
         non_null = [c for c in row if c is not None]
         if len(non_null) < _MIN_HEADER_CELLS:
@@ -124,25 +171,18 @@ def _find_header_row(rows: list[tuple[Any, ...]]) -> int:
 
         first_val = str(non_null[0]).strip() if non_null else ""
 
-        # Skip known metadata lines
         if _METADATA_PATTERNS.match(first_val):
             continue
-
-        # Skip rows where the first cell is a datetime (data row, not header)
-        import datetime as _dt
 
         if isinstance(non_null[0], (_dt.datetime, _dt.date)):
             continue
 
-        # Skip rows where the majority of non-null cells are numeric (data rows)
         numeric_count = sum(1 for c in non_null if isinstance(c, (int, float)))
         if numeric_count > len(non_null) // 2:
             continue
 
-        # This row looks like a header
         return idx
 
-    # Fallback: use row 0
     return 0
 
 

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.documents import DocumentStore
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.documents.types import DocumentStore
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
 
 
 def register_document_tools(
@@ -56,8 +56,8 @@ def register_document_tools(
         limit = int(args.get("limit", 50))
 
         if doc_id:
-            docs = [await store.get(doc_id)]
-            docs = [d for d in docs if d is not None]
+            maybe = await store.get(doc_id)
+            docs = [maybe] if maybe is not None else []
         else:
             docs = await store.list_documents()
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from remi.knowledge.ontology.schema import load_domain_yaml
-from remi.models.signals import (
+from remi.ontology.schema import load_domain_yaml
+from remi.signals import (
     CausalChain,
     Deontic,
     DomainRulebook,

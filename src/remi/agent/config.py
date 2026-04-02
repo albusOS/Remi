@@ -159,7 +159,7 @@ class AgentConfig(BaseModel):
         return self.max_iterations
 
     @classmethod
-    def _parse_tool_list(cls, raw: list) -> list[ToolRef]:
+    def _parse_tool_list(cls, raw: list[Any]) -> list[ToolRef]:
         tools: list[ToolRef] = []
         for t in raw:
             if isinstance(t, str):

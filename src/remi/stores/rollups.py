@@ -15,8 +15,8 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import select
 
+from remi.queries.rollups import ManagerSnapshot, PropertySnapshot, RollupStore
 from remi.db.tables import ManagerRollupRow, PropertyRollupRow
-from remi.models.rollups import ManagerSnapshot, PropertySnapshot, RollupStore
 
 # ------------------------------------------------------------------
 # Row ↔ DTO converters

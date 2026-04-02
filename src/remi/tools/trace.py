@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
-from remi.models.trace import TraceStore
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.observe.types import TraceStore
 
 
 def register_trace_tools(

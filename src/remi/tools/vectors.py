@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
-from remi.vectors.ports import Embedder, VectorStore
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.vectors.types import Embedder, VectorStore
 
 
 def register_vector_tools(

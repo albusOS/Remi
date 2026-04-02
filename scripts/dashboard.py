@@ -284,9 +284,9 @@ class RemiDashboard(App):
     @work(exclusive=True, thread=False)
     async def _boot(self) -> None:
         self._activity("  [dim]Bootstrapping container…[/dim]")
-        from remi.config.container import Container
-        from remi.config.settings import load_settings
-        from remi.observability.logging import configure_logging
+        from remi.interface.config.container import Container
+        from remi.interface.config.settings import load_settings
+        from remi.infra.observability.logging import configure_logging
 
         settings = load_settings()
         configure_logging(level="WARNING", format="console")
@@ -390,7 +390,7 @@ class RemiDashboard(App):
 
     @work(exclusive=False, thread=False)
     async def _run_chat(self, user_input: str) -> None:
-        from remi.models.chat import Message
+        from remi.core.models.chat import Message
 
         self._chat(f"\n[bold green]you>[/bold green] {user_input}")
 

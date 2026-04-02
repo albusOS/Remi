@@ -9,14 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.ontology import (
-    KnowledgeGraph,
-    KnowledgeProvenance,
-    ObjectTypeDef,
-    PropertyDef,
-)
-from remi.models.signals import SignalStore
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.graph.stores import KnowledgeGraph
+from remi.graph.types import KnowledgeProvenance, ObjectTypeDef, PropertyDef
+from remi.signals import SignalStore
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
 
 
 def register_knowledge_graph_tools(

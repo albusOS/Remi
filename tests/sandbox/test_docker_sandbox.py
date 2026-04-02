@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from remi.sandbox.docker import DockerSandbox
-from remi.sandbox.ports import ExecStatus
+from remi.sandbox.types import ExecStatus
 
 
 def _docker_available() -> bool:

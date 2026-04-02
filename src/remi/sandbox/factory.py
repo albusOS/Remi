@@ -11,8 +11,8 @@ import subprocess
 
 import structlog
 
-from remi.config.settings import RemiSettings
-from remi.sandbox.ports import Sandbox
+from remi.sandbox.types import Sandbox
+from remi.types.config import RemiSettings
 
 _log = structlog.get_logger(__name__)
 

@@ -10,18 +10,19 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from remi.llm.ports import (
+from remi.llm.types import (
     LLMProvider,
     LLMResponse,
+    Message,
     ModelCapabilities,
     ModelPricing,
     ProviderConfig,
     StreamChunk,
     TokenUsage,
     ToolCallRequest,
+    ToolDefinition,
 )
-from remi.models.chat import Message
-from remi.models.tools import ToolDefinition
+from remi.types.errors import LLMConnectionError, LLMRateLimitError, LLMTimeoutError
 
 _MODEL_REGISTRY: dict[str, ModelCapabilities] = {
     "gpt-4o": ModelCapabilities(
@@ -72,6 +73,22 @@ _DEFAULT_CAPABILITIES = ModelCapabilities(
     context_window=128_000,
     max_output_tokens=4_096,
 )
+
+def _wrap_openai_error(exc: Exception) -> None:
+    """Re-raise OpenAI SDK errors as provider-agnostic core types.
+
+    Called in except blocks; always raises — never returns.
+    """
+    import openai
+
+    if isinstance(exc, openai.APIConnectionError):
+        raise LLMConnectionError(str(exc), provider="openai") from exc
+    if isinstance(exc, openai.APITimeoutError):
+        raise LLMTimeoutError(str(exc), provider="openai") from exc
+    if isinstance(exc, openai.RateLimitError):
+        raise LLMRateLimitError(str(exc), provider="openai") from exc
+    raise exc
+
 
 _TIKTOKEN_ENCODING = "cl100k_base"
 
@@ -168,7 +185,11 @@ class OpenAIProvider(LLMProvider):
         if tools:
             kwargs["tools"] = [self._tool_to_openai(t) for t in tools]
 
-        resp = await client.chat.completions.create(**kwargs)
+        try:
+            resp = await client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            _wrap_openai_error(exc)
+
         choice = resp.choices[0]
 
         usage = (
@@ -227,7 +248,10 @@ class OpenAIProvider(LLMProvider):
             kwargs["tools"] = [self._tool_to_openai(t) for t in tools]
 
         active_tool_calls: dict[int, dict[str, str]] = {}
-        response_stream = await client.chat.completions.create(**kwargs)
+        try:
+            response_stream = await client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            _wrap_openai_error(exc)
 
         async for chunk in response_stream:
             choice = chunk.choices[0] if chunk.choices else None

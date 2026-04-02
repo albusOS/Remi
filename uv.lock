@@ -2253,9 +2253,11 @@ analytics = [
 ]
 dev = [
     { name = "asyncpg" },
+    { name = "google-generativeai" },
     { name = "httpx" },
     { name = "mypy" },
     { name = "numpy" },
+    { name = "openai" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2300,7 +2302,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0,<7" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
-    { name = "remi", extras = ["postgres", "analytics"], marker = "extra == 'dev'" },
+    { name = "remi", extras = ["postgres", "analytics", "all-providers"], marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8,<1" },
     { name = "scikit-learn", marker = "extra == 'analytics'", specifier = ">=1.5,<2" },
     { name = "scipy", marker = "extra == 'analytics'", specifier = ">=1.14,<2" },

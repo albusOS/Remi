@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from remi.sandbox.ports import ExecStatus
+from remi.sandbox.types import ExecStatus
 from remi.sandbox.local import LocalSandbox
 from remi.tools.registry import InMemoryToolRegistry
 from remi.tools.sandbox import register_sandbox_tools

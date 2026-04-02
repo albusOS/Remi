@@ -11,19 +11,37 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from remi.llm.ports import (
+from remi.llm.types import (
     LLMProvider,
     LLMResponse,
+    Message,
     ModelCapabilities,
     ModelPricing,
     ProviderConfig,
     StreamChunk,
     TokenUsage,
     ToolCallRequest,
+    ToolDefinition,
 )
-from remi.models.chat import Message
-from remi.models.tools import ToolDefinition
-from remi.vectors.tokens import CHARS_PER_TOKEN
+from remi.types.errors import LLMConnectionError, LLMRateLimitError, LLMTimeoutError
+from remi.types.text import CHARS_PER_TOKEN
+
+
+def _wrap_anthropic_error(exc: Exception) -> None:
+    """Re-raise Anthropic SDK errors as provider-agnostic core types.
+
+    Called in except blocks; always raises — never returns.
+    """
+    import anthropic
+
+    if isinstance(exc, anthropic.APIConnectionError):
+        raise LLMConnectionError(str(exc), provider="anthropic") from exc
+    if isinstance(exc, anthropic.APITimeoutError):
+        raise LLMTimeoutError(str(exc), provider="anthropic") from exc
+    if isinstance(exc, anthropic.RateLimitError):
+        raise LLMRateLimitError(str(exc), provider="anthropic") from exc
+    raise exc
+
 
 _MODEL_REGISTRY: dict[str, ModelCapabilities] = {
     "claude-opus-4-20250514": ModelCapabilities(
@@ -229,7 +247,10 @@ class AnthropicProvider(LLMProvider):
             tools=tools,
         )
 
-        resp = await client.messages.create(**kwargs)
+        try:
+            resp = await client.messages.create(**kwargs)
+        except Exception as exc:
+            _wrap_anthropic_error(exc)
 
         content_text: str | None = None
         tool_calls: list[ToolCallRequest] = []
@@ -278,7 +299,12 @@ class AnthropicProvider(LLMProvider):
         cache_read = 0
         cache_creation = 0
 
-        async with client.messages.stream(**kwargs) as stream:
+        try:
+            stream_cm = client.messages.stream(**kwargs)
+        except Exception as exc:
+            _wrap_anthropic_error(exc)
+
+        async with stream_cm as stream:
             async for event in stream:
                 if event.type == "content_block_start":
                     block = event.content_block

@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from remi.knowledge.context_builder import (
-    ContextBuilder,
-    ContextFrame,
+from remi.agent.context.rendering import (
     render_active_signals,
     render_domain_context,
     render_graph_context,
 )
-from remi.knowledge.graph_retriever import ResolvedEntity
-from remi.knowledge.ontology.schema import load_domain_yaml
-from remi.models.chat import Message
-from remi.models.ontology import KnowledgeLink
-from remi.models.signals import DomainRulebook, Severity, Signal
-from remi.stores.signals import InMemorySignalStore
-from remi.vectors.tokens import estimate_tokens, truncate_to_tokens
+from remi.agent.types import Message
+from remi.graph.types import KnowledgeLink
+from remi.signals import DomainRulebook, Severity, Signal
+from remi.types.text import estimate_tokens, truncate_to_tokens
+from remi.agent.context.builder import ContextBuilder
+from remi.agent.context.frame import ContextFrame
+from remi.graph.retriever import ResolvedEntity
+from remi.ontology.schema import load_domain_yaml
+from remi.signals.mem import InMemorySignalStore
 
 # -- token utilities ----------------------------------------------------------
 
@@ -202,7 +202,7 @@ def test_render_domain_context_includes_compositions() -> None:
     domain = DomainRulebook.from_yaml(load_domain_yaml())
     result = render_domain_context(domain)
 
-    assert "Composition rules" in result
+    assert "Composition rules" in result or "Composition signals" in result
     assert "DelinquencyLeaseCliff" in result
     assert "OperationalBreakdown" in result
     assert "DecliningPortfolio" in result

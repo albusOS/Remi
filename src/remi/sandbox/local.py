@@ -16,9 +16,9 @@ from typing import Any
 
 import structlog
 
-from remi.sandbox.data_bridge import DATA_BRIDGE_SOURCE
+from remi.sandbox.bridge import DATA_BRIDGE_SOURCE
 from remi.sandbox.policy import build_subprocess_env, is_dangerous_command, resolve_python_bin
-from remi.sandbox.ports import ExecResult, ExecStatus, Sandbox, SandboxSession
+from remi.sandbox.types import ExecResult, ExecStatus, Sandbox, SandboxSession
 
 _log = structlog.get_logger(__name__)
 

@@ -1,105 +1,161 @@
 ---
-description: Forward-looking architecture alignment — guides incremental migration toward agent-first, domain-centric design
+description: Architecture alignment — naming, placement, boundaries, and conventions
 globs: ["**/*.py", "**/*.yaml", "**/*.yml"]
 alwaysApply: true
 ---
 
 # Architecture Alignment
 
-This codebase is layer-organized today but migrating incrementally toward
-a **domain-centric, agent-first** structure. Every change should move us
-closer — or at minimum not move us further away.
+Two halves (generic capabilities + real estate product) plus a
+composition root. The directory tree is the documentation.
+The generic/RE boundary is visible in `ls`.
 
-## Target Direction
+## Package Placement — the Two Halves
 
-The long-term target is domain-organized code with hexagonal boundaries:
-each bounded context owns its models, ports (interfaces), adapters, and
-tools in one place. We are **not** rewriting today — we are steering.
+### Domain-Agnostic (could power any domain)
 
-## Interface Segregation (active migration)
+| Package | What it is | Depends on |
+|---------|-----------|------------|
+| `types/` | Pure vocabulary — ids, clock, errors, enums | nothing |
+| `db/` | Database engine + tables | `types/` |
+| `llm/` | LLM provider ports + adapters | `types/` |
+| `vectors/` | Embedding ports + adapters | `types/` |
+| `sandbox/` | Code execution ports + adapters | `types/` |
+| `observe/` | Logging, tracing | `types/` |
+| `signals/` | Signal framework — types, stores, engine | `types/` |
+| `graph/` | Knowledge graph — types, bridge, retriever | `vectors/`, `types/` |
+| `documents/` | Document types, stores, parsers | `types/` |
+| `agent/` | LLM runtime, context building, perception | `signals/`, `graph/`, `vectors/`, `llm/`, `sandbox/`, `observe/` |
 
-Repository ports are split into **narrow, per-entity protocols**
-(e.g. `LeaseRepository`, `UnitRepository`). The composite `PropertyStore`
-inherits from all of them for backward compatibility.
+### Real Estate (the product)
 
-- **New code** must depend on the **narrowest** protocol that covers its
-  needs — never on `PropertyStore` when a single-entity protocol suffices.
-- When touching existing code that takes `PropertyStore`, narrow the type
-  annotation if the function only uses methods from one or two protocols.
+| Package | What it is | Depends on |
+|---------|-----------|------------|
+| `portfolio/` | Entity DTOs, protocols, rules | `types/` |
+| `stores/` | RE persistence adapters | `portfolio/`, `db/` |
+| `queries/` | RE query services | `portfolio/`, `stores/` |
+| `evaluators/` | RE signal producers | `portfolio/`, `stores/`, `signals/` |
+| `ingestion/` | RE inbound data pipeline | `portfolio/`, `stores/`, `documents/`, `signals/` |
+| `ontology/` | RE knowledge graph schema | `graph/` |
+| `search/` | RE-aware hybrid search | `graph/`, `vectors/`, `signals/` |
+| `tools/` | RE agent capabilities | `queries/`, `evaluators/`, `ingestion/`, `ontology/`, `search/` |
+| `configs/` | RE agent YAML manifests | `agent/` |
+
+### Composition Root
+
+| Package | What it is | Depends on |
+|---------|-----------|------------|
+| `shell/` | DI container, settings, API mountpoint, CLI | everything |
+
+## New Modules — Placement Checklist
+
+Before creating a file or adding significant logic, answer:
+
+1. **Which half?**
+   - Could this work for healthcare/logistics? → Generic capability
+   - Does it mention Property, Unit, Tenant, Lease? → Real estate
+
+2. **Which package?**
+   - Pure primitives, no I/O → `types/`
+   - Database machinery → `db/`
+   - LLM provider interaction → `llm/`
+   - Embedding, vector search → `vectors/`
+   - Code execution → `sandbox/`
+   - Logging, tracing → `observe/`
+   - Signal framework → `signals/`
+   - Knowledge graph framework → `graph/`
+   - Document framework → `documents/`
+   - LLM runtime, context, perception → `agent/`
+   - RE entity DTOs, protocols, rules → `portfolio/`
+   - RE persistence → `stores/`
+   - RE analytical views → `queries/`
+   - RE signal producers → `evaluators/`
+   - RE inbound data → `ingestion/`
+   - RE graph schema → `ontology/`
+   - RE search → `search/`
+   - RE agent tools → `tools/`
+   - RE agent configs → `configs/`
+   - HTTP routes → `shell/api/`
+   - CLI commands → `shell/cli/`
+   - Wiring only → `shell/config/container.py`
+
+3. **Hexagonal rule:** Does this code import a concrete infrastructure
+   library (`psycopg2`, `openai`, `anthropic`, `docker`, etc.)?
+   Each package owns its own adapters (e.g. `llm/openai.py`).
+   Only `shell/config/container.py` wires them.
+
+4. **Discoverability:** Could an LLM discover this capability via
+   the directory tree, `--help`, or tool registry?
+
+## Interface Segregation
+
+Repository ports live in `portfolio/protocols.py` as **narrow,
+per-entity protocols** (e.g. `LeaseRepository`, `UnitRepository`).
+
+- **New code** must depend on the **narrowest** protocol.
+- When touching existing code that takes a composite store, narrow
+  the type if the function only uses one or two protocols.
 
 ## Container Discipline
 
-`Container` must stay a **thin wiring layer** — no business logic, no
-factory decisions, no closures. Rules:
+`shell/config/container.py` must stay a **thin wiring layer**.
 
-- Attributes that are only consumed internally (to build other objects)
-  should be **local variables**, not `self.*` attributes.
-- Factory functions belong in the module that owns the thing being
-  built (e.g. `stores/factory.py`, `knowledge/composite.py`),
-  **not** in `container.py`.
-- Before adding a new attribute, verify it will be read outside
-  `container.py`. If not, it's a local variable.
+- Attributes only consumed internally → local variables, not `self.*`.
+- Factory functions belong in the module that owns the thing being built.
+- Before adding a new `self.*` attribute, verify it will be read externally.
 
 ## Import Rules
 
 - **Never use `typing.TYPE_CHECKING`.** If you need it, the dependency
-  graph is wrong. Fix the design, not the import.
-- All imports must be direct and honest — if you use a type at runtime,
-  import it at the top of the file.
-- No circular import workarounds. If two modules need each other,
-  one of them has the wrong responsibility.
+  graph is wrong.
+- All imports must be direct and honest.
+- No circular import workarounds.
 
 ## Error Propagation Rules
 
 - **No silent exception swallowing.** Every `except` block must either
   re-raise or log at `warning`+ with `exc_info=True`.
 - `except Exception: pass` and `except Exception: continue` are banned.
-- Catch-and-continue in pipelines/batch loops must record failures in
-  a result object (`errors`, `failed_producers`, `pipeline_warnings`).
-- Narrow the exception type — prefer `ValueError`, `TypeError`,
-  `KeyError` over bare `Exception` when the failure mode is known.
+- Catch-and-continue must record failures in a result object.
+- Narrow the exception type when the failure mode is known.
 
 ## Type Strictness
 
-- **No `dict[str, Any]`** as a return type or parameter — define a
-  Pydantic model or TypedDict.
-- **No `-> Any`** return annotations — be explicit about what is returned.
+- **No `dict[str, Any]`** as a return type or parameter.
+- **No `-> Any`** return annotations.
 - **No `list[dict]`** — model the list items.
-- When touching existing code that uses `Any` or untyped `dict`, narrow
-  the annotation. At minimum, don't add new ones.
+- When touching existing `Any`/`dict` code, narrow the annotation.
 
 ## File Size Gates
 
-- **Interface files** (ABCs / Protocols): flag at **8 abstract methods**.
-  Beyond that, the interface likely conflates bounded contexts.
-- **Implementation files**: flag at **300 lines**. Split by entity or
-  responsibility before adding more.
-- **Container**: flag at **250 lines**. Extract factory functions into
-  the owning modules.
+- **Port files** (ABCs / Protocols): flag at **8 abstract methods**.
+- **Implementation files**: flag at **300 lines**.
+- **Container**: flag at **250 lines**.
 
-## New Modules — Placement Checklist
+## Boundary Model Conventions
 
-Before creating a file or adding significant logic, answer:
+Types flow **inward** — outer packages import from inner packages.
 
-1. Which **domain entity** does this serve?
-2. Does a narrow repository protocol exist for it? If not, create one.
-3. Does this belong in `stores/` (I/O adapter), `services/` (domain
-   logic), or `tools/` (agent interface)?
-4. Could an LLM discover this capability via `--help` or tool registry?
-   If not, is that acceptable?
+| Location | Owns | Examples |
+|----------|------|----------|
+| `portfolio/models.py` | Entity DTOs | `Property`, `Unit`, `Lease` |
+| `queries/*.py` | Service read-models | `RentRollResult`, `PortfolioOverview` |
+| `shell/api/*/schemas.py` | Re-exports + HTTP-only types | Request bodies, envelope wrappers |
+| CLI commands | nothing — format what services return | `model_dump()` → render |
+
+### Write operations
+
+Mutating repository methods return `WriteResult[T]` with a `WriteOutcome`
+discriminator (`CREATED`, `UPDATED`, `NOOP`).
 
 ## Dead Code Policy
 
-- Do not leave CLI commands that are unreachable from the entry point.
+- Do not leave CLI commands unreachable from the entry point.
 - Do not leave tool registration functions that are never called.
-- Backward-compat aliases (properties, re-exports) get a `# COMPAT:`
-  comment and a removal date or condition.
+- Backward-compat aliases get a `# COMPAT:` comment and a removal condition.
 
 ## Naming Conventions
 
-- Files that define a class plus its factory: name after the concept,
-  not after lifecycle (`schema.py` not `bootstrap.py`).
-- Factory functions: `build_<thing>()` — lives in the module that
-  defines the thing.
-- Seeding / initialization: `seed_<thing>()` — loads data into an
-  already-constructed object.
+- Files that define a class plus its factory: name after the concept.
+- Factory functions: `build_<thing>()` — lives in the owning module.
+- Seeding / initialization: `seed_<thing>()`.

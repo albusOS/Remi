@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from remi.agent.thread import trim_thread
-from remi.models.chat import Message
+from remi.agent.conversation.thread import trim_thread
+from remi.agent.types import Message
 
 
 def _msg(role: str, content: str) -> Message:

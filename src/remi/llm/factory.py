@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.config.settings import SecretsSettings
 from remi.llm.anthropic import AnthropicProvider
 from remi.llm.gemini import GeminiProvider
 from remi.llm.openai import OpenAIProvider
-from remi.llm.ports import LLMProvider, ProviderConfig
+from remi.llm.types import LLMProvider, ProviderConfig
+from remi.types.config import SecretsSettings
 
 _ADAPTER_MAP: dict[str, type[LLMProvider]] = {
     "openai": OpenAIProvider,

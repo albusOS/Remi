@@ -1,1 +1,1 @@
-"""Documents package."""
+"""Document management — types, stores, parsers."""

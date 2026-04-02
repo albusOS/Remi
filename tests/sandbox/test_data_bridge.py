@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from remi.sandbox.data_bridge import DATA_BRIDGE_SOURCE
+from remi.sandbox.bridge import DATA_BRIDGE_SOURCE
 
 # -- US-4 prerequisite: bridge is valid Python --------------------------------
 

@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import pytest
 
-from remi.knowledge.composite import CompositeProducer
-from remi.knowledge.entailment.engine import EntailmentEngine
-from remi.knowledge.ontology.bridge import BridgedKnowledgeGraph
-from remi.knowledge.statistical import StatisticalProducer
-from remi.models.properties import Unit, UnitStatus
-from remi.models.signals import (
+from remi.signals.composite import CompositeProducer
+from remi.evaluators.engine import EntailmentEngine
+from remi.graph.bridge import BridgedKnowledgeGraph
+from remi.evaluators.statistical import StatisticalProducer
+from remi.portfolio.models import Unit, UnitStatus
+from remi.signals import (
     DomainRulebook,
     ProducerResult,
     Provenance,
@@ -21,9 +21,9 @@ from remi.models.signals import (
     SignalOutcome,
     SignalProducer,
 )
-from remi.stores.memory import InMemoryKnowledgeStore
-from remi.stores.properties import InMemoryPropertyStore
-from remi.stores.signals import InMemoryFeedbackStore, InMemorySignalStore
+from remi.graph.mem import InMemoryKnowledgeStore
+from remi.stores.mem import InMemoryPropertyStore
+from remi.signals.mem import InMemoryFeedbackStore, InMemorySignalStore
 
 # -- Fixtures -----------------------------------------------------------------
 
@@ -231,7 +231,7 @@ async def test_entailment_engine_implements_signal_producer(
     property_store: InMemoryPropertyStore,
 ) -> None:
     """EntailmentEngine is a valid SignalProducer."""
-    from remi.knowledge.ontology.schema import load_domain_yaml
+    from remi.ontology.schema import load_domain_yaml
 
     domain = DomainRulebook.from_yaml(load_domain_yaml())
     engine = EntailmentEngine(domain=domain, property_store=property_store)
@@ -397,7 +397,7 @@ async def test_full_pipeline_integration(
     knowledge_graph: BridgedKnowledgeGraph,
 ) -> None:
     """End-to-end: rules + stats produce signals, feedback records outcomes."""
-    from remi.knowledge.ontology.schema import load_domain_yaml
+    from remi.ontology.schema import load_domain_yaml
 
     await _bootstrap(knowledge_graph)
 
@@ -433,6 +433,6 @@ async def test_full_pipeline_integration(
 
 
 async def _bootstrap(knowledge_graph: BridgedKnowledgeGraph) -> None:
-    from remi.knowledge.ontology.schema import seed_knowledge_graph
+    from remi.ontology.schema import seed_knowledge_graph
 
     await seed_knowledge_graph(knowledge_graph)

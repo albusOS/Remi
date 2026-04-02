@@ -15,14 +15,12 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
-from remi.vectors.ports import Embedder
-
-if TYPE_CHECKING:
-    from remi.config.settings import EmbeddingsSettings, SecretsSettings
+from remi.types.config import EmbeddingsSettings, SecretsSettings
+from remi.vectors.types import Embedder
 
 _log = structlog.get_logger(__name__)
 
@@ -139,7 +137,8 @@ class VoyageEmbedder(Embedder):
         client = self._get_client()
         _log.debug("embedding_batch", count=len(texts), model=self._model)
         result = await client.embed(texts, model=self._model, input_type=self._input_type)
-        return result.embeddings
+        embeddings: list[list[float]] = result.embeddings
+        return embeddings
 
     async def embed_one(self, text: str) -> list[float]:
         results = await self.embed([text])

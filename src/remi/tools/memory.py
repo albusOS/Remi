@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.memory import MemoryStore
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
+from remi.graph.stores import MemoryStore
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
 
 
 def register_memory_tools(

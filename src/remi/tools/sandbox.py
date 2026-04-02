@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.models.tools import ToolArg, ToolDefinition, ToolRegistry
-from remi.sandbox.ports import Sandbox
+from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.sandbox.types import Sandbox
 
 _DEFAULT_SESSION = "agent-default"
 
