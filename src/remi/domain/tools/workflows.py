@@ -15,14 +15,14 @@ from typing import Any, Protocol
 
 from remi.agent.graph.stores import KnowledgeGraph
 from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
-from remi.domain.portfolio.models import (
+from remi.domain.core.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     ActionItemStatus,
 )
-from remi.domain.portfolio.protocols import PropertyStore
-from remi.domain.queries.dashboard import DashboardQueryService
-from remi.domain.queries.managers import ManagerReviewService
+from remi.domain.core.portfolio.protocols import PropertyStore
+from remi.domain.intelligence.queries.dashboard import DashboardQueryService
+from remi.domain.intelligence.queries.managers import ManagerReviewService
 
 
 class SubAgentInvoker(Protocol):

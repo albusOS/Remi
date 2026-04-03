@@ -9,7 +9,7 @@ from typing import Any
 
 from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
 from remi.agent.documents.types import DocumentStore
-from remi.domain.ingestion.pipeline import DocumentIngestService
+from remi.domain.ingestion.documents.pipeline import DocumentIngestService
 
 
 def register_document_tools(

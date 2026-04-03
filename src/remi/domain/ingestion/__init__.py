@@ -1,6 +1,9 @@
-"""RE inbound data pipeline — ontology-driven ingestion.
+"""Ingestion context — inbound data.
 
-LLM extraction pipeline (classify → extract → enrich) produces typed rows.
-The resolver maps rows directly to domain models and persists to
-PropertyStore + KnowledgeStore in one pass. No intermediate event layer.
+Split into three categories:
+- ``documents/`` — document parsing, LLM extraction, persistence
+- ``embedding/`` — vector indexing of portfolio entities
+- ``seeding/`` — initial data load from sample reports
+
+Format adapters live in ``adapters/``.
 """

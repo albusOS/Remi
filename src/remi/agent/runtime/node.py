@@ -17,6 +17,7 @@ from typing import Any
 import structlog
 
 from remi.agent.config import AgentConfig
+from remi.agent.context.builder import _find_tail_inject_point
 from remi.agent.context.frame import WorldState
 from remi.agent.context.intent import classify_intent
 from remi.agent.context.rendering import (
@@ -185,7 +186,7 @@ class AgentNode(BaseModule):
                 "Only discuss data relevant to this manager's portfolio "
                 "unless the user explicitly asks about the broader portfolio."
             )
-            _insert_after_static(thread, Message(role="system", content="\n".join(scope_parts)))
+            _insert_before_last_user(thread, Message(role="system", content="\n".join(scope_parts)))
 
         trace_cm = (
             tracer.start_trace(
@@ -246,17 +247,13 @@ class AgentNode(BaseModule):
                 if needs_signals and signal_store is not None:
                     signal_summary = await render_active_signals(signal_store)
                     if signal_summary:
-                        tbox_in_thread = any(
-                            m.role == "system" and m.content and "Domain Context" in str(m.content)
-                            for m in thread[1:]
-                        )
-                        insert_idx = 2 if tbox_in_thread else 1
+                        insert_idx = _find_tail_inject_point(thread)
                         thread.insert(insert_idx, Message(role="system", content=signal_summary))
 
                 memory_text = await memory_text_coro
 
             if memory_text:
-                _insert_after_static(
+                _insert_before_last_user(
                     thread,
                     Message(role="system", content=f"Past context:\n{memory_text}"),
                 )
@@ -274,6 +271,8 @@ class AgentNode(BaseModule):
                 max_tool_rounds=max_tool_rounds,
                 routing_provider=routing_provider,
                 usage_ledger=usage_ledger,
+                memory=memory,
+                memory_namespace=cfg.memory.namespace,
             )
 
             final = format_output(thread, cfg)
@@ -283,6 +282,11 @@ class AgentNode(BaseModule):
                 run_usage.completion_tokens,
             )
             latency_ms = round((time.monotonic() - _t0) * 1000)
+            cache_ratio = (
+                run_usage.cache_read_tokens / run_usage.prompt_tokens
+                if run_usage.prompt_tokens > 0
+                else 0.0
+            )
 
             done_payload: dict[str, Any] = {
                 "response": last_assistant_content(thread) or "",
@@ -291,6 +295,7 @@ class AgentNode(BaseModule):
                 "provider": cfg.provider,
                 "latency_ms": latency_ms,
                 "trace_id": get_current_trace_id(),
+                "cache_hit_ratio": round(cache_ratio, 3),
             }
             if intent_name:
                 done_payload["intent"] = intent_name
@@ -305,6 +310,9 @@ class AgentNode(BaseModule):
                 prompt_tokens=run_usage.prompt_tokens,
                 completion_tokens=run_usage.completion_tokens,
                 total_tokens=run_usage.total_tokens,
+                cache_read_tokens=run_usage.cache_read_tokens,
+                cache_creation_tokens=run_usage.cache_creation_tokens,
+                cache_hit_ratio=round(cache_ratio, 3),
                 cost=round(cost, 6) if cost is not None else None,
             )
 
@@ -346,21 +354,14 @@ class AgentNode(BaseModule):
             )
 
 
-def _insert_after_static(thread: list[Message], msg: Message) -> None:
-    """Insert *msg* after static system messages but before the user message.
+def _insert_before_last_user(thread: list[Message], msg: Message) -> None:
+    """Insert *msg* just before the last user message (tail-inject).
 
-    Anthropic caches from the beginning of the context window.  Keeping
-    the static prefix (system prompt + TBox priming) contiguous maximises
-    cache-read hits.  Dynamic per-turn content goes between the static
-    prefix and the first non-system message.
+    Keeps the static prefix (system prompt + TBox priming) contiguous
+    for KV-cache stability, and places dynamic content in recent context
+    where the model's attention is strongest.
     """
-    idx = 0
-    for i, m in enumerate(thread):
-        if m.role == "system":
-            idx = i + 1
-        else:
-            break
-    thread.insert(idx, msg)
+    thread.insert(_find_tail_inject_point(thread), msg)
 
 
 def _extract_user_question(thread: list[Message]) -> str | None:

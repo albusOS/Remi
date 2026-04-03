@@ -25,7 +25,7 @@ from remi.agent.context.rendering import (
     render_active_signals,
     render_graph_context,
 )
-from remi.agent.graph.retriever import GraphRetriever
+from remi.agent.graph.retrieval.retriever import GraphRetriever
 from remi.agent.graph.stores import KnowledgeGraph
 from remi.agent.observe.events import Event
 from remi.agent.observe.types import SpanKind, Tracer
@@ -181,15 +181,16 @@ class ContextBuilder:
         The TBox is already in the thread from priming.  This injects
         only ABox perception: signal summary and graph context, under
         the token budget.
+
+        Injection point: immediately *before* the last user message.
+        This keeps the static prefix (system prompt + TBox) contiguous
+        for KV-cache stability, and places dynamic perception in recent
+        context where the model's attention is strongest.
         """
         existing_tokens = sum(estimate_tokens(str(m.content)) for m in thread if m.content)
         remaining = self._token_budget - existing_tokens
 
-        tbox_in_thread = any(
-            m.role == "system" and m.content and "Domain Context" in str(m.content)
-            for m in thread[1:]
-        )
-        insert_idx = 2 if tbox_in_thread else 1
+        insert_idx = _find_tail_inject_point(thread)
 
         if frame.signal_summary and remaining > 200:
             signal_budget = remaining // 2
@@ -209,6 +210,28 @@ class ContextBuilder:
             graph_ctx = render_graph_context(frame, max_tokens=remaining)
             if graph_ctx:
                 thread.insert(insert_idx, Message(role="system", content=graph_ctx))
+
+
+def _find_tail_inject_point(thread: list[Message]) -> int:
+    """Find the insertion index just before the last user message.
+
+    Places dynamic per-turn context (signals, graph, memory) in *recent*
+    context where LLM attention is strongest, while keeping the static
+    prefix (system prompt + TBox) contiguous for KV-cache hits.
+
+    Falls back to after the static system prefix if no user message
+    exists yet (e.g. first turn).
+    """
+    for i in range(len(thread) - 1, -1, -1):
+        if thread[i].role == "user":
+            return i
+    idx = 0
+    for i, m in enumerate(thread):
+        if m.role == "system":
+            idx = i + 1
+        else:
+            break
+    return idx
 
 
 def build_context_builder(

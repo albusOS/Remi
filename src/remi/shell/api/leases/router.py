@@ -9,9 +9,9 @@ from remi.shell.api.leases.schemas import (
     LeaseListItem,
     LeaseListResponse,
 )
-from remi.domain.portfolio.models import LeaseStatus
-from remi.domain.portfolio.protocols import PropertyStore
-from remi.domain.queries.leases import LeaseQueryService
+from remi.domain.core.portfolio.models import LeaseStatus
+from remi.domain.core.portfolio.protocols import PropertyStore
+from remi.domain.intelligence.queries.leases import LeaseQueryService
 from remi.shell.api.dependencies import get_lease_query, get_property_store
 
 router = APIRouter(prefix="/leases", tags=["leases"])

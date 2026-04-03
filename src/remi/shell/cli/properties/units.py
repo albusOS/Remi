@@ -35,7 +35,7 @@ async def _list_units(property_id: str | None, status_str: str | None, fmt_json:
         data = _http.get(f"/units{qs}")
         items = data.get("units", [])
     else:
-        from remi.domain.portfolio.models import UnitStatus
+        from remi.domain.core.portfolio.models import UnitStatus
 
         container = get_container()
         status = UnitStatus(status_str) if status_str else None

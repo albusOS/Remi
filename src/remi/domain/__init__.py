@@ -1,6 +1,11 @@
 """Domain — real estate product intelligence.
 
-All property management business logic: entity models, persistence,
-queries, signal evaluation, data ingestion, ontology, search, agent
-tools, and agent configuration manifests.
+Organized as CCCC (Core, Context, Category, Command):
+
+    core/           Internal plumbing — entity models, protocols, persistence, ontology
+    monitoring/     Situation awareness — signal evaluation + time-series snapshots
+    ingestion/      Inbound data — document extraction, embedding, seeding
+    intelligence/   Queries and search — read-model aggregation + hybrid search
+    tools/          View layer — agent-facing tool registrations
+    agents/         YAML manifests for named agent configurations
 """

@@ -13,14 +13,14 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from remi.types.errors import NotFoundError
-from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
 from remi.agent.graph.types import GraphObject
-from remi.domain.portfolio.models import (
+from remi.domain.core.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     ActionItemStatus,
 )
-from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.core.portfolio.protocols import PropertyStore
 from remi.shell.api.dependencies import get_knowledge_graph, get_property_store
 from remi.shell.api.schemas import DeletedResponse
 

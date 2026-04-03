@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from remi.agent.documents.types import DocumentStore
-from remi.domain.ingestion.pipeline import DocumentIngestService
+from remi.domain.ingestion.documents.pipeline import DocumentIngestService
 from remi.shell.api.dependencies import get_document_ingest, get_document_store
 from remi.shell.api.documents.schemas import (
     DeleteResponse,

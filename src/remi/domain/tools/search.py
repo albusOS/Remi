@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
-from remi.domain.search.service import SearchService
+from remi.domain.intelligence.search.service import SearchService
 
 
 def register_search_tools(

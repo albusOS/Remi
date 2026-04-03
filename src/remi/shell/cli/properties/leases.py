@@ -29,7 +29,7 @@ async def _expiring(days: int, fmt_json: bool) -> None:
         data = _http.get(f"/leases/expiring?days={days}")
         items = data.get("leases", [])
     else:
-        from remi.domain.portfolio.models import LeaseStatus
+        from remi.domain.core.portfolio.models import LeaseStatus
 
         container = get_container()
         today = date.today()
@@ -94,7 +94,7 @@ async def _list_leases(property_id: str | None, status_str: str | None, fmt_json
         data = _http.get(f"/leases{qs}")
         items = data.get("leases", [])
     else:
-        from remi.domain.portfolio.models import LeaseStatus
+        from remi.domain.core.portfolio.models import LeaseStatus
 
         container = get_container()
         status = LeaseStatus(status_str) if status_str else None

@@ -20,7 +20,7 @@ from remi.shell.api.signals.schemas import (
     SignalSummary,
     SourceResult,
 )
-from remi.agent.signals.composite import CompositeProducer
+from remi.agent.signals.producers.composite import CompositeProducer
 from remi.shell.api.dependencies import (
     get_feedback_store,
     get_signal_pipeline,

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from remi.agent.graph.retriever import ResolvedEntity
+from remi.agent.graph.retrieval.retriever import ResolvedEntity
 from remi.agent.graph.types import KnowledgeLink
 from remi.agent.signals import CausalChain, DomainTBox, MutableTBox, Policy, Signal
 

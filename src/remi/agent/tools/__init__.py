@@ -2,5 +2,15 @@
 
 Sandbox, HTTP, memory, vectors, delegation, trace, and the tool registry
 are generic capabilities that could power any domain. They live here, not
-in ``tools/`` (which holds real-estate-specific agent capabilities).
+in ``domain/tools/`` (which holds real-estate-specific agent capabilities).
+
+Public API::
+
+    from remi.agent.tools import InMemoryToolRegistry
 """
+
+from remi.agent.tools.registry import InMemoryToolRegistry
+
+__all__ = [
+    "InMemoryToolRegistry",
+]

@@ -17,9 +17,9 @@ from remi.agent.context.frame import (
     PerceptionSnapshot,
     WorldState,
 )
-from remi.agent.graph.retriever import ResolvedEntity
-from remi.domain.ontology.schema import load_domain_yaml
-from remi.agent.signals.mem import InMemorySignalStore
+from remi.agent.graph.retrieval.retriever import ResolvedEntity
+from remi.domain.core.ontology.schema import load_domain_yaml
+from remi.agent.signals.persistence.mem import InMemorySignalStore
 
 # -- token utilities ----------------------------------------------------------
 

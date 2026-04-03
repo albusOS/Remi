@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from remi.agent.signals.composite import CompositeProducer
-from remi.agent.signals.composition import CompositionProducer
+from remi.agent.signals.producers.composite import CompositeProducer
+from remi.agent.signals.producers.composition import CompositionProducer
 from remi.agent.graph.types import KnowledgeProvenance
 from remi.agent.signals import (
     CompositionRule,
@@ -16,7 +16,7 @@ from remi.agent.signals import (
     Signal,
     SignalProducer,
 )
-from remi.agent.signals.mem import InMemorySignalStore
+from remi.agent.signals.persistence.mem import InMemorySignalStore
 
 
 @pytest.fixture

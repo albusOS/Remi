@@ -12,6 +12,11 @@ Strategy:
   row counts, numeric aggregates) and truncate the raw payload.
   The summary preserves enough signal for the LLM to reason without
   needing the full JSON.
+- When a MemoryStore is available (offload path): full payload is
+  written to the store under a deterministic key; only the summary +
+  a retrieval reference is kept in the thread.  The agent can re-read
+  via ``memory_recall``.  This is the "context = RAM, store = disk"
+  pattern from Manus.
 """
 
 from __future__ import annotations
@@ -19,7 +24,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from remi.agent.graph.stores import MemoryStore
+
 _TOKEN_THRESHOLD = 500
+_OFFLOAD_THRESHOLD = 1500
 _CHARS_PER_TOKEN = 4
 _MAX_SUMMARY_CHARS = 1600
 
@@ -47,6 +55,48 @@ def compress_tool_result(tool_name: str, result: Any) -> Any:
         return result
 
     return _summarize_structured(tool_name, result, serialized)
+
+
+async def compress_and_offload(
+    tool_name: str,
+    call_id: str,
+    result: Any,
+    memory: MemoryStore | None,
+    namespace: str,
+) -> Any:
+    """Compress a tool result, offloading large payloads to MemoryStore.
+
+    When *memory* is available and the result exceeds the offload
+    threshold, the full payload is persisted under a deterministic key
+    and a compact summary with a retrieval hint replaces it in the
+    thread.  The agent can fetch the full data via ``memory_recall``.
+
+    Falls back to ``compress_tool_result`` when no store is available
+    or when the result is small enough.
+    """
+    if isinstance(result, (str, int, float, bool)) or result is None:
+        return compress_tool_result(tool_name, result)
+
+    serialized = json.dumps(result, default=str)
+    tokens = _estimate_tokens(serialized)
+
+    if tokens <= _TOKEN_THRESHOLD:
+        return result
+
+    if memory is None or tokens < _OFFLOAD_THRESHOLD:
+        return _summarize_structured(tool_name, result, serialized)
+
+    offload_key = f"tool:{call_id}"
+    await memory.store(namespace, offload_key, serialized, ttl=3600)
+
+    summary = _summarize_structured(tool_name, result, serialized)
+    summary["_offloaded"] = True
+    summary["_recall_key"] = offload_key
+    summary["_recall_hint"] = (
+        f"Full {tokens}-token result saved. "
+        f'Retrieve with memory_recall(key="{offload_key}") if you need the complete data.'
+    )
+    return summary
 
 
 def _truncate_string(text: str) -> str:

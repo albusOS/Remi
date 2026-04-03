@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from remi.agent.graph.bridge import BridgedKnowledgeGraph
-from remi.domain.portfolio.models import (
+from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
+from remi.domain.core.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     Address,
@@ -22,10 +22,10 @@ from remi.domain.portfolio.models import (
     Unit,
     UnitStatus,
 )
-from remi.domain.queries.dashboard import DashboardQueryService
-from remi.domain.queries.managers import ManagerReviewService
-from remi.agent.graph.mem import InMemoryKnowledgeStore
-from remi.domain.stores.mem import InMemoryPropertyStore
+from remi.domain.intelligence.queries.dashboard import DashboardQueryService
+from remi.domain.intelligence.queries.managers import ManagerReviewService
+from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
+from remi.domain.core.stores.mem import InMemoryPropertyStore
 from remi.agent.tools.registry import InMemoryToolRegistry
 from remi.domain.tools.workflows import register_workflow_tools
 

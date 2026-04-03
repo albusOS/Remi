@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from remi.domain.evaluators.engine import EntailmentEngine
-from remi.domain.ontology.schema import load_domain_yaml
-from remi.domain.portfolio.models import (
+from remi.domain.monitoring.signals.engine import EntailmentEngine
+from remi.domain.core.ontology.schema import load_domain_yaml
+from remi.domain.core.portfolio.models import (
     Address,
     Portfolio,
     Property,
     PropertyManager,
 )
 from remi.agent.signals import DomainTBox
-from remi.domain.stores.mem import InMemoryPropertyStore
-from remi.agent.signals.mem import InMemorySignalStore
+from remi.domain.core.stores.mem import InMemoryPropertyStore
+from remi.agent.signals.persistence.mem import InMemorySignalStore
 
 
 @pytest.fixture

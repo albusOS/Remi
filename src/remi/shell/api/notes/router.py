@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from remi.types.errors import NotFoundError
-from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
 from remi.agent.graph.types import GraphObject
 from remi.shell.api.dependencies import get_knowledge_graph
 from remi.shell.api.schemas import DeletedResponse

@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from remi.agent.context.builder import build_context_builder
 from remi.agent.documents.types import DocumentStore
-from remi.agent.graph.bridge import BridgedKnowledgeGraph
-from remi.agent.graph.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
+from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
 from remi.agent.graph.stores import KnowledgeStore
 from remi.agent.ingestion.runner import IngestionPipelineRunner
 from remi.agent.llm.factory import LLMProviderFactory, build_provider_factory
@@ -29,7 +29,7 @@ from remi.agent.runtime.runner import ChatAgentService
 from remi.agent.sandbox.factory import build_sandbox
 from remi.agent.sandbox.types import Sandbox
 from remi.agent.signals import DomainTBox, FeedbackStore, MutableTBox, SignalStore
-from remi.agent.signals.mem import (
+from remi.agent.signals.persistence.mem import (
     InMemoryFeedbackStore,
     InMemorySignalStore,
 )
@@ -39,26 +39,26 @@ from remi.agent.types import ChatSessionStore, ToolRegistry
 from remi.agent.vectors.embedder import build_embedder
 from remi.agent.vectors.store import InMemoryVectorStore
 from remi.agent.vectors.types import Embedder, VectorStore
-from remi.domain.evaluators.pipeline import build_signal_pipeline
-from remi.domain.ingestion.embedding import EmbeddingPipeline
-from remi.domain.ingestion.pipeline import DocumentIngestService
-from remi.domain.ingestion.seed import SeedService
-from remi.domain.ingestion.service import IngestionService
-from remi.domain.ontology.bridge import build_knowledge_graph
-from remi.domain.ontology.schema import load_domain_yaml
-from remi.domain.ontology.seed import seed_knowledge_graph
-from remi.domain.portfolio.protocols import PropertyStore
-from remi.domain.queries.auto_assign import AutoAssignService
-from remi.domain.queries.dashboard import DashboardQueryService
-from remi.domain.queries.leases import LeaseQueryService
-from remi.domain.queries.maintenance import MaintenanceQueryService
-from remi.domain.queries.managers import ManagerReviewService
-from remi.domain.queries.portfolios import PortfolioQueryService
-from remi.domain.queries.properties import PropertyQueryService
-from remi.domain.queries.rent_roll import RentRollService
-from remi.domain.queries.snapshots import SnapshotService
-from remi.domain.search.service import SearchService
-from remi.domain.stores.factory import (
+from remi.domain.monitoring.signals.pipeline import build_signal_pipeline
+from remi.domain.ingestion.embedding.pipeline import EmbeddingPipeline
+from remi.domain.ingestion.documents.pipeline import DocumentIngestService
+from remi.domain.ingestion.seeding.service import SeedService
+from remi.domain.ingestion.documents.service import IngestionService
+from remi.domain.core.ontology.bridge import build_knowledge_graph
+from remi.domain.core.ontology.schema import load_domain_yaml
+from remi.domain.core.ontology.seed import seed_knowledge_graph
+from remi.domain.core.portfolio.protocols import PropertyStore
+from remi.domain.intelligence.queries.auto_assign import AutoAssignService
+from remi.domain.intelligence.queries.dashboard import DashboardQueryService
+from remi.domain.intelligence.queries.leases import LeaseQueryService
+from remi.domain.intelligence.queries.maintenance import MaintenanceQueryService
+from remi.domain.intelligence.queries.managers import ManagerReviewService
+from remi.domain.intelligence.queries.portfolios import PortfolioQueryService
+from remi.domain.intelligence.queries.properties import PropertyQueryService
+from remi.domain.intelligence.queries.rent_roll import RentRollService
+from remi.domain.monitoring.snapshots.service import SnapshotService
+from remi.domain.intelligence.search.service import SearchService
+from remi.domain.core.stores.factory import (
     build_document_store,
     build_property_store,
     build_rollup_store,

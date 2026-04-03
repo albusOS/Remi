@@ -51,7 +51,19 @@ class UsageSummary(BaseModel, frozen=True):
     total_completion_tokens: int = 0
     total_tokens: int = 0
     total_cache_read_tokens: int = 0
+    total_cache_creation_tokens: int = 0
     total_estimated_cost_usd: float = 0.0
+
+    @property
+    def cache_hit_ratio(self) -> float:
+        """Fraction of prompt tokens served from cache (0.0–1.0).
+
+        Higher is better — means more of the stable prefix is being
+        reused across iterations. Target: >0.5 for multi-turn runs.
+        """
+        if self.total_prompt_tokens == 0:
+            return 0.0
+        return self.total_cache_read_tokens / self.total_prompt_tokens
 
 
 class UsageBreakdown(BaseModel, frozen=True):
@@ -106,6 +118,7 @@ class LLMUsageLedger:
             total_completion_tokens=sum(r.completion_tokens for r in recs),
             total_tokens=sum(r.total_tokens for r in recs),
             total_cache_read_tokens=sum(r.cache_read_tokens for r in recs),
+            total_cache_creation_tokens=sum(r.cache_creation_tokens for r in recs),
             total_estimated_cost_usd=sum(r.estimated_cost_usd or 0.0 for r in recs),
         )
 

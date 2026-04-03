@@ -7,6 +7,12 @@ disabled* so the agent always produces a proper synthesis.
 
 Tool calls within a single LLM response are executed **concurrently**
 via ``asyncio.gather``.
+
+The loop maintains a **scratchpad** — a rolling system message at the
+tail of the thread that keeps the agent's working plan in recent
+context.  This is the Manus "todo.md" pattern: instead of relying on
+the model to hold its plan in memory across a growing context window,
+we materialize it as a message that the model sees on every iteration.
 """
 
 from __future__ import annotations
@@ -17,7 +23,8 @@ import json
 import structlog
 
 from remi.agent.config import AgentConfig, PhaseConfig
-from remi.agent.conversation.compression import compress_tool_result
+from remi.agent.conversation.compression import compress_and_offload, compress_tool_result
+from remi.agent.graph.stores import MemoryStore
 from remi.agent.conversation.thread import try_parse_json
 from remi.agent.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
 from remi.agent.observe.types import Tracer
@@ -28,6 +35,8 @@ from remi.agent.runtime.tool_executor import ToolExecutor
 from remi.agent.types import Message
 
 logger = structlog.get_logger("remi.agent.loop")
+
+_SCRATCHPAD_TAG = "[scratchpad]"
 
 
 def _build_phase_thresholds(
@@ -54,6 +63,8 @@ async def _execute_tool_call(
     iteration: int,
     tool_executor: ToolExecutor,
     emit: OnEventCallback,
+    memory: MemoryStore | None = None,
+    memory_namespace: str = "",
 ) -> Message:
     """Execute a single tool call with event emission. Returns the tool Message."""
     await emit(
@@ -65,8 +76,54 @@ async def _execute_tool_call(
         "tool_result",
         {"tool": tc.name, "call_id": tc.id, "result": _serialize_result(result)},
     )
-    compressed = compress_tool_result(tc.name, result)
+    compressed = await compress_and_offload(tc.name, tc.id, result, memory, memory_namespace)
     return Message(role="tool", name=tc.name, tool_call_id=tc.id, content=compressed)
+
+
+def _build_scratchpad(
+    iteration: int,
+    tool_round_budget: int,
+    tool_rounds_used: int,
+    phase_name: str | None,
+    tool_names_called: list[str],
+    last_assistant_text: str | None,
+) -> str:
+    """Build the scratchpad system message for the current iteration.
+
+    Keeps the agent's working state in recent context — the "todo.md"
+    pattern.  The model sees this on every iteration so it never loses
+    track of progress even in long tool-call chains.
+    """
+    parts = [f"{_SCRATCHPAD_TAG}"]
+    parts.append(f"Iteration {iteration + 1} | tools used {tool_rounds_used}/{tool_round_budget}")
+    if phase_name:
+        parts.append(f"Phase: {phase_name}")
+    if tool_names_called:
+        parts.append(f"Tools called this run: {', '.join(dict.fromkeys(tool_names_called))}")
+    if last_assistant_text:
+        trimmed = last_assistant_text[:300]
+        if len(last_assistant_text) > 300:
+            trimmed += "…"
+        parts.append(f"Last reasoning: {trimmed}")
+    remaining = tool_round_budget - tool_rounds_used
+    if remaining <= 2 and remaining > 0:
+        parts.append(f"⚠ {remaining} tool round(s) remaining — begin synthesizing")
+    elif remaining <= 0:
+        parts.append("⚠ Tool budget spent — produce your final answer now")
+    return "\n".join(parts)
+
+
+def _remove_previous_scratchpad(thread: list[Message]) -> None:
+    """Strip the previous scratchpad message from the thread (if any)."""
+    for i in range(len(thread) - 1, -1, -1):
+        msg = thread[i]
+        if (
+            msg.role == "system"
+            and isinstance(msg.content, str)
+            and msg.content.startswith(_SCRATCHPAD_TAG)
+        ):
+            thread.pop(i)
+            return
 
 
 async def run_agent_loop(
@@ -81,6 +138,8 @@ async def run_agent_loop(
     max_tool_rounds: int | None = None,
     routing_provider: LLMProvider | None = None,
     usage_ledger: LLMUsageLedger | None = None,
+    memory: MemoryStore | None = None,
+    memory_namespace: str = "",
 ) -> tuple[list[Message], TokenUsage]:
     """Execute the think-act-observe loop.
 
@@ -94,10 +153,11 @@ async def run_agent_loop(
     tool_defs = tool_executor.definitions
     produced_answer = False
 
-    all_tool_defs = list(tool_defs)
     phase_thresholds = _build_phase_thresholds(cfg.phases)
     next_phase_idx = 0
     current_phase_name: str | None = cfg.phases[0].name if cfg.phases else None
+    tool_names_called: list[str] = []
+    last_assistant_text: str | None = None
 
     for iteration in range(hard_cap):
         total_iterations = iteration + 1
@@ -115,13 +175,18 @@ async def run_agent_loop(
                 thread.append(Message(role="system", content=nudge))
 
                 if next_phase.tools:
-                    allowed = set(next_phase.tools)
-                    tool_defs = [td for td in all_tool_defs if td.name in allowed]
+                    preferred = ", ".join(next_phase.tools)
+                    thread.append(Message(
+                        role="system",
+                        content=(
+                            f"Preferred tools for {next_phase.name} phase: {preferred}. "
+                            "Focus on these tools but all tools remain available."
+                        ),
+                    ))
                     log.info(
-                        "phase_tool_pruning",
+                        "phase_tool_hint",
                         phase=next_phase.name,
-                        kept=len(tool_defs),
-                        total=len(all_tool_defs),
+                        preferred=next_phase.tools,
                     )
 
                 log.info(
@@ -141,6 +206,18 @@ async def run_agent_loop(
 
         budget_exhausted = tool_rounds_used >= tool_round_budget
         active_tools = None if budget_exhausted else (tool_defs or None)
+
+        if iteration > 0 and tool_round_budget > 1:
+            _remove_previous_scratchpad(thread)
+            scratchpad = _build_scratchpad(
+                iteration=iteration,
+                tool_round_budget=tool_round_budget,
+                tool_rounds_used=tool_rounds_used,
+                phase_name=current_phase_name,
+                tool_names_called=tool_names_called,
+                last_assistant_text=last_assistant_text,
+            )
+            thread.append(Message(role="system", content=scratchpad))
 
         log.debug(
             "iteration_start",
@@ -203,11 +280,14 @@ async def run_agent_loop(
             content = response.content or ""
             if cfg.response_format == "json":
                 content = try_parse_json(content)
+            _remove_previous_scratchpad(thread)
             thread.append(Message(role="assistant", content=content))
             produced_answer = True
             break
 
         tool_rounds_used += 1  # noqa: SIM113
+        last_assistant_text = response.content or None
+        tool_names_called.extend(tc.name for tc in response.tool_calls)
         thread.append(
             Message(
                 role="assistant",
@@ -217,11 +297,18 @@ async def run_agent_loop(
         )
 
         tool_messages = await asyncio.gather(
-            *[_execute_tool_call(tc, iteration, tool_executor, emit) for tc in response.tool_calls]
+            *[
+                _execute_tool_call(
+                    tc, iteration, tool_executor, emit,
+                    memory=memory, memory_namespace=memory_namespace,
+                )
+                for tc in response.tool_calls
+            ]
         )
         thread.extend(tool_messages)
 
     if not produced_answer:
+        _remove_previous_scratchpad(thread)
         log.info("hard_cap_synthesis", iterations=total_iterations)
         synth_request = LLMRequest(
             model=cfg.model or "",

@@ -1,15 +1,15 @@
-"""signals — signal system: types, stores, producers.
+"""signals — signal system: types, persistence, producers.
 
-Submodules:
-  enums        — Severity, RuleCondition, Horizon, Deontic, SignalOutcome, etc.
-  tbox         — SignalDefinition, Policy, CausalChain, DomainTBox, MutableTBox
-  signal       — Signal, ProducerResult, SignalProducer
-  feedback     — SignalFeedback, SignalFeedbackSummary
-  stores       — SignalStore, FeedbackStore ABCs
-  evaluation   — MakeSignalFn, EntailmentResult, signal_id (entailment primitives)
-  composition  — CompositionProducer (co-occurrence signal producer)
-  statistical  — StatisticalProducer (anomaly detection over KG)
-  composite    — CompositeProducer (pipeline runner for producers)
+Subpackages:
+  persistence/ — SignalStore, FeedbackStore ABCs + in-memory adapters
+  producers/   — CompositeProducer, CompositionProducer, StatisticalProducer
+
+Core modules (types layer):
+  enums      — Severity, RuleCondition, Horizon, Deontic, SignalOutcome
+  tbox       — SignalDefinition, Policy, CausalChain, DomainTBox, MutableTBox
+  signal     — Signal, ProducerResult, SignalProducer
+  feedback   — SignalFeedback, SignalFeedbackSummary
+  evaluation — MakeSignalFn, EntailmentResult, signal_id
 """
 
 from remi.agent.graph.types import KnowledgeProvenance as Provenance
@@ -22,8 +22,8 @@ from remi.agent.signals.enums import (
 )
 from remi.agent.signals.evaluation import EntailmentResult, MakeSignalFn, signal_id
 from remi.agent.signals.feedback import SignalFeedback, SignalFeedbackSummary
+from remi.agent.signals.persistence.stores import FeedbackStore, SignalStore
 from remi.agent.signals.signal import ProducerResult, Signal, SignalProducer
-from remi.agent.signals.stores import FeedbackStore, SignalStore
 from remi.agent.signals.tbox import (
     CausalChain,
     CompositionRule,
@@ -65,7 +65,7 @@ __all__ = [
     "EntailmentResult",
     "MakeSignalFn",
     "signal_id",
-    # stores
+    # stores (re-exported from persistence/)
     "FeedbackStore",
     "SignalStore",
 ]

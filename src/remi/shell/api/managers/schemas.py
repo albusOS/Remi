@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.domain.queries.managers import ManagerRanking
+from remi.domain.intelligence.queries.managers import ManagerRanking
 
 __all__ = ["ManagerRanking"]
 

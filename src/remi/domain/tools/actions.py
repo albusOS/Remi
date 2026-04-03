@@ -14,12 +14,12 @@ from typing import Any
 
 from remi.agent.graph.stores import KnowledgeGraph
 from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
-from remi.domain.portfolio.models import (
+from remi.domain.core.portfolio.models import (
     ActionItem,
     ActionItemPriority,
     ActionItemStatus,
 )
-from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.core.portfolio.protocols import PropertyStore
 
 
 def register_action_tools(

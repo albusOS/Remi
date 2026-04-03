@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from remi.domain.portfolio.models import UnitStatus
-from remi.domain.portfolio.protocols import PropertyStore
+from remi.domain.core.portfolio.models import UnitStatus
+from remi.domain.core.portfolio.protocols import PropertyStore
 from remi.shell.api.dependencies import get_property_store
 
 router = APIRouter(prefix="/units", tags=["units"])

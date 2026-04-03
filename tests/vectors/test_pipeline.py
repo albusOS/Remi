@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from remi.domain.portfolio.models import (
+from remi.domain.core.portfolio.models import (
     Address,
     Lease,
     LeaseStatus,
@@ -23,9 +23,9 @@ from remi.domain.portfolio.models import (
     Unit,
     UnitStatus,
 )
-from remi.domain.stores.mem import InMemoryPropertyStore
+from remi.domain.core.stores.mem import InMemoryPropertyStore
 from remi.agent.vectors.embedder import NoopEmbedder
-from remi.domain.ingestion.embedding import EmbeddingPipeline
+from remi.domain.ingestion.embedding.pipeline import EmbeddingPipeline
 from remi.agent.vectors.store import InMemoryVectorStore
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")

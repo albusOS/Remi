@@ -25,7 +25,7 @@ from remi.shell.api.ontology.schemas import (
     SearchResponse,
     TimelineResponse,
 )
-from remi.agent.graph.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
 from remi.shell.api.dependencies import get_knowledge_graph
 
 router = APIRouter(prefix="/ontology", tags=["ontology"])

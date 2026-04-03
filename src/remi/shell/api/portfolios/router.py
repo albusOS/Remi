@@ -9,9 +9,9 @@ from remi.shell.api.portfolios.schemas import (
     PortfolioDetail,
     PortfolioListResponse,
 )
-from remi.domain.queries.portfolios import PortfolioSummaryResult
-from remi.domain.portfolio.protocols import PortfolioRepository
-from remi.domain.queries.portfolios import PortfolioQueryService
+from remi.domain.intelligence.queries.portfolios import PortfolioSummaryResult
+from remi.domain.core.portfolio.protocols import PortfolioRepository
+from remi.domain.intelligence.queries.portfolios import PortfolioQueryService
 from remi.shell.api.dependencies import get_portfolio_query, get_property_store
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])

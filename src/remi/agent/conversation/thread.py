@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from remi.agent.runtime.base import Message
+from remi.agent.llm.types import Message
 from remi.agent.config import AgentConfig
 from remi.agent.context.frame import WorldState
 

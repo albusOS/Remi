@@ -22,6 +22,7 @@ __all__ = [
     "ToolCallRequest",
     "ToolArg",
     "ToolDefinition",
+    "ToolResult",
     "ChatSession",
     "AgentEvent",
     "ChatEvent",
@@ -93,6 +94,47 @@ class ChatSessionStore(abc.ABC):
 
     @abc.abstractmethod
     async def delete(self, session_id: str) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
+# Tool result — standard output contract for all tool implementations
+# ---------------------------------------------------------------------------
+
+
+class ToolResult(BaseModel):
+    """Standard output envelope for tool executions.
+
+    Every tool SHOULD return a ``ToolResult`` so the runtime and downstream
+    consumers can distinguish success from failure without inspecting
+    ad-hoc dict shapes.  Existing tools that return raw dicts continue to
+    work — the runtime serialises whatever it gets — but new tools should
+    adopt this contract.
+
+    Fields
+    ------
+    ok:
+        ``True`` when the tool completed successfully.
+    data:
+        The primary payload (search hits, action item, stats, etc.).
+        ``None`` on error.
+    error:
+        Human-readable error message.  ``None`` on success.
+    metadata:
+        Optional provenance, timing, or debug information.
+    """
+
+    ok: bool = True
+    data: Any = None
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def success(cls, data: Any, **meta: Any) -> ToolResult:
+        return cls(ok=True, data=data, metadata=meta)
+
+    @classmethod
+    def fail(cls, error: str, **meta: Any) -> ToolResult:
+        return cls(ok=False, error=error, metadata=meta)
 
 
 # ---------------------------------------------------------------------------
