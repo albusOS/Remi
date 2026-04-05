@@ -1,1 +1,0 @@
-"""AppFolio adapter."""

@@ -11,17 +11,24 @@ from dataclasses import dataclass, field
 
 import structlog
 
-from remi.agent.documents.types import DocumentStore
-from remi.agent.signals import SignalStore
-from remi.agent.vectors.types import Embedder, EmbeddingRecord, EmbeddingRequest, VectorStore
+from remi.application.core.protocols import (
+    DocumentRepository,
+    EmbedRequest,
+    PropertyStore,
+    TextIndexer,
+)
+from remi.application.services.embedding.sources import SignalStoreProtocol
 from remi.application.services.embedding.extraction import (
     extract_maintenance,
     extract_properties,
     extract_tenants,
     extract_units,
 )
-from remi.application.services.embedding.sources import extract_document_rows, extract_managers
-from remi.application.core.protocols import PropertyStore
+from remi.application.services.embedding.sources import (
+    extract_document_chunks,
+    extract_document_rows,
+    extract_managers,
+)
 
 _log = structlog.get_logger(__name__)
 
@@ -40,15 +47,13 @@ class EmbeddingPipeline:
     def __init__(
         self,
         property_store: PropertyStore,
-        vector_store: VectorStore,
-        embedder: Embedder,
-        document_store: DocumentStore | None = None,
-        signal_store: SignalStore | None = None,
+        text_indexer: TextIndexer,
+        document_repo: DocumentRepository | None = None,
+        signal_store: "SignalStoreProtocol | None" = None,
     ) -> None:
         self._ps = property_store
-        self._vs = vector_store
-        self._embedder = embedder
-        self._ds = document_store
+        self._indexer = text_indexer
+        self._doc_repo = document_repo
         self._ss = signal_store
 
     async def run_full(self) -> PipelineResult:
@@ -63,36 +68,16 @@ class EmbeddingPipeline:
             _log.info("embedding_pipeline_empty")
             return result
 
-        batch_size = 100
-        for i in range(0, len(requests), batch_size):
-            batch = requests[i : i + batch_size]
-            try:
-                vectors = await self._embedder.embed([r.text for r in batch])
-            except Exception:
-                _log.warning("embedding_batch_failed", batch_start=i, exc_info=True)
-                result.errors += len(batch)
-                continue
-
-            records = []
-            for req, vec in zip(batch, vectors, strict=False):
-                records.append(
-                    EmbeddingRecord(
-                        id=req.id,
-                        text=req.text,
-                        vector=vec,
-                        source_entity_id=req.source_entity_id,
-                        source_entity_type=req.source_entity_type,
-                        source_field=req.source_field,
-                        metadata=req.metadata,
-                    )
+        try:
+            indexed = await self._indexer.index_many(requests)
+            result.embedded = indexed
+            for req in requests[:indexed]:
+                result.by_type[req.source_entity_type] = (
+                    result.by_type.get(req.source_entity_type, 0) + 1
                 )
-
-            await self._vs.put_many(records)
-            result.embedded += len(records)
-            for rec in records:
-                result.by_type[rec.source_entity_type] = (
-                    result.by_type.get(rec.source_entity_type, 0) + 1
-                )
+        except Exception:
+            _log.warning("embedding_pipeline_index_failed", exc_info=True)
+            result.errors = len(requests)
 
         _log.info(
             "embedding_pipeline_complete",
@@ -102,13 +87,14 @@ class EmbeddingPipeline:
         )
         return result
 
-    async def _extract_all(self) -> list[EmbeddingRequest]:
-        requests: list[EmbeddingRequest] = []
+    async def _extract_all(self) -> list[EmbedRequest]:
+        requests: list[EmbedRequest] = []
         requests.extend(await extract_managers(self._ps, self._ss))
         requests.extend(await extract_tenants(self._ps))
         requests.extend(await extract_units(self._ps))
         requests.extend(await extract_maintenance(self._ps))
         requests.extend(await extract_properties(self._ps))
-        if self._ds is not None:
-            requests.extend(await extract_document_rows(self._ds))
+        if self._doc_repo is not None:
+            requests.extend(await extract_document_rows(self._doc_repo))
+            requests.extend(await extract_document_chunks(self._doc_repo))
         return requests

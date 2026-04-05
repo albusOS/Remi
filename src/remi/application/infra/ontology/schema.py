@@ -1,7 +1,7 @@
 """REMI knowledge graph schema — type registry, link types, and prompt helpers.
 
 Entity type definitions are **derived** from the Pydantic models in
-``application.core.models`` via ``agent.graph.retrieval.introspect``.  This
+``application.core.models`` via ``agent.graph.retrieval``.  This
 module owns the RE-specific registry (which models to introspect, descriptions,
 plural names), the structural and operational link types, the FK projection
 map, and the ``entity_schemas_for_prompt`` entry point.
@@ -20,11 +20,7 @@ from typing import Any
 
 import yaml
 
-from remi.agent.graph.retrieval.introspect import (
-    pydantic_to_type_defs,
-    schemas_for_prompt,
-)
-from remi.agent.graph.types import (
+from remi.agent.graph import (
     FKProjection,
     KnowledgeProvenance,
     LinkTypeDef,
@@ -32,6 +28,7 @@ from remi.agent.graph.types import (
     ProjectionMapping,
     PropertyDef,
 )
+from remi.agent.graph.retrieval import pydantic_to_type_defs, schemas_for_prompt
 from remi.application.core.models import (
     ActionItem,
     Lease,
@@ -199,6 +196,12 @@ _STRUCTURAL_LINKS: list[LinkTypeDef] = [
         source_type="*",
         target_type="Annotation",
         description="Entity has an attached annotation (note, comment, conflict, user context)",
+    ),
+    LinkTypeDef(
+        name="MENTIONS",
+        source_type="document",
+        target_type="*",
+        description="Document references or mentions a domain entity",
     ),
 ]
 

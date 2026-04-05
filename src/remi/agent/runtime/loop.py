@@ -23,9 +23,9 @@ import json
 import structlog
 
 from remi.agent.config import AgentConfig, PhaseConfig
-from remi.agent.conversation.compression import compress_and_offload, compress_tool_result
+from remi.agent.runtime.conversation.compression import compress_and_offload, compress_tool_result
 from remi.agent.graph.stores import MemoryStore
-from remi.agent.conversation.thread import try_parse_json
+from remi.agent.runtime.conversation.thread import try_parse_json
 from remi.agent.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger

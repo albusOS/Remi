@@ -11,26 +11,26 @@ from __future__ import annotations
 
 import structlog
 
-from remi.agent.graph.projector import GraphProjector
+from remi.agent.graph import GraphProjector
 from remi.application.core.models import (
     ActionItem,
+    ActionItemStatus,
     Lease,
+    LeaseStatus,
     MaintenanceRequest,
+    MaintenanceStatus,
     Note,
+    NoteProvenance,
+    OccupancyStatus,
     Owner,
     Portfolio,
     Property,
     PropertyManager,
     Tenant,
-    Unit,
-    Vendor,
-    ActionItemStatus,
-    LeaseStatus,
-    MaintenanceStatus,
-    NoteProvenance,
-    OccupancyStatus,
-    UnitStatus,
     TenantStatus,
+    Unit,
+    UnitStatus,
+    Vendor,
     VendorCategory,
 )
 from remi.application.core.protocols import PropertyStore

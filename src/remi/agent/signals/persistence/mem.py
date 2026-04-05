@@ -34,15 +34,6 @@ class InMemorySignalStore(SignalStore):
     def __init__(self) -> None:
         self._signals: dict[str, Signal] = {}
 
-    def dump_state(self) -> list[dict[str, object]]:
-        return [s.model_dump(mode="json") for s in self._signals.values()]
-
-    def load_state(self, data: list[dict[str, object]]) -> None:
-        self._signals.clear()
-        for raw in data:
-            sig = Signal.model_validate(raw)
-            self._signals[sig.signal_id] = sig
-
     async def put_signal(self, signal: Signal) -> None:
         self._signals[signal.signal_id] = signal
 
@@ -80,15 +71,6 @@ class InMemoryFeedbackStore(FeedbackStore):
 
     def __init__(self) -> None:
         self._entries: dict[str, SignalFeedback] = {}
-
-    def dump_state(self) -> list[dict[str, object]]:
-        return [f.model_dump(mode="json") for f in self._entries.values()]
-
-    def load_state(self, data: list[dict[str, object]]) -> None:
-        self._entries.clear()
-        for raw in data:
-            fb = SignalFeedback.model_validate(raw)
-            self._entries[fb.feedback_id] = fb
 
     async def record_feedback(self, feedback: SignalFeedback) -> None:
         self._entries[feedback.feedback_id] = feedback

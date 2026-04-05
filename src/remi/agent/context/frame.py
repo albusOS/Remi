@@ -130,4 +130,5 @@ class ContextFrame:
 
     # Rendered ABox prose (filled at injection boundary)
     signal_summary: str = ""
+    document_context: str = ""
     question: str | None = None

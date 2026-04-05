@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmt$, pct } from "@/lib/format";
@@ -10,35 +10,20 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { SearchBar } from "@/components/ui/SearchBar";
-import { SparklineChart } from "@/components/ui/SparklineChart";
 import type {
   ManagerListItem,
-  ManagerSnapshot,
   DelinquencyBoard,
   LeaseCalendar,
   VacancyTracker,
   NeedsManagerResponse,
 } from "@/lib/types";
 
-function TrendArrow({ prev, curr, invert }: { prev: number; curr: number; invert?: boolean }) {
-  const diff = curr - prev;
-  if (Math.abs(diff) < 0.001) return null;
-  const positive = invert ? diff < 0 : diff > 0;
-  return (
-    <span className={`text-[8px] font-bold ml-0.5 ${positive ? "text-ok" : "text-error"}`}>
-      {positive ? "▲" : "▼"}
-    </span>
-  );
-}
-
 function ManagerCard({
   m,
-  prev,
   allManagers,
   onRefresh,
 }: {
   m: ManagerListItem;
-  prev?: ManagerSnapshot | null;
   allManagers: ManagerListItem[];
   onRefresh: () => void;
 }) {
@@ -194,37 +179,30 @@ function ManagerCard({
             <p className="text-[9px] text-fg-faint uppercase truncate">Occ</p>
             <p className={`text-[11px] font-bold truncate ${m.occupancy_rate < 0.9 ? "text-warn" : "text-fg"}`}>
               {pct(m.occupancy_rate)}
-              {prev && <TrendArrow prev={prev.occupancy_rate} curr={m.occupancy_rate} />}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Revenue</p>
             <p className="text-[11px] font-bold text-fg truncate">
               {fmt$(m.total_actual_rent)}
-              {prev && <TrendArrow prev={prev.total_rent} curr={m.total_actual_rent} />}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">LTL</p>
             <p className={`text-[11px] font-bold truncate ${m.total_loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>
               {m.total_loss_to_lease > 0 ? fmt$(m.total_loss_to_lease) : "—"}
-              {prev && prev.loss_to_lease !== m.total_loss_to_lease && (
-                <TrendArrow prev={prev.loss_to_lease} curr={m.total_loss_to_lease} invert />
-              )}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Delinq</p>
             <p className={`text-[11px] font-bold truncate ${m.delinquent_count > 0 ? "text-error" : "text-fg-muted"}`}>
               {m.delinquent_count > 0 ? m.delinquent_count : "—"}
-              {prev && <TrendArrow prev={prev.delinquent_count} curr={m.delinquent_count} invert />}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Vacant</p>
             <p className={`text-[11px] font-bold truncate ${m.vacant > 0 ? "text-error" : "text-fg-muted"}`}>
               {m.vacant > 0 ? m.vacant : "—"}
-              {prev && <TrendArrow prev={prev.vacant} curr={m.vacant} invert />}
             </p>
           </div>
         </div>
@@ -271,14 +249,12 @@ export function Dashboard() {
   const [sortBy, setSortBy] = useState<SortKey>("issues");
 
   const { data: dashboardData, loading, refetch } = useApiQuery(async () => {
-    const [mgrs, del, lse, vac, nm, snaps, mhist] = await Promise.all([
+    const [mgrs, del, lse, vac, nm] = await Promise.all([
       api.listManagers().catch(() => []),
       api.delinquencyBoard().catch(() => null),
       api.leasesExpiring(90).catch(() => null),
       api.vacancyTracker().catch(() => null),
       api.needsManager().catch(() => null),
-      api.snapshots().catch(() => ({ total: 0, snapshots: [] })),
-      api.metricsHistory("manager", undefined, 90).catch(() => ({ entity_type: "manager", total: 0, snapshots: [] })),
     ]);
     return {
       managers: mgrs as ManagerListItem[],
@@ -286,8 +262,6 @@ export function Dashboard() {
       leases: lse as LeaseCalendar | null,
       vacancies: vac as VacancyTracker | null,
       needsMgr: nm as NeedsManagerResponse | null,
-      snapshots: snaps.snapshots as ManagerSnapshot[],
-      metricsHistory: mhist.snapshots as ManagerSnapshot[],
     };
   }, []);
 
@@ -296,61 +270,16 @@ export function Dashboard() {
   const leases = dashboardData?.leases ?? null;
   const vacancies = dashboardData?.vacancies ?? null;
   const needsMgr = dashboardData?.needsMgr ?? null;
-  const snapshots = dashboardData?.snapshots ?? [];
-  const metricsHistory = useMemo(
-    () => dashboardData?.metricsHistory ?? [],
-    [dashboardData],
-  );
 
   const activeMgrs = managers.filter((m) => m.total_units > 0 || m.property_count > 0);
   const sorted = sortManagers(activeMgrs, sortBy);
 
-  // Build a map from manager_id → second-to-last snapshot (for trend arrows)
-  const prevSnapshotMap = new Map<string, ManagerSnapshot>();
-  const byMgr = new Map<string, ManagerSnapshot[]>();
-  for (const s of snapshots) {
-    const arr = byMgr.get(s.manager_id) || [];
-    arr.push(s);
-    byMgr.set(s.manager_id, arr);
-  }
-  for (const [mid, arr] of byMgr) {
-    arr.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    if (arr.length >= 2) {
-      prevSnapshotMap.set(mid, arr[arr.length - 2]);
-    }
-  }
-
   const totalUnits = activeMgrs.reduce((s, m) => s + m.total_units, 0);
   const totalOccupied = activeMgrs.reduce((s, m) => s + m.occupied, 0);
-  const totalVacant = totalUnits - totalOccupied;
   const totalRevenue = activeMgrs.reduce((s, m) => s + m.total_actual_rent, 0);
   const totalLTL = activeMgrs.reduce((s, m) => s + m.total_loss_to_lease, 0);
-  const totalMarketRent = totalRevenue + totalLTL;
   const totalVacLoss = activeMgrs.reduce((s, m) => s + m.total_vacancy_loss, 0);
   const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
-  const captureRate = totalMarketRent > 0 ? totalRevenue / totalMarketRent : 1;
-
-  // Aggregate metrics history into portfolio-level sparkline data
-  const sparklineData = useMemo(() => {
-    if (metricsHistory.length === 0) return [];
-    const byDay = new Map<string, { occ: number[]; rev: number; delBal: number }>();
-    for (const s of metricsHistory) {
-      const day = s.timestamp.slice(0, 10);
-      const entry = byDay.get(day) || { occ: [], rev: 0, delBal: 0 };
-      entry.occ.push(s.occupancy_rate);
-      entry.rev += s.total_rent;
-      entry.delBal += s.delinquent_balance;
-      byDay.set(day, entry);
-    }
-    return [...byDay.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([day, v]) => ({
-        day,
-        occupancy: Math.round((v.occ.reduce((a, b) => a + b, 0) / v.occ.length) * 1000) / 10,
-        revenue: v.rev,
-        delinquency: v.delBal,
-      }));
-  }, [metricsHistory]);
 
   return (
     <PageContainer wide>
@@ -369,97 +298,7 @@ export function Dashboard() {
           <div className="text-sm text-fg-faint animate-pulse">Loading...</div>
         )}
 
-        {/* Portfolio KPIs */}
-        {sparklineData.length >= 2 && (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <SparklineChart
-              data={sparklineData}
-              dataKey="occupancy"
-              color={avgOcc >= 0.95 ? "var(--color-ok)" : avgOcc >= 0.9 ? "var(--color-warn)" : "var(--color-error)"}
-              label="Occupancy"
-              value={pct(avgOcc)}
-              valueFormatter={(v) => `${v.toFixed(1)}%`}
-            />
-            <SparklineChart
-              data={sparklineData}
-              dataKey="revenue"
-              color="var(--color-accent)"
-              label="Revenue"
-              value={fmt$(totalRevenue)}
-              valueFormatter={(v) => fmt$(v)}
-            />
-            <SparklineChart
-              data={sparklineData}
-              dataKey="delinquency"
-              color="var(--color-error)"
-              label="Delinquency"
-              value={sparklineData.length > 0 ? fmt$(sparklineData[sparklineData.length - 1].delinquency) : "$0"}
-              valueFormatter={(v) => fmt$(v)}
-              invertTrend
-            />
-            {/* Loss to Lease: proportion bar — how much of market rent are you capturing? */}
-            <div className="rounded-2xl border border-border bg-surface p-4 min-w-0 flex-1">
-              <p className="text-[10px] font-semibold text-fg-faint uppercase tracking-wide mb-1">
-                Loss to Lease
-              </p>
-              <p className="text-xl font-bold text-fg tabular-nums mb-2">{fmt$(totalLTL)}</p>
-              <div className="space-y-1.5">
-                <div className="h-2 rounded-full bg-surface-sunken overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(captureRate * 100, 100)}%`,
-                      background: captureRate >= 0.98 ? "var(--color-ok)" : captureRate >= 0.95 ? "var(--color-warn)" : "var(--color-error)",
-                    }}
-                  />
-                </div>
-                <div className="flex justify-between text-[9px]">
-                  <span className="text-fg-faint">
-                    {(captureRate * 100).toFixed(1)}% of market captured
-                  </span>
-                  <span className="text-fg-ghost">{fmt$(totalMarketRent)}</span>
-                </div>
-              </div>
-            </div>
-            {/* Units: composition ring — occupied vs vacant */}
-            <div className="rounded-2xl border border-border bg-surface p-4 min-w-0 flex-1">
-              <p className="text-[10px] font-semibold text-fg-faint uppercase tracking-wide mb-1">
-                Units
-              </p>
-              <p className="text-xl font-bold text-fg tabular-nums mb-2">
-                {totalOccupied.toLocaleString()}
-                <span className="text-sm font-normal text-fg-faint ml-1">
-                  / {totalUnits.toLocaleString()}
-                </span>
-              </p>
-              <div className="flex items-center gap-3">
-                <svg viewBox="0 0 36 36" className="w-12 h-12 shrink-0 -rotate-90">
-                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--color-error)" strokeWidth="3.5" strokeOpacity="0.15" />
-                  <circle
-                    cx="18" cy="18" r="15.9" fill="none"
-                    stroke={avgOcc >= 0.95 ? "var(--color-ok)" : avgOcc >= 0.9 ? "var(--color-warn)" : "var(--color-error)"}
-                    strokeWidth="3.5"
-                    strokeDasharray={`${avgOcc * 100} ${100 - avgOcc * 100}`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="text-[9px] space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-ok shrink-0" />
-                    <span className="text-fg-muted">{totalOccupied.toLocaleString()} occupied</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-error/30 shrink-0" />
-                    <span className="text-fg-muted">{totalVacant.toLocaleString()} vacant</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Fallback KPI strip when no sparkline data yet */}
-        {sparklineData.length < 2 && !loading && activeMgrs.length > 0 && (
+        {!loading && activeMgrs.length > 0 && (
           <MetricStrip>
             <MetricCard label="Occupancy" value={pct(avgOcc)} trend={avgOcc >= 0.95 ? "up" : avgOcc >= 0.9 ? "flat" : "down"} />
             <MetricCard label="Monthly Revenue" value={fmt$(totalRevenue)} />
@@ -527,7 +366,7 @@ export function Dashboard() {
         {/* Manager cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {sorted.map((m) => (
-            <ManagerCard key={m.id} m={m} prev={prevSnapshotMap.get(m.id)} allManagers={activeMgrs} onRefresh={refetch} />
+            <ManagerCard key={m.id} m={m} allManagers={activeMgrs} onRefresh={refetch} />
           ))}
         </div>
 

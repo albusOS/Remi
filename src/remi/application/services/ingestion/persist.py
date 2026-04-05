@@ -11,7 +11,7 @@ from typing import Any
 
 import structlog
 
-from remi.agent.graph.stores import KnowledgeStore
+from remi.application.core.protocols import KnowledgeWriter, PropertyStore
 from remi.application.services.ingestion.base import IngestionResult, RowWarning
 from remi.application.services.ingestion.context import IngestionCtx
 from remi.application.services.ingestion.managers import (
@@ -20,7 +20,6 @@ from remi.application.services.ingestion.managers import (
 )
 from remi.application.services.ingestion.persisters import ROW_PERSISTERS
 from remi.application.services.ingestion.resolver import property_name, resolve_row_type
-from remi.application.core.protocols import PropertyStore
 from remi.types.text import slugify
 
 _log = structlog.get_logger(__name__)
@@ -33,7 +32,7 @@ async def resolve_and_persist(
     platform: str,
     doc_id: str,
     namespace: str,
-    kb: KnowledgeStore,
+    kb: KnowledgeWriter,
     ps: PropertyStore,
     manager_resolver: ManagerResolver,
     result: IngestionResult,

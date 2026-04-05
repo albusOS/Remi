@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from remi.agent.sandbox.types import ExecStatus
 from remi.agent.sandbox.local import LocalSandbox
+from remi.agent.sandbox.types import ExecStatus
 from remi.agent.tools.registry import InMemoryToolRegistry
-from remi.agent.tools.sandbox import register_sandbox_tools
+from remi.agent.tools.sandbox import SandboxToolProvider
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def sandbox(tmp_path: Path) -> LocalSandbox:
 @pytest.fixture
 def registry(sandbox: LocalSandbox) -> InMemoryToolRegistry:
     reg = InMemoryToolRegistry()
-    register_sandbox_tools(reg, sandbox=sandbox)
+    SandboxToolProvider(sandbox).register(reg)
     return reg
 
 
@@ -196,7 +196,7 @@ async def test_session_id_injection(sandbox: LocalSandbox) -> None:
     with only session_id in args (auto-create via _ensure_session).
     """
     reg = InMemoryToolRegistry()
-    register_sandbox_tools(reg, sandbox=sandbox)
+    SandboxToolProvider(sandbox).register(reg)
 
     session_id = "injected-session"
     await sandbox.create_session(session_id)

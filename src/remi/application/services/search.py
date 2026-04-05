@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
-from remi.agent.vectors.types import Embedder, SearchResult, VectorStore
+from remi.application.core.protocols import TextSearchHit, VectorSearch
 
 _log = structlog.get_logger(__name__)
 
@@ -25,6 +25,7 @@ _ENTITY_TYPE_LABELS: dict[str, str] = {
     "Unit": "Unit",
     "MaintenanceRequest": "Maintenance",
     "DocumentRow": "Document",
+    "DocumentChunk": "Document",
 }
 
 
@@ -38,29 +39,31 @@ class SearchHit(BaseModel, frozen=True):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _title_for(result: SearchResult) -> str:
-    meta = result.record.metadata
-    et = result.record.source_entity_type
+def _title_for(hit: TextSearchHit) -> str:
+    meta = hit.metadata
+    et = hit.entity_type
     if et == "PropertyManager":
-        return meta.get("manager_name", result.record.source_entity_id)
+        return meta.get("manager_name", hit.entity_id)
     if et == "Property":
-        return meta.get("property_name", result.record.source_entity_id)
+        return meta.get("property_name", hit.entity_id)
     if et == "Tenant":
-        return meta.get("tenant_name", result.record.source_entity_id)
+        return meta.get("tenant_name", hit.entity_id)
     if et == "Unit":
         pname = meta.get("property_name", "")
-        return f"Unit at {pname}" if pname else result.record.source_entity_id
+        return f"Unit at {pname}" if pname else hit.entity_id
     if et == "MaintenanceRequest":
         pname = meta.get("property_name", "")
         return f"Maintenance — {pname}" if pname else "Maintenance Request"
     if et == "DocumentRow":
         return meta.get("filename", "Document Row")
-    return result.record.source_entity_id
+    if et == "DocumentChunk":
+        return meta.get("filename", "Document")
+    return hit.entity_id
 
 
-def _subtitle_for(result: SearchResult) -> str:
-    meta = result.record.metadata
-    et = result.record.source_entity_type
+def _subtitle_for(hit: TextSearchHit) -> str:
+    meta = hit.metadata
+    et = hit.entity_type
     if et == "PropertyManager":
         parts: list[str] = []
         if meta.get("company"):
@@ -83,28 +86,30 @@ def _subtitle_for(result: SearchResult) -> str:
         return " · ".join(parts_m)
     if et == "DocumentRow":
         return meta.get("report_type", "")
+    if et == "DocumentChunk":
+        page = meta.get("page")
+        return f"Page {page}" if page is not None else ""
     return ""
 
 
-def _hit_from_result(result: SearchResult) -> SearchHit:
-    et = result.record.source_entity_type
+def _search_hit_from(raw: TextSearchHit) -> SearchHit:
+    et = raw.entity_type
     return SearchHit(
-        entity_id=result.record.source_entity_id,
+        entity_id=raw.entity_id,
         entity_type=et,
         label=_ENTITY_TYPE_LABELS.get(et, et),
-        title=_title_for(result),
-        subtitle=_subtitle_for(result),
-        score=result.score,
-        metadata=result.record.metadata,
+        title=_title_for(raw),
+        subtitle=_subtitle_for(raw),
+        score=raw.score,
+        metadata=raw.metadata,
     )
 
 
 class SearchService:
-    """Hybrid keyword + semantic search over the vector store."""
+    """Hybrid keyword + semantic search over the vector index."""
 
-    def __init__(self, vector_store: VectorStore, embedder: Embedder) -> None:
-        self._vs = vector_store
-        self._embedder = embedder
+    def __init__(self, vector_search: VectorSearch) -> None:
+        self._vs = vector_search
 
     async def search(
         self,
@@ -120,44 +125,40 @@ class SearchService:
         query = query.strip()
         seen: dict[str, SearchHit] = {}
 
-        keyword_results = await self._vs.metadata_text_search(
+        keyword_results = await self._vs.keyword_search(
             query,
             fields=_KEYWORD_FIELDS,
             limit=limit * 2,
         )
         for r in keyword_results:
-            hit = _hit_from_result(r)
+            hit = _search_hit_from(r)
             if types and hit.entity_type not in types:
                 continue
-            if manager_id and r.record.metadata.get("manager_id") != manager_id:
+            if manager_id and r.metadata.get("manager_id") != manager_id:
                 continue
             if hit.entity_id not in seen:
                 seen[hit.entity_id] = hit
 
         if len(seen) < limit:
+            metadata_filter: dict[str, Any] | None = None
+            if manager_id:
+                metadata_filter = {"manager_id": manager_id}
+
             try:
-                vector = await self._embedder.embed_one(query)
-            except Exception:
-                _log.warning("search_embed_failed", query=query[:100], exc_info=True)
-                vector = None
-
-            if vector is not None:
-                metadata_filter: dict[str, Any] | None = None
-                if manager_id:
-                    metadata_filter = {"manager_id": manager_id}
-
-                semantic_results = await self._vs.search(
-                    vector,
+                semantic_results = await self._vs.semantic_search(
+                    query,
                     limit=limit,
                     min_score=0.3,
                     metadata_filter=metadata_filter,
                 )
                 for r in semantic_results:
-                    hit = _hit_from_result(r)
+                    hit = _search_hit_from(r)
                     if types and hit.entity_type not in types:
                         continue
                     if hit.entity_id not in seen or hit.score > seen[hit.entity_id].score:
                         seen[hit.entity_id] = hit
+            except Exception:
+                _log.warning("search_semantic_failed", query=query[:100], exc_info=True)
 
         results = sorted(seen.values(), key=lambda h: h.score, reverse=True)
         return results[:limit]

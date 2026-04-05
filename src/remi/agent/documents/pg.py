@@ -8,8 +8,13 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import select
 
-from remi.agent.documents.types import Document, DocumentStore
 from remi.agent.db.tables import DocumentRow
+from remi.agent.documents.types import (
+    Document,
+    DocumentKind,
+    DocumentStore,
+    TextChunk,
+)
 
 
 def _json_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -26,20 +31,46 @@ def _json_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _chunks_to_json(chunks: list[TextChunk]) -> list[dict[str, Any]]:
+    return [c.model_dump() for c in chunks]
+
+
+def _chunks_from_json(data: list[dict[str, Any]]) -> list[TextChunk]:
+    return [TextChunk(**c) for c in data]
+
+
 def _doc_from_row(row: DocumentRow) -> Document:
+    meta = row.doc_metadata or {}
     return Document(
         id=row.id,
         filename=row.filename,
         content_type=row.content_type,
         uploaded_at=row.uploaded_at,
+        kind=DocumentKind(meta.get("kind", "tabular")),
         row_count=row.row_count,
         column_names=row.column_names,
         rows=row.rows,
-        metadata=row.doc_metadata,
+        chunks=_chunks_from_json(meta.get("chunks", [])),
+        raw_text=meta.get("raw_text", ""),
+        page_count=meta.get("page_count", 0),
+        tags=meta.get("tags", []),
+        size_bytes=meta.get("size_bytes", 0),
+        metadata={k: v for k, v in meta.items() if k not in {
+            "kind", "chunks", "raw_text", "page_count", "tags", "size_bytes",
+        }},
     )
 
 
 def _doc_to_row(doc: Document) -> DocumentRow:
+    meta = dict(doc.metadata)
+    meta.update({
+        "kind": doc.kind.value,
+        "chunks": _chunks_to_json(doc.chunks),
+        "raw_text": doc.raw_text,
+        "page_count": doc.page_count,
+        "tags": doc.tags,
+        "size_bytes": doc.size_bytes,
+    })
     return DocumentRow(
         id=doc.id,
         filename=doc.filename,
@@ -48,7 +79,7 @@ def _doc_to_row(doc: Document) -> DocumentRow:
         row_count=doc.row_count,
         column_names=list(doc.column_names),
         rows=_json_safe_rows(doc.rows),
-        doc_metadata=dict(doc.metadata),
+        doc_metadata=meta,
     )
 
 
@@ -59,19 +90,20 @@ class PostgresDocumentStore(DocumentStore):
         self._session_factory = session_factory
 
     async def save(self, document: Document) -> None:
+        row = _doc_to_row(document)
         async with self._session_factory() as session:
             existing = await session.get(DocumentRow, document.id)
             if existing:
-                existing.filename = document.filename
-                existing.content_type = document.content_type
-                existing.uploaded_at = document.uploaded_at
-                existing.row_count = document.row_count
-                existing.column_names = list(document.column_names)
-                existing.rows = _json_safe_rows(document.rows)
-                existing.doc_metadata = dict(document.metadata)
+                existing.filename = row.filename
+                existing.content_type = row.content_type
+                existing.uploaded_at = row.uploaded_at
+                existing.row_count = row.row_count
+                existing.column_names = row.column_names
+                existing.rows = row.rows
+                existing.doc_metadata = row.doc_metadata
                 session.add(existing)
             else:
-                session.add(_doc_to_row(document))
+                session.add(row)
             await session.commit()
 
     async def get(self, document_id: str) -> Document | None:
@@ -115,3 +147,38 @@ class PostgresDocumentStore(DocumentStore):
                     rows = [r for r in rows if str(r.get(col, "")) == str(val)]
 
         return rows[:limit]
+
+    async def search_documents(
+        self,
+        *,
+        query: str | None = None,
+        kind: DocumentKind | None = None,
+        tags: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[Document]:
+        docs = await self.list_documents()
+
+        if kind is not None:
+            docs = [d for d in docs if d.kind == kind]
+
+        if tags:
+            tag_set = set(tags)
+            docs = [d for d in docs if tag_set & set(d.tags)]
+
+        if query:
+            q = query.lower()
+            docs = [d for d in docs if q in d.filename.lower()]
+
+        return docs[:limit]
+
+    async def update_tags(self, document_id: str, tags: list[str]) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(DocumentRow, document_id)
+            if row is None:
+                return False
+            meta = dict(row.doc_metadata or {})
+            meta["tags"] = tags
+            row.doc_metadata = meta
+            session.add(row)
+            await session.commit()
+            return True

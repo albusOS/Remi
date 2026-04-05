@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.agent.sandbox.types import Sandbox
+from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 
 _DEFAULT_SESSION = "agent-default"
 
@@ -189,15 +189,3 @@ class SandboxToolProvider(ToolProvider):
                 args=[],
             ),
         )
-
-
-# COMPAT: tests and existing code call this directly
-def register_sandbox_tools(
-    registry: ToolRegistry,
-    *,
-    sandbox: Sandbox | None = None,
-    data_bridge_hint: str = "",
-) -> None:
-    if sandbox is None:
-        return
-    SandboxToolProvider(sandbox, data_bridge_hint=data_bridge_hint).register(registry)

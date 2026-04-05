@@ -4,27 +4,26 @@ from __future__ import annotations
 
 import typer
 
-from remi.application.cli.agents import ai_cmd
-from remi.application.cli.bench import cmd as bench_cmd
-from remi.application.cli.db import cmd as db_cmd
-from remi.application.cli.demo import cmd as demo_cmd
-from remi.application.cli.documents import cmd as documents_cmd
-from remi.application.cli.graph import cmd as graph_cmd
-from remi.application.cli.ontology import cmd as onto_cmd
-from remi.application.cli.properties import (
-    leases_cmd,
-    maintenance_cmd,
-    portfolio_cmd,
-    property_cmd,
-    report_cmd,
-    tenants_cmd,
-    units_cmd,
-)
-from remi.application.cli.research import cmd as research_cmd
-from remi.application.cli.search import cmd as search_cmd
-from remi.application.cli.seed import cmd as seed_cmd
-from remi.application.cli.trace import cmd as trace_cmd
-from remi.application.cli.vectors import cmd as vectors_cmd
+from remi.application.cli.intelligence.graph import cmd as graph_cmd
+from remi.application.cli.intelligence.ontology import cmd as onto_cmd
+from remi.application.cli.intelligence.research import cmd as research_cmd
+from remi.application.cli.intelligence.search import cmd as search_cmd
+from remi.application.cli.intelligence.trace import cmd as trace_cmd
+from remi.application.cli.operations.leases import cmd as leases_cmd
+from remi.application.cli.operations.maintenance import cmd as maintenance_cmd
+from remi.application.cli.operations.tenants import cmd as tenants_cmd
+from remi.application.cli.portfolio.managers import cmd as managers_cmd
+from remi.application.cli.portfolio.portfolios import cmd as portfolio_cmd
+from remi.application.cli.portfolio.property import cmd as property_cmd
+from remi.application.cli.portfolio.rent_roll import cmd as report_cmd
+from remi.application.cli.portfolio.units import cmd as units_cmd
+from remi.application.cli.system.agents import ai_cmd
+from remi.application.cli.system.bench import cmd as bench_cmd
+from remi.application.cli.system.db import cmd as db_cmd
+from remi.application.cli.system.demo import cmd as demo_cmd
+from remi.application.cli.system.documents import cmd as documents_cmd
+from remi.application.cli.system.seed import cmd as seed_cmd
+from remi.application.cli.system.vectors import cmd as vectors_cmd
 
 cli = typer.Typer(
     name="remi",
@@ -34,6 +33,7 @@ cli = typer.Typer(
 
 cli.add_typer(ai_cmd)
 cli.add_typer(research_cmd)
+cli.add_typer(managers_cmd)
 cli.add_typer(portfolio_cmd)
 cli.add_typer(property_cmd)
 cli.add_typer(units_cmd)
@@ -60,7 +60,7 @@ def dashboard(
 ) -> None:
     """Open the live portfolio dashboard (Textual TUI)."""
     try:
-        from remi.application.cli.dashboard import run as run_dashboard
+        from remi.application.cli.intelligence.dashboard import run as run_dashboard
     except ImportError as exc:
         typer.echo(f"Dashboard requires textual: {exc}", err=True)
         raise typer.Exit(1) from exc

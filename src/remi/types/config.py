@@ -43,7 +43,6 @@ class ApiSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: list[str] = Field(default_factory=list)
-    capture_interval_minutes: int = 60
 
 
 class LLMSettings(BaseModel):
@@ -78,6 +77,47 @@ class EmbeddingsSettings(BaseModel):
     dimensions: int = 1536
 
 
+# ---------------------------------------------------------------------------
+# Agent-layer store backend selectors
+# ---------------------------------------------------------------------------
+
+
+class VectorStoreSettings(BaseModel):
+    """Vector store backend — ``memory`` for dev, ``postgres`` for pgvector."""
+
+    backend: str = "memory"
+
+
+class KnowledgeStoreSettings(BaseModel):
+    """Knowledge graph persistence — ``memory``, ``postgres``, or ``neo4j``."""
+
+    backend: str = "memory"
+
+
+class MemoryStoreSettings(BaseModel):
+    """Episodic memory backend — ``memory`` or ``postgres``."""
+
+    backend: str = "memory"
+
+
+class SignalStoreSettings(BaseModel):
+    """Signal and feedback persistence — ``memory`` or ``postgres``."""
+
+    backend: str = "memory"
+
+
+class TraceStoreSettings(BaseModel):
+    """Trace/span persistence — ``memory`` or ``postgres``."""
+
+    backend: str = "memory"
+
+
+class SessionStoreSettings(BaseModel):
+    """Chat session persistence — ``memory`` or ``postgres``."""
+
+    backend: str = "memory"
+
+
 class RemiSettings(BaseModel):
     environment: str = "development"
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
@@ -88,3 +128,9 @@ class RemiSettings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings)
+    vectors: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    knowledge: KnowledgeStoreSettings = Field(default_factory=KnowledgeStoreSettings)
+    memory: MemoryStoreSettings = Field(default_factory=MemoryStoreSettings)
+    signals: SignalStoreSettings = Field(default_factory=SignalStoreSettings)
+    tracing: TraceStoreSettings = Field(default_factory=TraceStoreSettings)
+    sessions: SessionStoreSettings = Field(default_factory=SessionStoreSettings)

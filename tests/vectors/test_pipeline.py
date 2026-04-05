@@ -25,8 +25,9 @@ from remi.application.core.models import (
 )
 from remi.application.infra.stores.mem import InMemoryPropertyStore
 from remi.agent.vectors.embedder import NoopEmbedder
-from remi.application.services.embedding.pipeline import EmbeddingPipeline
 from remi.agent.vectors.store import InMemoryVectorStore
+from remi.application.infra.ports import AgentTextIndexer
+from remi.application.services.embedding.pipeline import EmbeddingPipeline
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 
@@ -54,8 +55,7 @@ def pipeline(
 ) -> EmbeddingPipeline:
     return EmbeddingPipeline(
         property_store=property_store,
-        vector_store=vector_store,
-        embedder=embedder,
+        text_indexer=AgentTextIndexer(embedder, vector_store),
     )
 
 

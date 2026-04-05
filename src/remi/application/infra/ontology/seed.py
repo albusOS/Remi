@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from remi.agent.graph.stores import KnowledgeGraph
-from remi.agent.graph.types import KnowledgeProvenance
-from remi.agent.signals.tbox import CausalChain, DomainTBox, Policy, WorkflowSeed
+from remi.agent.graph import KnowledgeGraph, KnowledgeProvenance
+from remi.agent.signals import CausalChain, DomainTBox, Policy, WorkflowSeed
 from remi.application.infra.ontology.schema import (
     _ALL_TYPE_DEFS,
     _OPERATIONAL_LINKS,

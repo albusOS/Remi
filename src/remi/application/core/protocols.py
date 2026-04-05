@@ -3,11 +3,17 @@
 New code should depend on the narrowest protocol it actually needs.
 ``PropertyStore`` is a composite that inherits every protocol for
 backward compatibility.
+
+Infrastructure ports (KnowledgeWriter, DocumentParser, etc.) decouple
+``application/services/`` from ``agent/`` primitives.  Implementations
+live in ``application/infra/``.
 """
 
 from __future__ import annotations
 
 import abc
+from dataclasses import dataclass, field
+from typing import Any
 
 from remi.application.core.models import (
     ActionItem,
@@ -246,3 +252,200 @@ class PropertyStore(
     """Full property store — prefer narrow per-entity protocols in new code."""
 
     pass
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure ports — decouple services from agent/ primitives
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class KBEntity:
+    """Application-level representation of a knowledge-graph entity."""
+
+    entity_id: str
+    entity_type: str
+    namespace: str
+    properties: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class KBRelationship:
+    """Application-level representation of a knowledge-graph relationship."""
+
+    source_id: str
+    target_id: str
+    relation_type: str
+    namespace: str
+
+
+class KnowledgeWriter(abc.ABC):
+    """Port for writing entities and relationships to the knowledge graph.
+
+    Hides agent.graph.KnowledgeStore from application services that only
+    need to persist extracted knowledge (ingestion, apply, etc.).
+    """
+
+    @abc.abstractmethod
+    async def put_entity(self, entity: KBEntity) -> None: ...
+
+    @abc.abstractmethod
+    async def get_entity(self, namespace: str, entity_id: str) -> KBEntity | None: ...
+
+    @abc.abstractmethod
+    async def put_relationship(self, rel: KBRelationship) -> None: ...
+
+
+class KnowledgeReader(abc.ABC):
+    """Port for reading knowledge-graph data from application services.
+
+    Provides the narrow query surface that dashboard, auto-assign, and
+    search need — without exposing the full KnowledgeStore API.
+    """
+
+    @abc.abstractmethod
+    async def find_entities(
+        self,
+        namespace: str,
+        entity_type: str | None = None,
+        *,
+        limit: int = 20,
+    ) -> list[KBEntity]: ...
+
+    @abc.abstractmethod
+    async def list_namespaces(self) -> list[str]: ...
+
+
+@dataclass
+class ParsedTextChunk:
+    """Application-level text chunk — mirrors agent TextChunk."""
+
+    index: int
+    text: str
+    page: int | None = None
+
+
+@dataclass
+class ParsedDocument:
+    """Application-level parsed document — decouples from agent.documents.Document."""
+
+    id: str
+    filename: str
+    content_type: str
+    kind: str = "tabular"
+
+    # Tabular
+    column_names: list[str] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)
+    row_count: int = 0
+
+    # Text
+    chunks: list[ParsedTextChunk] = field(default_factory=list)
+    raw_text: str = ""
+    page_count: int = 0
+
+    # Shared
+    tags: list[str] = field(default_factory=list)
+    size_bytes: int = 0
+    effective_date: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class DocumentParser(abc.ABC):
+    """Port for parsing raw uploads into structured documents."""
+
+    @abc.abstractmethod
+    def parse(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        *,
+        extra_skip_patterns: tuple[str, ...] = (),
+    ) -> ParsedDocument: ...
+
+
+class DocumentRepository(abc.ABC):
+    """Port for persisting and listing parsed documents."""
+
+    @abc.abstractmethod
+    async def save(self, doc: ParsedDocument) -> None: ...
+
+    @abc.abstractmethod
+    async def get(self, doc_id: str) -> ParsedDocument | None: ...
+
+    @abc.abstractmethod
+    async def list_documents(self) -> list[ParsedDocument]: ...
+
+    @abc.abstractmethod
+    async def search_documents(
+        self,
+        *,
+        query: str | None = None,
+        kind: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[ParsedDocument]: ...
+
+    @abc.abstractmethod
+    async def update_tags(self, doc_id: str, tags: list[str]) -> bool: ...
+
+
+@dataclass
+class EmbedRequest:
+    """Application-level embedding request — what text to embed for which entity."""
+
+    id: str
+    text: str
+    source_entity_id: str
+    source_entity_type: str
+    source_field: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TextSearchHit:
+    """A single result from vector search."""
+
+    entity_id: str
+    entity_type: str
+    text: str
+    score: float
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class TextIndexer(abc.ABC):
+    """Port for embedding and storing text vectors.
+
+    Collapses Embedder + VectorStore into a single service boundary
+    for application code that just needs "embed this text, store it."
+    """
+
+    @abc.abstractmethod
+    async def index_many(self, requests: list[EmbedRequest]) -> int:
+        """Embed and store. Returns count successfully indexed."""
+        ...
+
+
+class VectorSearch(abc.ABC):
+    """Port for keyword + semantic search over the vector index."""
+
+    @abc.abstractmethod
+    async def keyword_search(
+        self,
+        query: str,
+        *,
+        fields: list[str] | None = None,
+        limit: int = 10,
+    ) -> list[TextSearchHit]: ...
+
+    @abc.abstractmethod
+    async def semantic_search(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        min_score: float = 0.0,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[TextSearchHit]: ...

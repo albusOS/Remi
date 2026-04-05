@@ -20,6 +20,7 @@ from remi.application.core.models import (
     Note,
     NoteProvenance,
     OccupancyStatus,
+    Owner,
     Portfolio,
     Priority,
     Property,
@@ -29,17 +30,21 @@ from remi.application.core.models import (
     TenantStatus,
     Unit,
     UnitStatus,
+    Vendor,
+    VendorCategory,
 )
 from remi.application.infra.stores.pg.tables import (
     ActionItemRow,
     LeaseRow,
     MaintenanceRequestRow,
     NoteRow,
+    OwnerRow,
     PortfolioRow,
     PropertyManagerRow,
     PropertyRow,
     TenantRow,
     UnitRow,
+    VendorRow,
 )
 
 _T = TypeVar("_T", bound=SQLModel)
@@ -350,6 +355,60 @@ def note_to_row(note: Note) -> NoteRow:
         created_by=note.created_by,
         created_at=note.created_at,
         updated_at=note.updated_at,
+    )
+
+
+def owner_from_row(row: OwnerRow) -> Owner:
+    return Owner(
+        id=row.id,
+        name=row.name,
+        entity_type_label=row.entity_type_label,
+        email=row.email,
+        phone=row.phone,
+        property_ids=row.property_ids,
+        created_at=row.created_at,
+    )
+
+
+def owner_to_row(o: Owner) -> OwnerRow:
+    return OwnerRow(
+        id=o.id,
+        name=o.name,
+        entity_type_label=o.entity_type_label,
+        email=o.email,
+        phone=o.phone,
+        property_ids=list(o.property_ids),
+        created_at=o.created_at,
+    )
+
+
+def vendor_from_row(row: VendorRow) -> Vendor:
+    return Vendor(
+        id=row.id,
+        name=row.name,
+        category=VendorCategory(row.category) if row.category else VendorCategory.GENERAL,
+        phone=row.phone,
+        email=row.email,
+        is_internal=row.is_internal,
+        license_number=row.license_number,
+        insurance_expiry=row.insurance_expiry,
+        rating=row.rating,
+        created_at=row.created_at,
+    )
+
+
+def vendor_to_row(v: Vendor) -> VendorRow:
+    return VendorRow(
+        id=v.id,
+        name=v.name,
+        category=v.category.value,
+        phone=v.phone,
+        email=v.email,
+        is_internal=v.is_internal,
+        license_number=v.license_number,
+        insurance_expiry=v.insurance_expiry,
+        rating=v.rating,
+        created_at=v.created_at,
     )
 
 

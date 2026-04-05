@@ -6,13 +6,11 @@ from typing import Any
 
 import structlog
 
-from remi.agent.graph.stores import KnowledgeStore
-from remi.agent.graph.types import Entity, Relationship
+from remi.application.core.models import Property
+from remi.application.core.protocols import KBEntity, KBRelationship, KnowledgeWriter, PropertyStore
 from remi.application.services.ingestion.base import IngestionResult
 from remi.application.services.ingestion.managers import ManagerResolver
 from remi.application.services.ingestion.resolver import parse_address, property_name
-from remi.application.core.models import Property
-from remi.application.core.protocols import PropertyStore
 from remi.types.text import slugify
 
 _log = structlog.get_logger(__name__)
@@ -44,7 +42,7 @@ class IngestionCtx:
         report_type: str,
         doc_id: str,
         namespace: str,
-        kb: KnowledgeStore,
+        kb: KnowledgeWriter,
         ps: PropertyStore,
         manager_resolver: ManagerResolver,
         result: IngestionResult,
@@ -76,7 +74,7 @@ async def merge_kb(
     if existing:
         merged = {**existing.properties, **new_props}
         await ctx.kb.put_entity(
-            Entity(
+            KBEntity(
                 entity_id=entity_id,
                 entity_type=existing.entity_type,
                 namespace=ctx.namespace,
@@ -85,7 +83,7 @@ async def merge_kb(
         )
     else:
         await ctx.kb.put_entity(
-            Entity(
+            KBEntity(
                 entity_id=entity_id,
                 entity_type=entity_type,
                 namespace=ctx.namespace,
@@ -102,7 +100,7 @@ async def link(
 ) -> None:
     """Create a relationship in the knowledge graph."""
     await ctx.kb.put_relationship(
-        Relationship(
+        KBRelationship(
             source_id=source,
             target_id=target,
             relation_type=relation,

@@ -1,15 +1,15 @@
-"""SQLModel table definitions mirroring domain.portfolio.models.
+"""SQLModel table definitions owned by the agent layer.
 
-These are mutable DB-row objects — the store layer converts to/from the
-frozen Pydantic read models that the rest of the app uses.
+Agent-layer row classes live here — one table per agent subsystem that
+needs Postgres persistence.  Application-domain tables belong in
+``application.infra.stores.pg.tables``, not here.
 
-Naming convention: ``<Entity>Row`` to distinguish from the Pydantic DTOs.
+Naming convention: ``<Entity>Row`` to distinguish from Pydantic DTOs.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
-from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -35,172 +35,118 @@ class DocumentRow(SQLModel, table=True):
     doc_metadata: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
 
 
-class PropertyManagerRow(SQLModel, table=True):
-    __tablename__ = "property_managers"
-
-    id: str = Field(primary_key=True)
-    name: str
-    email: str = ""
-    company: str | None = None
-    phone: str | None = None
-    manager_tag: str | None = None
-    portfolio_ids: list[str] = Field(default_factory=list, sa_type=sa.JSON)
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+# ---------------------------------------------------------------------------
+# Knowledge graph tables
+# ---------------------------------------------------------------------------
 
 
-class PortfolioRow(SQLModel, table=True):
-    __tablename__ = "portfolios"
+class KGEntityRow(SQLModel, table=True):
+    __tablename__ = "kg_entities"
+    __table_args__ = (
+        sa.Index("ix_kg_entities_ns_type", "namespace", "entity_type"),
+    )
 
-    id: str = Field(primary_key=True)
-    manager_id: str = Field(index=True)
-    name: str
-    description: str = ""
-    property_ids: list[str] = Field(default_factory=list, sa_type=sa.JSON)
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
-
-
-class PropertyRow(SQLModel, table=True):
-    __tablename__ = "properties"
-
-    id: str = Field(primary_key=True)
-    portfolio_id: str = Field(index=True)
-    name: str
-    property_type: str = "residential"
-    year_built: int | None = None
-    # Address stored as individual columns for queryability.
-    address_street: str = ""
-    address_city: str = ""
-    address_state: str = ""
-    address_zip_code: str = ""
-    address_country: str = "US"
-    source_document_id: str | None = None
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
-
-
-class UnitRow(SQLModel, table=True):
-    __tablename__ = "units"
-
-    id: str = Field(primary_key=True)
-    property_id: str = Field(index=True)
-    unit_number: str
-    bedrooms: int | None = None
-    bathrooms: float | None = None
-    sqft: int | None = None
-    market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    current_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    status: str = "vacant"
-    occupancy_status: str | None = None
-    days_vacant: int | None = None
-    listed_on_website: bool = False
-    listed_on_internet: bool = False
-    floor: int | None = None
-    source_document_id: str | None = None
-
-
-class LeaseRow(SQLModel, table=True):
-    __tablename__ = "leases"
-
-    id: str = Field(primary_key=True)
-    unit_id: str = Field(index=True)
-    tenant_id: str = Field(index=True)
-    property_id: str = Field(index=True)
-    start_date: date
-    end_date: date
-    monthly_rent: Decimal = Field(sa_type=sa.Numeric(12, 2))
-    deposit: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    status: str = "active"
-    market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    is_month_to_month: bool = False
-    source_document_id: str | None = None
-
-
-class TenantRow(SQLModel, table=True):
-    __tablename__ = "tenants"
-
-    id: str = Field(primary_key=True)
-    name: str
-    email: str = ""
-    phone: str | None = None
-    status: str = "current"
-    balance_owed: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    balance_0_30: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    balance_30_plus: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    last_payment_date: date | None = None
-    tags: list[str] = Field(default_factory=list, sa_type=sa.JSON)
-    lease_ids: list[str] = Field(default_factory=list, sa_type=sa.JSON)
-    source_document_id: str | None = None
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
-
-
-class MaintenanceRequestRow(SQLModel, table=True):
-    __tablename__ = "maintenance_requests"
-
-    id: str = Field(primary_key=True)
-    unit_id: str = Field(index=True)
-    property_id: str = Field(index=True)
-    tenant_id: str | None = None
-    category: str = "general"
-    priority: str = "medium"
-    title: str = ""
-    description: str = ""
-    status: str = "open"
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
-    resolved_at: datetime | None = Field(default=None, sa_type=_TZDateTime)
-    cost: Decimal | None = Field(default=None, sa_type=sa.Numeric(12, 2))
-    vendor: str | None = None
-
-
-class ActionItemRow(SQLModel, table=True):
-    __tablename__ = "action_items"
-
-    id: str = Field(primary_key=True)
-    title: str
-    description: str = ""
-    status: str = "open"
-    priority: str = "medium"
-    manager_id: str | None = Field(default=None, index=True)
-    property_id: str | None = Field(default=None, index=True)
-    tenant_id: str | None = Field(default=None, index=True)
-    due_date: date | None = None
+    entity_id: str = Field(primary_key=True)
+    namespace: str = Field(primary_key=True)
+    entity_type: str
+    properties: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
+    metadata_: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON, sa_column_kwargs={"key": "metadata"})
+    provenance: dict[str, Any] | None = Field(default=None, sa_type=sa.JSON)
     created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
     updated_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
 
 
-class ManagerRollupRow(SQLModel, table=True):
-    __tablename__ = "manager_rollups"
+class KGRelationshipRow(SQLModel, table=True):
+    __tablename__ = "kg_relationships"
+    __table_args__ = (
+        sa.Index("ix_kg_rels_ns_source", "namespace", "source_id"),
+        sa.Index("ix_kg_rels_ns_target", "namespace", "target_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    source_id: str
+    target_id: str
+    relation_type: str
+    namespace: str = "default"
+    properties: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
+    provenance: dict[str, Any] | None = Field(default=None, sa_type=sa.JSON)
+    weight: float = 1.0
+    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+
+
+# ---------------------------------------------------------------------------
+# Signal and feedback tables
+# ---------------------------------------------------------------------------
+
+
+class SignalRow(SQLModel, table=True):
+    __tablename__ = "signals"
+    __table_args__ = (
+        sa.Index("ix_signals_type", "signal_type"),
+        sa.Index("ix_signals_entity", "entity_id"),
+    )
+
+    signal_id: str = Field(primary_key=True)
+    signal_type: str
+    severity: str
+    entity_type: str
+    entity_id: str
+    entity_name: str = ""
+    description: str = ""
+    evidence: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
+    detected_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+    provenance: str = "data_derived"
+
+
+class SignalFeedbackRow(SQLModel, table=True):
+    __tablename__ = "signal_feedback"
+    __table_args__ = (
+        sa.Index("ix_feedback_signal", "signal_id"),
+        sa.Index("ix_feedback_type", "signal_type"),
+    )
+
+    feedback_id: str = Field(primary_key=True)
+    signal_id: str
+    signal_type: str
+    outcome: str
+    actor: str = ""
+    notes: str = ""
+    context: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
+    recorded_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+
+
+# ---------------------------------------------------------------------------
+# Vector embeddings table (requires pgvector extension)
+# ---------------------------------------------------------------------------
+
+
+class MemoryEntryRow(SQLModel, table=True):
+    __tablename__ = "memory_entries"
+    __table_args__ = (
+        sa.Index("ix_memory_ns_key", "namespace", "key"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    namespace: str
+    key: str
+    value: str = ""
+    ttl_seconds: int | None = None
+    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+
+
+class VectorEmbeddingRow(SQLModel, table=True):
+    __tablename__ = "vector_embeddings"
+    __table_args__ = (
+        sa.Index("ix_vec_source", "source_entity_id"),
+        sa.Index("ix_vec_type", "source_entity_type"),
+    )
 
     id: str = Field(primary_key=True)
-    manager_id: str = Field(index=True)
-    manager_name: str
-    captured_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime, index=True)
-    property_count: int = 0
-    total_units: int = 0
-    occupied: int = 0
-    vacant: int = 0
-    occupancy_rate: float = 0.0
-    total_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    total_market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    loss_to_lease: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    delinquent_count: int = 0
-    delinquent_balance: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-
-
-class PropertyRollupRow(SQLModel, table=True):
-    __tablename__ = "property_rollups"
-
-    id: str = Field(primary_key=True)
-    property_id: str = Field(index=True)
-    property_name: str
-    manager_id: str = Field(index=True)
-    manager_name: str
-    captured_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime, index=True)
-    total_units: int = 0
-    occupied: int = 0
-    vacant: int = 0
-    occupancy_rate: float = 0.0
-    total_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    total_market_rent: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    loss_to_lease: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
-    maintenance_open: int = 0
-    maintenance_closed: int = 0
-    avg_maintenance_cost: Decimal = Field(default=Decimal("0"), sa_type=sa.Numeric(12, 2))
+    text: str = ""
+    source_entity_id: str
+    source_entity_type: str
+    source_field: str = ""
+    metadata_: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON, sa_column_kwargs={"key": "metadata"})
+    created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
+    vector: list[float] = Field(default_factory=list, sa_type=sa.JSON)

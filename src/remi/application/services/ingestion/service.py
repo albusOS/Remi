@@ -12,15 +12,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
-from remi.agent.documents.types import Document
-from remi.agent.graph.stores import KnowledgeStore
-from remi.agent.graph.types import Entity, FactProvenance, KnowledgeProvenance, Relationship
-from remi.agent.ingestion.runner import IngestionPipelineRunner
+from remi.agent.pipeline import IngestionPipelineRunner
+from remi.application.core.protocols import (
+    KBEntity,
+    KBRelationship,
+    KnowledgeWriter,
+    ParsedDocument,
+    PropertyStore,
+)
 from remi.application.infra.ontology.schema import entity_schemas_for_prompt
-from remi.application.core.protocols import PropertyStore
 from remi.application.services.ingestion.base import IngestionResult
 from remi.application.services.ingestion.managers import ManagerResolver
 from remi.application.services.ingestion.persist import resolve_and_persist
@@ -71,7 +75,9 @@ class EnrichedRow:
                 rels.append(EnrichedRelationship(src, tgt, rtype))
         props_raw = raw.get("properties") or {}
         props: dict[str, str | int | float | bool | None] = {
-            str(k): v for k, v in props_raw.items() if isinstance(v, (str, int, float, bool, type(None)))
+            str(k): v
+            for k, v in props_raw.items()
+            if isinstance(v, (str, int, float, bool, type(None)))
         }
         return cls(
             row_index=int(raw.get("row_index", 0)),
@@ -129,11 +135,11 @@ class IngestionService:
 
     def __init__(
         self,
-        knowledge_store: KnowledgeStore,
+        knowledge_writer: KnowledgeWriter,
         property_store: PropertyStore,
         pipeline_runner: IngestionPipelineRunner,
     ) -> None:
-        self._kb = knowledge_store
+        self._kb = knowledge_writer
         self._ps = property_store
         self._runner = pipeline_runner
         self._manager_resolver = ManagerResolver(
@@ -141,9 +147,64 @@ class IngestionService:
             portfolio_repo=property_store,
         )
 
+    async def ingest_mapped_rows(
+        self,
+        doc: ParsedDocument,
+        *,
+        report_type: str,
+        rows: list[dict[str, Any]],
+        manager: str | None = None,
+    ) -> IngestionResult:
+        """Persist pre-mapped rows without calling the LLM pipeline.
+
+        Used by the rule-based extraction path where column mapping has
+        already been done deterministically.
+        """
+        namespace = "ontology"
+        result = IngestionResult(document_id=doc.id)
+        result.report_type = report_type
+
+        upload_portfolio_id: str | None = None
+        if manager:
+            upload_portfolio_id = await self._manager_resolver.ensure_manager(manager)
+
+        validated = validate_rows(rows, result)
+        if validated:
+            await resolve_and_persist(
+                validated,
+                report_type=report_type,
+                platform="appfolio",
+                doc_id=doc.id,
+                namespace=namespace,
+                kb=self._kb,
+                ps=self._ps,
+                manager_resolver=self._manager_resolver,
+                result=result,
+                upload_portfolio_id=upload_portfolio_id,
+            )
+        else:
+            logger.warning(
+                "rules_mapped_rows_empty_after_validation",
+                doc_id=doc.id,
+                report_type=report_type,
+            )
+
+        await self._write_doc_entity(doc, result, namespace)
+
+        logger.info(
+            "rules_ingestion_complete",
+            doc_id=doc.id,
+            report_type=report_type,
+            entities=result.entities_created,
+            relationships=result.relationships_created,
+            rows_accepted=result.rows_accepted,
+            rows_rejected=result.rows_rejected,
+        )
+        return result
+
     async def ingest(
         self,
-        doc: Document,
+        doc: ParsedDocument,
         *,
         manager: str | None = None,
     ) -> IngestionResult:
@@ -168,7 +229,9 @@ class IngestionService:
             pipeline_result = await self._runner.run(
                 _PIPELINE,
                 pipeline_input,
-                context={"entity_schemas": entity_schemas_for_prompt(filter_names=PERSISTABLE_TYPES)},
+                context={
+                    "entity_schemas": entity_schemas_for_prompt(filter_names=PERSISTABLE_TYPES),
+                },
             )
         except Exception:
             logger.exception("ingestion_pipeline_failed", doc_id=doc.id)
@@ -257,61 +320,55 @@ class IngestionService:
         result: IngestionResult,
         doc_id: str,
     ) -> None:
-        prov = FactProvenance(
-            source="llm_enrichment",
-            confidence=0.6,
-            document_id=doc_id,
-            provenance_type=KnowledgeProvenance.INFERRED,
-        )
         for row in enriched:
             if row.entity_type == "noise":
                 continue
             await self._kb.put_entity(
-                Entity(
+                KBEntity(
                     entity_id=row.entity_id,
                     entity_type=row.entity_type,
                     namespace=namespace,
                     properties={**row.properties, "document_id": doc_id},
                     metadata={"source": "llm_enrichment"},
-                    provenance=prov,
                 )
             )
             result.entities_created += 1
             for rel in row.relationships:
                 await self._kb.put_relationship(
-                    Relationship(
+                    KBRelationship(
                         source_id=rel.source_id,
                         target_id=rel.target_id,
                         relation_type=rel.relation_type,
                         namespace=namespace,
-                        provenance=prov,
                     )
                 )
                 result.relationships_created += 1
 
     async def _write_doc_entity(
         self,
-        doc: Document,
+        doc: ParsedDocument,
         result: IngestionResult,
         namespace: str,
     ) -> None:
+        props: dict[str, str] = {
+            "filename": doc.filename,
+            "content_type": doc.content_type,
+            "kind": doc.kind,
+            "row_count": str(doc.row_count),
+            "chunk_count": str(len(doc.chunks)),
+            "page_count": str(doc.page_count),
+            "report_type": result.report_type,
+            "document_id": doc.id,
+            "size_bytes": str(doc.size_bytes),
+        }
+        if doc.tags:
+            props["tags"] = ",".join(doc.tags)
+
         await self._kb.put_entity(
-            Entity(
+            KBEntity(
                 entity_id=f"document:{doc.id}",
                 entity_type="document",
                 namespace=namespace,
-                properties={
-                    "filename": doc.filename,
-                    "content_type": doc.content_type,
-                    "row_count": str(doc.row_count),
-                    "report_type": result.report_type,
-                    "document_id": doc.id,
-                },
-                provenance=FactProvenance(
-                    source="ingestion",
-                    confidence=1.0,
-                    document_id=doc.id,
-                    provenance_type=KnowledgeProvenance.DATA_DERIVED,
-                ),
+                properties=props,
             )
         )

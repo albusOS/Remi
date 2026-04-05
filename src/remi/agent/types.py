@@ -49,6 +49,7 @@ class ChatSession(BaseModel):
     agent: str = "director"
     provider: str | None = None
     model: str | None = None
+    sandbox_session_id: str | None = None
     thread: list[Message] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

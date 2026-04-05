@@ -9,13 +9,12 @@ import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
 
-from remi.agent.graph.stores import KnowledgeStore
 from remi.application.core.models import (
     LeaseStatus,
     OccupancyStatus,
     UnitStatus,
 )
-from remi.application.core.protocols import PropertyStore
+from remi.application.core.protocols import KnowledgeReader, PropertyStore
 from remi.application.core.rules import is_occupied, is_vacant, loss_to_lease
 
 from ._models import (
@@ -38,10 +37,10 @@ class DashboardQueryService:
     def __init__(
         self,
         property_store: PropertyStore,
-        knowledge_store: KnowledgeStore | None = None,
+        knowledge_reader: KnowledgeReader | None = None,
     ) -> None:
         self._ps = property_store
-        self._ks = knowledge_store
+        self._kr = knowledge_reader
 
     async def portfolio_overview(self, manager_id: str | None = None) -> PortfolioOverview:
         if manager_id:
@@ -180,7 +179,7 @@ class DashboardQueryService:
         delinquent.sort(key=lambda t: t.balance_owed, reverse=True)
 
         delinquency_notes: dict[str, str] = {}
-        if self._ks is not None:
+        if self._kr is not None:
             delinquency_notes = await self._load_delinquency_notes([t.id for t in delinquent])
 
         return DelinquencyBoard(
@@ -208,13 +207,14 @@ class DashboardQueryService:
 
     async def _load_delinquency_notes(self, tenant_ids: list[str]) -> dict[str, str]:
         """Read-time join: fetch delinquency_notes from ingested KB entities."""
-        assert self._ks is not None
+        assert self._kr is not None
         result: dict[str, str] = {}
         lookup = set(tenant_ids)
-        for ns_key in list(self._ks._entities.keys()) if hasattr(self._ks, "_entities") else []:
+        namespaces = await self._kr.list_namespaces()
+        for ns_key in namespaces:
             if not ns_key.startswith("doc:"):
                 continue
-            entities = await self._ks.find_entities(
+            entities = await self._kr.find_entities(
                 ns_key,
                 entity_type="appfolio_delinquent_tenant",
                 limit=500,

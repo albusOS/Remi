@@ -18,6 +18,8 @@ import structlog
 
 from remi.agent.config import AgentConfig
 from remi.agent.context.builder import _find_tail_inject_point
+from remi.agent.workspace import inject_workspace, load_workspace
+from remi.agent.workspace.flush import flush_before_trim
 from remi.agent.context.frame import WorldState
 from remi.agent.context.intent import classify_intent
 from remi.agent.context.rendering import (
@@ -25,7 +27,7 @@ from remi.agent.context.rendering import (
     render_active_signals,
     render_domain_context,
 )
-from remi.agent.conversation.thread import (
+from remi.agent.runtime.conversation.thread import (
     build_initial_thread,
     format_output,
     last_assistant_content,
@@ -163,6 +165,12 @@ class AgentNode(BaseModule):
         )
 
         tool_executor = ToolExecutor(tool_defs, tool_execute, tracer, log)
+
+        sandbox_for_flush = context.extras.get("sandbox")
+        flush_sid = context.params.sandbox_session_id
+        if sandbox_for_flush is not None and flush_sid:
+            await flush_before_trim(thread, cfg.max_history_turns, sandbox_for_flush, flush_sid)
+
         thread = trim_thread(thread, cfg.max_history_turns)
 
         scope: ScopeContext = context.scope
@@ -170,6 +178,12 @@ class AgentNode(BaseModule):
             _insert_before_last_user(
                 thread, Message(role="system", content=scope.scope_message)
             )
+
+        sandbox_sid = context.params.sandbox_session_id
+        sandbox = context.extras.get("sandbox")
+        if sandbox is not None and sandbox_sid:
+            workspace = await load_workspace(sandbox, sandbox_sid)
+            inject_workspace(thread, workspace)
 
         trace_cm = (
             tracer.start_trace(

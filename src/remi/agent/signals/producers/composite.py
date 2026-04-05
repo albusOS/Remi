@@ -1,11 +1,10 @@
 """CompositeProducer — runs multiple SignalProducers and merges their results.
 
-This is the top-level entailment entry point. It replaces direct calls to
-EntailmentEngine, supporting a pluggable pipeline of signal sources:
+Top-level entry point for running a pluggable pipeline of signal sources:
 
     composite = CompositeProducer(signal_store, [
-        RuleBasedProducer(domain, property_store),
         StatisticalProducer(knowledge_graph=knowledge_graph),
+        CompositionProducer(domain=domain, signal_store=signal_store),
     ])
     result = await composite.run_all()
 

@@ -4,21 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from remi.agent.documents.types import Document, DocumentStore
+from remi.agent.documents.types import Document, DocumentKind, DocumentStore
 
 
 class InMemoryDocumentStore(DocumentStore):
     def __init__(self) -> None:
         self._docs: dict[str, Document] = {}
-
-    def dump_state(self) -> list[dict[str, object]]:
-        return [d.model_dump(mode="json") for d in self._docs.values()]
-
-    def load_state(self, data: list[dict[str, object]]) -> None:
-        self._docs.clear()
-        for raw in data:
-            doc = Document.model_validate(raw)
-            self._docs[doc.id] = doc
 
     async def save(self, document: Document) -> None:
         self._docs[document.id] = document
@@ -52,3 +43,34 @@ class InMemoryDocumentStore(DocumentStore):
                     rows = [r for r in rows if str(r.get(col, "")) == str(val)]
 
         return rows[:limit]
+
+    async def search_documents(
+        self,
+        *,
+        query: str | None = None,
+        kind: DocumentKind | None = None,
+        tags: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[Document]:
+        results = list(self._docs.values())
+
+        if kind is not None:
+            results = [d for d in results if d.kind == kind]
+
+        if tags:
+            tag_set = set(tags)
+            results = [d for d in results if tag_set & set(d.tags)]
+
+        if query:
+            q = query.lower()
+            results = [d for d in results if q in d.filename.lower()]
+
+        results.sort(key=lambda d: d.uploaded_at, reverse=True)
+        return results[:limit]
+
+    async def update_tags(self, document_id: str, tags: list[str]) -> bool:
+        doc = self._docs.get(document_id)
+        if doc is None:
+            return False
+        doc.tags = tags
+        return True

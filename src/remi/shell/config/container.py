@@ -11,65 +11,98 @@ from __future__ import annotations
 
 from typing import cast
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
-
-from remi.agent.context.builder import build_context_builder
-from remi.agent.documents.types import DocumentStore
-from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
-from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
-from remi.agent.graph.stores import KnowledgeStore
-from remi.agent.ingestion.runner import IngestionPipelineRunner
-from remi.agent.llm.factory import LLMProviderFactory, build_provider_factory
-from remi.agent.mem import InMemoryChatSessionStore
-from remi.agent.observe.mem import InMemoryTraceStore
-from remi.agent.observe.types import Tracer, TraceStore
-from remi.agent.observe.usage import LLMUsageLedger
+from remi.agent.context import build_context_builder
+from remi.agent.documents import DocumentStore
+from remi.agent.graph import (
+    BridgedKnowledgeGraph,
+    GraphProjector,
+    KnowledgeStore,
+    MemoryStore,
+    build_knowledge_store,
+    build_memory_store,
+)
+from remi.agent.pipeline import IngestionPipelineRunner
+from remi.agent.llm import LLMProviderFactory, build_provider_factory
+from remi.agent.observe import LLMUsageLedger, Tracer, TraceStore, build_trace_store
 from remi.agent.profile import DomainProfile
-from remi.agent.runtime.retry import RetryPolicy
-from remi.agent.runtime.runner import ChatAgentService
-from remi.agent.sandbox.factory import build_sandbox
-from remi.agent.sandbox.types import Sandbox
-from remi.agent.signals import DomainTBox, FeedbackStore, MutableTBox, SignalStore
-from remi.agent.signals.persistence.mem import (
-    InMemoryFeedbackStore,
-    InMemorySignalStore,
+from remi.agent.runtime import ChatAgentService, RetryPolicy
+from remi.agent.sandbox import Sandbox, build_sandbox
+from remi.agent.sessions import build_chat_session_store
+from remi.agent.signals import (
+    DomainTBox,
+    FeedbackStore,
+    MutableTBox,
+    SignalStore,
+    build_feedback_store,
+    build_signal_store,
 )
-from remi.agent.tools.delegation import AgentInvoker, register_delegation_tools
-from remi.agent.tools.registry import InMemoryToolRegistry
-from remi.agent.types import ChatSessionStore, ToolRegistry
-from remi.agent.vectors.embedder import build_embedder
-from remi.agent.vectors.store import InMemoryVectorStore
-from remi.agent.vectors.types import Embedder, VectorStore
+from remi.agent.tools import (
+    AgentInvoker,
+    DelegationToolProvider,
+    HttpToolProvider,
+    InMemoryToolRegistry,
+    MemoryToolProvider,
+    SandboxToolProvider,
+    TraceToolProvider,
+    VectorToolProvider,
+)
+from remi.agent.types import ChatSessionStore, ToolArg, ToolProvider, ToolRegistry
+from remi.agent.vectors import Embedder, VectorStore, build_embedder, build_vector_store
+from remi.application.core import EventStore, PropertyStore
+from remi.application.infra.ontology import (
+    build_knowledge_graph,
+    load_domain_yaml,
+    seed_knowledge_graph,
+)
+from remi.application.infra.ports import (
+    AgentDocumentParser,
+    AgentDocumentRepository,
+    AgentTextIndexer,
+    AgentVectorSearch,
+    KnowledgeStoreReader,
+    KnowledgeStoreWriter,
+)
+from remi.application.infra.stores import (
+    InMemoryEventStore,
+    ProjectingPropertyStore,
+    StoreSuite,
+    build_store_suite,
+)
 from remi.application.profile import build_re_profile
-from remi.application.infra.ontology.bridge import build_knowledge_graph
-from remi.application.infra.ontology.schema import load_domain_yaml
-from remi.application.infra.ontology.seed import seed_knowledge_graph
-from remi.application.core.protocols import PropertyStore
-from remi.application.infra.stores.factory import (
-    build_document_store,
-    build_property_store,
-    build_rollup_store,
-)
-from remi.application.infra.stores.projecting import ProjectingPropertyStore
+from remi.application.services.embedding.pipeline import EmbeddingPipeline
 from remi.application.services.ingestion.pipeline import DocumentIngestService
 from remi.application.services.ingestion.service import IngestionService
-from remi.application.services.embedding.pipeline import EmbeddingPipeline
-from remi.application.services.seeding.cache import StoreBundle
-from remi.application.services.seeding.service import SeedService
-from remi.application.services.queries.auto_assign import AutoAssignService
-from remi.application.services.queries.dashboard import DashboardQueryService
-from remi.application.services.queries.managers import ManagerReviewService
-from remi.application.services.queries import PortfolioQueryService
-from remi.application.services.queries import RentRollService
+from remi.application.services.queries import (
+    AutoAssignService,
+    DashboardQueryService,
+    ManagerReviewService,
+    PortfolioQueryService,
+    RentRollService,
+)
 from remi.application.services.search import SearchService
-from remi.application.services.monitoring.signals.pipeline import build_signal_pipeline
-from remi.application.core.rollups import RollupStore
-from remi.application.services.monitoring.snapshots.service import SnapshotService
-from remi.application.tools import register_all_tools
-from remi.application.tools.assertions import register_assertion_tools
-from remi.application.tools.snapshots import register_snapshot_tools
-from remi.application.tools.workflows import SubAgentInvoker, register_workflow_tools
+from remi.application.services.seeding.service import SeedService
+from remi.application.tools import (
+    ActionToolProvider,
+    AssertionToolProvider,
+    DocumentToolProvider,
+    KnowledgeGraphToolProvider,
+    SearchToolProvider,
+    SubAgentInvoker,
+    WorkflowToolProvider,
+)
 from remi.shell.config.settings import RemiSettings
+
+
+def _build_scope_filter_args(profile: DomainProfile) -> list[ToolArg]:
+    args: list[ToolArg] = []
+    if profile.scope_entity_type:
+        scope_key = profile.scope_entity_type[0].lower() + profile.scope_entity_type[1:]
+        scope_key = scope_key.replace("Manager", "_manager").replace("Property", "_property")
+    for key in ("manager_id", "property_id"):
+        hint_key = f"semantic_search:{key}"
+        desc = profile.tool_hints.get(hint_key, f"Filter results by {key}")
+        args.append(ToolArg(name=key, description=desc))
+    return args
 
 
 class Container:
@@ -81,28 +114,21 @@ class Container:
         # -- Domain profile (operational config for agent layer) ---------------
         self.profile: DomainProfile = build_re_profile()
 
-        # -- Core infrastructure -----------------------------------------------
-        memory_store = InMemoryMemoryStore()
-        self.knowledge_store: KnowledgeStore = InMemoryKnowledgeStore()
+        # -- Core infrastructure (all via factories) ---------------------------
+        memory_store: MemoryStore = build_memory_store(self.settings)
+        self.knowledge_store: KnowledgeStore = build_knowledge_store(self.settings)
         self.tool_registry: ToolRegistry = InMemoryToolRegistry()
         self.provider_factory: LLMProviderFactory = build_provider_factory(
             self.settings.secrets,
         )
 
-        # -- Stores ------------------------------------------------------------
-        self.chat_session_store: ChatSessionStore = InMemoryChatSessionStore()
-        self.property_store: PropertyStore
-        self._db_engine: AsyncEngine | None
-        self._db_session_factory: async_sessionmaker[AsyncSession] | None
-        self.property_store, self._db_engine, self._db_session_factory = build_property_store(
-            self.settings
-        )
-        self.document_store: DocumentStore = build_document_store(self._db_session_factory)
-        rollup_store = build_rollup_store(self._db_session_factory)
+        # -- Application stores (via StoreSuite) -------------------------------
+        self.chat_session_store: ChatSessionStore = build_chat_session_store(self.settings)
+        self._store_suite: StoreSuite = build_store_suite(self.settings)
+        self.property_store: PropertyStore = self._store_suite.property_store
+        self.document_store: DocumentStore = self._store_suite.document_store
 
         # -- Knowledge graph ---------------------------------------------------
-        from remi.agent.graph.projector import GraphProjector
-
         self.knowledge_graph: BridgedKnowledgeGraph
         self.graph_projector: GraphProjector
         self.knowledge_graph, self.graph_projector = build_knowledge_graph(
@@ -110,14 +136,13 @@ class Container:
             self.knowledge_store,
         )
 
-        # Wrap the store so every upsert auto-projects FK edges into the graph.
         self.property_store = ProjectingPropertyStore(
             self.property_store, self.graph_projector
         )
         self._bootstrap_pending = True
 
         # -- Trace layer -------------------------------------------------------
-        self.trace_store: TraceStore = InMemoryTraceStore()
+        self.trace_store: TraceStore = build_trace_store(self.settings)
         self.usage_ledger: LLMUsageLedger = LLMUsageLedger()
         tracer = Tracer(self.trace_store)
 
@@ -125,25 +150,27 @@ class Container:
         raw_domain = load_domain_yaml()
         self.domain_tbox: DomainTBox = DomainTBox.from_yaml(raw_domain)
         mutable_tbox = MutableTBox(self.domain_tbox)
-        self.signal_store: SignalStore = InMemorySignalStore()
-        self.feedback_store: FeedbackStore = InMemoryFeedbackStore()
+        self.signal_store: SignalStore = build_signal_store(self.settings)
+        self.feedback_store: FeedbackStore = build_feedback_store(self.settings)
 
         # -- Sandbox -----------------------------------------------------------
         self.sandbox: Sandbox = build_sandbox(self.settings)
 
         # -- Vectors -----------------------------------------------------------
-        self.vector_store: VectorStore = InMemoryVectorStore()
+        self.vector_store: VectorStore = build_vector_store(self.settings)
         self.embedder: Embedder = build_embedder(
             self.settings.embeddings,
             self.settings.secrets,
         )
 
-        # -- Adapter registry --------------------------------------------------
-        from remi.application.infra.adapters.appfolio.adapter import AppFolioAdapter
-        from remi.application.infra.adapters.protocol import AdapterRegistry
+        # -- Application-layer ports (bridge agent → application) ---------------
+        self.knowledge_writer = KnowledgeStoreWriter(self.knowledge_store)
+        self.knowledge_reader = KnowledgeStoreReader(self.knowledge_store)
+        self.document_parser = AgentDocumentParser()
+        self.document_repo = AgentDocumentRepository(self.document_store)
 
-        self.adapter_registry = AdapterRegistry()
-        self.adapter_registry.register(AppFolioAdapter())
+        # -- Event store -------------------------------------------------------
+        self.event_store: EventStore = InMemoryEventStore()
 
         # -- Services ----------------------------------------------------------
         pipeline_runner = IngestionPipelineRunner(
@@ -153,91 +180,80 @@ class Container:
             usage_ledger=self.usage_ledger,
         )
         ingestion_service = IngestionService(
-            knowledge_store=self.knowledge_store,
+            knowledge_writer=self.knowledge_writer,
             property_store=self.property_store,
             pipeline_runner=pipeline_runner,
         )
         self.dashboard_service = DashboardQueryService(
             property_store=self.property_store,
-            knowledge_store=self.knowledge_store,
-        )
-        self.snapshot_service = SnapshotService(
-            property_store=self.property_store,
-            rollup_store=rollup_store,
+            knowledge_reader=self.knowledge_reader,
         )
         self.portfolio_query = PortfolioQueryService(property_store=self.property_store)
         self.manager_review = ManagerReviewService(property_store=self.property_store)
         self.rent_roll_service = RentRollService(property_store=self.property_store)
         self.auto_assign_service = AutoAssignService(
             property_store=self.property_store,
-            knowledge_store=self.knowledge_store,
-            snapshot_service=self.snapshot_service,
-        )
-
-        # -- Signal pipeline ---------------------------------------------------
-        self.signal_pipeline = build_signal_pipeline(
-            domain=mutable_tbox,
-            property_store=self.property_store,
-            signal_store=self.signal_store,
-            snapshot_service=self.snapshot_service,
-            knowledge_graph=self.knowledge_graph,
-            tracer=tracer,
+            knowledge_reader=self.knowledge_reader,
         )
 
         # -- Embedding pipeline ------------------------------------------------
+        text_indexer = AgentTextIndexer(self.embedder, self.vector_store)
         self.embedding_pipeline = EmbeddingPipeline(
             property_store=self.property_store,
-            vector_store=self.vector_store,
-            embedder=self.embedder,
-            document_store=self.document_store,
+            text_indexer=text_indexer,
+            document_repo=self.document_repo,
             signal_store=self.signal_store,
         )
 
         # -- Search service ----------------------------------------------------
-        self.search_service = SearchService(self.vector_store, self.embedder)
+        vector_search = AgentVectorSearch(self.vector_store, self.embedder)
+        self.search_service = SearchService(vector_search)
 
         # -- Document ingestion ------------------------------------------------
         self.document_ingest = DocumentIngestService(
-            document_store=self.document_store,
+            document_repo=self.document_repo,
+            document_parser=self.document_parser,
             ingestion_service=ingestion_service,
-            knowledge_store=self.knowledge_store,
-            property_store=self.property_store,
-            snapshot_service=self.snapshot_service,
-            signal_pipeline=self.signal_pipeline,
             embedding_pipeline=self.embedding_pipeline,
             metadata_skip_patterns=self.profile.metadata_skip_patterns,
         )
 
-        # -- Tools (phase 1 — before chat_agent exists) ------------------------
+        # -- Tool providers (phase 1 — before chat_agent exists) ---------------
         _api_base = f"http://127.0.0.1:{self.settings.api.port}"
-        register_all_tools(
-            self.tool_registry,
-            knowledge_graph=self.knowledge_graph,
-            document_store=self.document_store,
-            document_ingest=self.document_ingest,
-            property_store=self.property_store,
-            memory_store=memory_store,
-            signal_store=self.signal_store,
-            vector_store=self.vector_store,
-            embedder=self.embedder,
-            trace_store=self.trace_store,
-            sandbox=self.sandbox,
-            search_service=self.search_service,
-            api_base_url=_api_base,
-            profile=self.profile,
-        )
+        p = self.profile
+        scope_args = _build_scope_filter_args(p) if p.scope_entity_type else []
+
+        phase1_providers: list[ToolProvider] = [
+            SandboxToolProvider(self.sandbox, data_bridge_hint=p.data_bridge_hint),
+            HttpToolProvider(api_base_url=_api_base, api_path_examples=p.api_path_examples),
+            MemoryToolProvider(memory_store),
+            VectorToolProvider(
+                self.vector_store,
+                self.embedder,
+                search_hint=p.tool_hints.get("semantic_search", ""),
+                entity_type_hint=p.tool_hints.get("semantic_search:entity_type", ""),
+                scope_filter_args=scope_args,
+            ),
+            TraceToolProvider(self.trace_store),
+            KnowledgeGraphToolProvider(self.knowledge_graph, signal_store=self.signal_store),
+            DocumentToolProvider(
+                self.document_store,
+                document_ingest=self.document_ingest,
+                vector_search=vector_search,
+            ),
+            ActionToolProvider(self.property_store, knowledge_graph=self.knowledge_graph),
+            SearchToolProvider(self.search_service),
+        ]
+        for provider in phase1_providers:
+            provider.register(self.tool_registry)
 
         # -- Seed service ------------------------------------------------------
-        store_bundle = self._build_store_bundle(rollup_store)
         self.seed_service = SeedService(
             document_ingest=self.document_ingest,
             auto_assign=self.auto_assign_service,
-            signal_pipeline=self.signal_pipeline,
             embedding_pipeline=self.embedding_pipeline,
             property_store=self.property_store,
-            snapshot_service=self.snapshot_service,
-            rollup_store=rollup_store,
-            store_bundle=store_bundle,
+            document_parser=self.document_parser,
             metadata_skip_patterns=self.profile.metadata_skip_patterns,
         )
 
@@ -270,61 +286,26 @@ class Container:
             usage_ledger=self.usage_ledger,
         )
 
-        # -- Tools (phase 2 — after chat_agent exists) -------------------------
-        register_snapshot_tools(
-            self.tool_registry,
-            snapshot_service=self.snapshot_service,
-        )
-        register_workflow_tools(
-            self.tool_registry,
-            property_store=self.property_store,
-            knowledge_graph=self.knowledge_graph,
-            manager_review=self.manager_review,
-            dashboard_service=self.dashboard_service,
-            sub_agent=cast(SubAgentInvoker, self.chat_agent),
-        )
-        register_delegation_tools(
-            self.tool_registry,
-            agent_invoker=cast(AgentInvoker, self.chat_agent),
-            available_agents=self.profile.available_agents,
-        )
-        register_assertion_tools(
-            self.tool_registry,
-            knowledge_graph=self.knowledge_graph,
-        )
-
-    def _build_store_bundle(self, rollup_store: RollupStore) -> StoreBundle | None:
-        """Build a StoreBundle only when all stores are in-memory."""
-        from remi.agent.documents.mem import InMemoryDocumentStore
-        from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
-        from remi.agent.signals.persistence.mem import InMemoryFeedbackStore, InMemorySignalStore
-        from remi.application.infra.stores.mem import InMemoryPropertyStore
-        from remi.application.infra.stores.rollups import InMemoryRollupStore
-
-        if not (
-            isinstance(self.property_store, InMemoryPropertyStore)
-            and isinstance(self.knowledge_store, InMemoryKnowledgeStore)
-            and isinstance(self.document_store, InMemoryDocumentStore)
-            and isinstance(self.signal_store, InMemorySignalStore)
-            and isinstance(self.feedback_store, InMemoryFeedbackStore)
-            and isinstance(rollup_store, InMemoryRollupStore)
-        ):
-            return None
-
-        return StoreBundle(
-            property_store=self.property_store,
-            knowledge_store=self.knowledge_store,
-            document_store=self.document_store,
-            signal_store=self.signal_store,
-            feedback_store=self.feedback_store,
-            rollup_store=rollup_store,
-        )
+        # -- Tool providers (phase 2 — after chat_agent exists) ----------------
+        phase2_providers: list[ToolProvider] = [
+            WorkflowToolProvider(
+                self.property_store,
+                self.knowledge_graph,
+                self.manager_review,
+                self.dashboard_service,
+                sub_agent=cast(SubAgentInvoker, self.chat_agent),
+            ),
+            DelegationToolProvider(
+                cast(AgentInvoker, self.chat_agent),
+                self.profile.available_agents or {},
+            ),
+            AssertionToolProvider(self.knowledge_graph, event_store=self.event_store),
+        ]
+        for provider in phase2_providers:
+            provider.register(self.tool_registry)
 
     async def ensure_bootstrapped(self) -> None:
         if self._bootstrap_pending:
-            if self._db_engine is not None:
-                from remi.agent.db.engine import create_tables
-
-                await create_tables(self._db_engine)
+            await self._store_suite.ensure_tables_created()
             await seed_knowledge_graph(self.knowledge_graph)
             self._bootstrap_pending = False

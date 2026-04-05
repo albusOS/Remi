@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -12,24 +12,21 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { StatusDot } from "@/components/ui/StatusDot";
-import { TimeSeriesChart } from "@/components/ui/TimeSeriesChart";
 import type {
   ManagerReview,
   ManagerPropertySummary,
   DelinquencyBoard,
   LeaseCalendar,
   VacancyTracker,
-  ManagerSnapshot,
 } from "@/lib/types";
 
-type Tab = "overview" | "delinquency" | "leases" | "vacancies" | "performance" | "review";
+type Tab = "overview" | "delinquency" | "leases" | "vacancies" | "review";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "delinquency", label: "Delinquency" },
   { key: "leases", label: "Leases" },
   { key: "vacancies", label: "Vacancies" },
-  { key: "performance", label: "Performance" },
   { key: "review", label: "Review Prep" },
 ];
 
@@ -334,244 +331,6 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
   );
 }
 
-function computeTrend(
-  data: Record<string, unknown>[],
-  key: string,
-  invert = false,
-): { delta: number; pctChange: number; direction: "up" | "down" | "flat" } {
-  if (data.length < 2) return { delta: 0, pctChange: 0, direction: "flat" };
-  const first = Number(data[0][key]) || 0;
-  const last = Number(data[data.length - 1][key]) || 0;
-  const delta = last - first;
-  const pctChange = first !== 0 ? (delta / first) * 100 : 0;
-  const raw = delta > 0.01 ? "up" : delta < -0.01 ? "down" : "flat";
-  const direction = invert ? (raw === "up" ? "down" : raw === "down" ? "up" : "flat") : raw;
-  return { delta, pctChange, direction };
-}
-
-function proseSummary(
-  label: string,
-  current: string,
-  trend: { direction: "up" | "down" | "flat"; pctChange: number },
-): string {
-  const dir = trend.direction;
-  const pct = Math.abs(trend.pctChange).toFixed(0);
-  if (dir === "flat") return `${label} is steady at ${current}`;
-  const verb = dir === "up" ? "improved" : "declined";
-  return `${label} ${verb} ${pct}% to ${current} over this period`;
-}
-
-function PerformanceTab({ snapshots, managerId }: { snapshots: ManagerSnapshot[]; managerId: string }) {
-  const { data: historyData } = useApiQuery(
-    () => api.metricsHistory("manager", managerId, 180).catch(() => ({ entity_type: "manager", total: 0, snapshots: [] })),
-    [managerId],
-  );
-
-  const chartData = useMemo(
-    () =>
-      (historyData?.snapshots ?? [])
-        .map((s) => s as ManagerSnapshot)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-        .map((s) => ({
-          ...s,
-          occupancy_pct: Math.round((s.occupancy_rate ?? 0) * 1000) / 10,
-        })),
-    [historyData],
-  );
-
-  const last = chartData.length > 0 ? chartData[chartData.length - 1] : null;
-  const latestOcc = last ? last.occupancy_pct : 0;
-  const latestRev = last ? last.total_rent : 0;
-  const latestMkt = last ? last.total_market_rent : 0;
-  const latestLtl = last ? last.loss_to_lease : 0;
-  const latestDel = last ? last.delinquent_balance : 0;
-
-  const occTrend = computeTrend(chartData, "occupancy_pct");
-  const ltlTrend = computeTrend(chartData, "loss_to_lease", true);
-  const delTrend = computeTrend(chartData, "delinquent_balance", true);
-
-  const gapPct = latestMkt > 0 ? ((latestMkt - latestRev) / latestMkt * 100) : 0;
-
-  if (snapshots.length === 0 && chartData.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-sm text-fg-faint">No performance snapshots yet.</p>
-        <p className="text-xs text-fg-ghost mt-1">Snapshots are captured each time reports are uploaded.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      {chartData.length >= 2 && (
-        <>
-          {/* --- Occupancy: the big one, full-width --- */}
-          <TimeSeriesChart
-            title="Occupancy"
-            heroValue={`${latestOcc.toFixed(1)}%`}
-            heroColor={latestOcc >= 95 ? "var(--color-ok)" : latestOcc >= 90 ? "var(--color-warn)" : "var(--color-error)"}
-            summary={proseSummary("Occupancy", `${latestOcc.toFixed(1)}%`, occTrend)}
-            summaryColor={occTrend.direction === "up" ? "var(--color-ok)" : occTrend.direction === "down" ? "var(--color-error)" : undefined}
-            data={chartData}
-            height={200}
-            series={[
-              { dataKey: "occupancy_pct", color: "var(--color-ok)", label: "Occupancy %" },
-            ]}
-            yDomain={[
-              Math.min(80, ...chartData.map((d) => (Number(d.occupancy_pct) || 100) - 2)),
-              100,
-            ]}
-            yTickFormatter={(v) => `${v}%`}
-            zones={[
-              { y1: 95, y2: 100, color: "var(--color-ok)", label: "Healthy" },
-              { y1: 90, y2: 95, color: "var(--color-warn)", label: "Watch" },
-              { y1: 0, y2: 90, color: "var(--color-error)", label: "Critical" },
-            ]}
-            referenceLines={[
-              { y: 95, label: "Target", color: "var(--color-ok)", dashed: true },
-            ]}
-          />
-
-          {/* --- Revenue + Loss to Lease side-by-side --- */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <TimeSeriesChart
-              title="Revenue vs Market Potential"
-              heroValue={`$${(latestRev / 1000).toFixed(0)}k`}
-              heroColor="var(--color-accent)"
-              summary={
-                gapPct > 1
-                  ? `Capturing ${(100 - gapPct).toFixed(0)}% of market rent — ${fmt$((latestMkt - latestRev))} gap`
-                  : "Rents aligned with market"
-              }
-              summaryColor={gapPct > 5 ? "var(--color-warn)" : "var(--color-fg-faint)"}
-              data={chartData}
-              series={[
-                { dataKey: "total_market_rent", color: "var(--color-fg-ghost)", label: "Market Rent", type: "area", fillOpacity: 0.04 },
-                { dataKey: "total_rent", color: "var(--color-accent)", label: "Actual Revenue" },
-              ]}
-              yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-              gradient={true}
-            />
-            <TimeSeriesChart
-              title="Loss to Lease"
-              heroValue={latestLtl > 0 ? fmt$(latestLtl) : "$0"}
-              heroColor={latestLtl > 0 ? "var(--color-warn)" : "var(--color-ok)"}
-              summary={
-                latestLtl > 0
-                  ? proseSummary("Loss to lease", fmt$(latestLtl), ltlTrend)
-                  : "No loss to lease — rents at or above market"
-              }
-              summaryColor={ltlTrend.direction === "up" ? "var(--color-ok)" : ltlTrend.direction === "down" ? "var(--color-warn)" : undefined}
-              data={chartData}
-              series={[
-                { dataKey: "loss_to_lease", color: "var(--color-warn)", label: "Monthly LTL" },
-              ]}
-              yTickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-              referenceLines={[
-                { y: 0, color: "var(--color-ok)", dashed: true },
-              ]}
-            />
-          </div>
-
-          {/* --- Delinquency: full width, red severity shading --- */}
-          <TimeSeriesChart
-            title="Delinquency Exposure"
-            heroValue={latestDel > 0 ? fmt$(latestDel) : "$0"}
-            heroColor={latestDel > 0 ? "var(--color-error)" : "var(--color-ok)"}
-            summary={
-              latestDel > 0
-                ? proseSummary("Delinquent balance", fmt$(latestDel), delTrend)
-                : "No outstanding delinquent balances"
-            }
-            summaryColor={delTrend.direction === "up" ? "var(--color-ok)" : delTrend.direction === "down" ? "var(--color-error)" : undefined}
-            data={chartData}
-            height={180}
-            series={[
-              { dataKey: "delinquent_balance", color: "var(--color-error)", label: "Balance" },
-            ]}
-            yTickFormatter={(v) => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`}
-            referenceLines={[
-              { y: 0, color: "var(--color-ok)", dashed: true },
-            ]}
-          />
-        </>
-      )}
-
-      {/* Snapshot detail table */}
-      {snapshots.length > 0 && (
-        <details className="group">
-          <summary className="text-xs text-fg-muted cursor-pointer hover:text-fg-secondary transition-colors">
-            Snapshot detail table ({snapshots.length})
-          </summary>
-          <div className="mt-3 rounded-xl border border-border bg-surface overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Snapshot</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Props</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Units</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Occ</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Revenue</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">LTL</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Delinquent</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Vacant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()).map((s, i, arr) => {
-                    const prev = i > 0 ? arr[i - 1] : null;
-                    return (
-                      <tr key={s.timestamp} className="border-b border-border-subtle hover:bg-surface-raised">
-                        <td className="px-4 py-2 text-fg-secondary text-[10px]">{fmtDate(s.timestamp)}</td>
-                        <td className="px-4 py-2 text-right text-fg-secondary">{s.property_count}</td>
-                        <td className="px-4 py-2 text-right text-fg-secondary">
-                          {s.total_units}
-                          {prev && s.total_units !== prev.total_units && <Delta prev={prev.total_units} curr={s.total_units} />}
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <span className={s.occupancy_rate < 0.9 ? "text-warn" : "text-fg-secondary"}>{pct(s.occupancy_rate)}</span>
-                          {prev && <Delta prev={prev.occupancy_rate} curr={s.occupancy_rate} fmt={pct} />}
-                        </td>
-                        <td className="px-4 py-2 text-right text-fg-secondary">
-                          {fmt$(s.total_rent)}
-                          {prev && <Delta prev={prev.total_rent} curr={s.total_rent} fmt={fmt$} />}
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <span className={s.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}>{s.loss_to_lease > 0 ? fmt$(s.loss_to_lease) : "—"}</span>
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <span className={s.delinquent_count > 0 ? "text-error" : "text-fg-muted"}>{s.delinquent_count || "—"}</span>
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <span className={s.vacant > 0 ? "text-error" : "text-fg-muted"}>{s.vacant || "—"}</span>
-                          {prev && <Delta prev={prev.vacant} curr={s.vacant} invert />}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </details>
-      )}
-    </div>
-  );
-}
-
-function Delta({ prev, curr, fmt: fmtFn, invert }: { prev: number; curr: number; fmt?: (n: number) => string; invert?: boolean }) {
-  const diff = curr - prev;
-  if (Math.abs(diff) < 0.001) return null;
-  const positive = invert ? diff < 0 : diff > 0;
-  const display = fmtFn ? fmtFn(Math.abs(diff)) : String(Math.abs(diff));
-  return (
-    <span className={`ml-1 text-[9px] font-bold ${positive ? "text-ok" : "text-error"}`}>
-      {positive ? "+" : "-"}{display}
-    </span>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
@@ -589,12 +348,11 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const [deleting, setDeleting] = useState(false);
 
   const { data, loading, refetch } = useApiQuery(async () => {
-    const [review, delinquency, leases, vacancies, snaps, actionItems] = await Promise.all([
+    const [review, delinquency, leases, vacancies, actionItems] = await Promise.all([
       api.getManagerReview(managerId).catch(() => null),
       api.delinquencyBoard(managerId).catch(() => null),
       api.leasesExpiring(90, managerId).catch(() => null),
       api.vacancyTracker(managerId).catch(() => null),
-      api.snapshots(managerId).catch(() => ({ total: 0, snapshots: [] })),
       api.listActionItems({ manager_id: managerId }).catch(() => ({ total: 0, items: [] })),
     ]);
 
@@ -603,7 +361,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
       delinquency: delinquency as DelinquencyBoard | null,
       leases: leases as LeaseCalendar | null,
       vacancies: vacancies as VacancyTracker | null,
-      snapshots: snaps.snapshots as ManagerSnapshot[],
       actionCount: actionItems.total,
     };
   }, [managerId]);
@@ -612,7 +369,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const delinquency = data?.delinquency ?? null;
   const leases = data?.leases ?? null;
   const vacancies = data?.vacancies ?? null;
-  const snapshots = data?.snapshots ?? [];
   const actionCount = data?.actionCount ?? 0;
 
   function startEdit() {
@@ -672,7 +428,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const delCount = delinquency?.total_delinquent ?? 0;
   const leaseCount = leases?.total_expiring ?? 0;
   const vacCount = (vacancies?.total_vacant ?? 0) + (vacancies?.total_notice ?? 0);
-  const snapCount = snapshots.length;
 
   return (
     <PageContainer wide>
@@ -749,7 +504,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
         {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
           {TABS.map(({ key, label }) => {
-            const count = key === "delinquency" ? delCount : key === "leases" ? leaseCount : key === "vacancies" ? vacCount : key === "performance" ? snapCount : key === "review" ? actionCount : 0;
+            const count = key === "delinquency" ? delCount : key === "leases" ? leaseCount : key === "vacancies" ? vacCount : key === "review" ? actionCount : 0;
             return (
               <button
                 key={key}
@@ -778,7 +533,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
         {tab === "delinquency" && <DelinquencyTab data={delinquency} />}
         {tab === "leases" && <LeasesTab data={leases} />}
         {tab === "vacancies" && <VacanciesTab data={vacancies} />}
-        {tab === "performance" && <PerformanceTab snapshots={snapshots} managerId={managerId} />}
         {tab === "review" && <ReviewPrepTab managerId={managerId} />}
     </PageContainer>
   );

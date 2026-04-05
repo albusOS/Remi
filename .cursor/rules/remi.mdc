@@ -65,6 +65,33 @@ it worse.
 - Keep imports direct and honest. If module A uses a type from module B
   at runtime, import it at the top of the file.
 
+### Barrel Exports (`__init__.py` as Public API)
+
+Every package with external consumers must define its public API in
+`__init__.py` with explicit re-exports and `__all__`.
+
+**Rules:**
+- **Import from the package, not the module.** Write
+  `from remi.agent.graph import KnowledgeStore`, not
+  `from remi.agent.graph.stores import KnowledgeStore`.
+- **Factories belong on the barrel.** If a package has a `factory.py`,
+  re-export its public functions from `__init__.py`.
+- **`__all__` is required** on every barrel — it defines the contract.
+- **Internal modules stay private.** `mem.py`, `pg.py`, adapter
+  implementations — these are imported by the barrel, never by consumers.
+- **Three-segment depth max for cross-layer imports.** `shell/` and
+  `application/` should not import deeper than
+  `remi.agent.<package>` or `remi.application.<package>`.
+  Deeper paths are acceptable only within the same layer.
+
+**Exceptions:**
+- `application/services/` subpackages (ingestion, seeding,
+  embedding) — deep service paths are acceptable when the service has
+  a single consumer and no barrel would add clarity.
+- Test files may import internal modules for setup/mocking.
+- `application/api/` routers importing within their own slice is fine —
+  each slice barrel (`portfolio/`, `operations/`, etc.) is the public entry point.
+
 ## Tests
 
 - Only write tests for meaningful behavior — not implementation details
@@ -75,8 +102,8 @@ it worse.
 ## Architecture: An Agent Operating System
 
 REMI is an agent operating system — the runtime that lets an AI agent
-monitor a director's book of business, detect situations, and act. Four
-packages; the directory tree is the documentation.
+reason over a director's book of business. Four packages; the directory
+tree is the documentation.
 
 ```
 types/ ← agent/ ← application/ ← shell/
@@ -95,37 +122,56 @@ src/remi/
     vectors/          Embedding ports + adapters
     sandbox/          Code execution ports + adapters
     observe/          Structured logging, tracing
-    signals/          Signal types, stores, producers
+    signals/          Signal types, TBox, stores, producers (agent infra)
     graph/            Knowledge graph types, bridge, retriever
     documents/        Document types, stores, parsers
     db/               Database engine + tables
     runtime/          Execution loop, tool dispatch, streaming
+      conversation/   Thread management, compression (internal)
     context/          Perception, context builder, intent
-    ingestion/        Generic LLM pipeline runner
-    conversation/     Thread management, compression
+    pipeline/         Generic YAML-driven LLM pipeline executor
+    sessions/         Chat session persistence + in-memory adapter
     tools/            Domain-agnostic tool implementations
+    workspace/        Agent working memory (Markdown scratchpad)
 
   application/        # Real estate product (hexagonal)
-    core/             Pure business: models, protocols, rules, rollups
+    core/             Pure business: models, protocols, rules, events
     services/         Orchestration: queries, ingestion, embedding,
-                      monitoring (signals, snapshots), seeding, search
+                      seeding, search
+      ingestion/      Rule-based + LLM ingestion (rules.py, pipeline.py,
+                      service.py, persist.py, managers.py)
     infra/            Port implementations: stores (mem, pg), ontology,
-                      adapters (appfolio)
+                      ports (agent ↔ application bridges)
     tools/            Agent tool registrations
     agents/           RE agent YAML manifests
+    realtime/         WebSocket event broadcasting (connection_manager)
+    api/              HTTP delivery — vertical slices:
+      portfolio/      managers, properties, units, portfolios
+      operations/     leases, maintenance, tenants, actions, notes
+      intelligence/   signals, dashboard, search, ontology, knowledge, events
+      system/         agents, documents, seed, usage, realtime
+    cli/              CLI delivery — vertical slices:
+      portfolio/      managers, property, units, portfolios, rent_roll
+      operations/     leases, maintenance, tenants
+      intelligence/   dashboard, search, ontology, graph, trace, research
+      system/         agents, documents, seed, demo, vectors, bench, db
 
   types/              # Shared vocabulary — ids, clock, errors, enums
 
   shell/              # Composition root — DI container, settings, API, CLI
     config/           container, settings, domain.yaml
-    api/              FastAPI routers, schemas, dependencies
-    cli/              Typer commands
+    api/              FastAPI app factory, error handlers, middleware, DI
+    cli/              Typer CLI entry point (registers all command groups)
 ```
 
 **State the intended package before creating a new file.**
 
-**There is no `domain/` package.** It was deleted. Do not create `src/remi/domain/`
+**There is no `domain/` package.** Do not create `src/remi/domain/`
 or import from `remi.domain`. The real estate domain lives in `application/`.
+
+**There is no `detection/` package.** The precomputed entailment engine
+and snapshot system have been deleted. Do not create or import from
+`remi.application.services.detection`.
 
 **Dependency direction:** `application/` imports from `agent/` — never
 the reverse. `shell/` imports from both. `types/` imports nothing.
@@ -166,22 +212,69 @@ Port interfaces for storage live in `application/core/protocols.py` as
 
 Each module owns the factory for the thing it defines:
 
-- `application/services/monitoring/signals/pipeline.py` -> `build_signal_pipeline()`
 - `application/infra/ontology/bridge.py` -> `build_knowledge_graph()`
 - `agent/context/builder.py` -> `build_context_builder()`
-- `application/infra/stores/factory.py` -> `build_property_store()`, `build_rollup_store()`
+- `application/infra/stores/factory.py` -> `build_store_suite()`
 - `agent/llm/factory.py` -> `build_provider_factory()`
 - `agent/vectors/embedder.py` -> `build_embedder()`
 - `agent/sandbox/factory.py` -> `build_sandbox()`
 
 `container.py` calls these — it does not inline assembly.
 
+## Ingestion — Rules First, LLM Fallback
+
+Data ingestion uses a **two-tier pipeline**:
+
+1. **Rule-based** (`application/services/ingestion/rules.py`): deterministic
+   column-header detection, static column mapping, junk filtering, address
+   normalization. Zero API calls. Handles all known AppFolio report types.
+2. **LLM fallback** (`application/services/ingestion/service.py`): three-stage
+   YAML pipeline (classify → extract → enrich). Used only when rule engine
+   can't match.
+
+Both tiers converge at `resolve_and_persist` for the same persistence path.
+
+**Rules:**
+- **Add new report types to `rules.py` first.** Only use the LLM path
+  for genuinely unknown formats.
+- **Property Directory is always seeded first** — it establishes the manager
+  and property source of truth.
+- **Never treat lease tags as manager names.** The `Tags` column in
+  delinquency reports maps to `_lease_tags` (dropped), not `tags`.
+- **Filter junk rows** — AppFolio internal entries ("1234 ADMIN",
+  "Auto Loan", etc.) are not properties.
+- **Normalize addresses** — strip "DO NOT USE" prefixes before slugifying.
+
+## Real-Time Communication
+
+- **Agent chat** uses the REST streaming endpoint
+  `POST /api/v1/agents/{name}/ask` — NDJSON events (`delta`, `tool_call`,
+  `tool_result`, `done`). No WebSocket chat.
+- **Lifecycle events** (ingestion complete) use
+  `ws://host/ws/events` — a broadcast pub-sub channel.
+- `application/realtime/` exports only `connection_manager`.
+
 ## Key Constraints
 
 - `shell/config/domain.yaml` is the source of truth for signal definitions,
   thresholds, and rules — do not hardcode these values in Python
-- The LLM agent does NOT detect signals — the entailment engine does.
-  The LLM explains, connects, recommends, and codifies.
+- The agent reasons over data via tools — there is no precomputed signal
+  engine. The TBox defines the vocabulary; the agent queries on demand.
 - `types/` is for cross-cutting primitives only — no business logic
 - Prefer small focused modules over accumulating logic in an existing file
 - When a file is growing beyond a single clear responsibility, flag it
+
+## What Was Deleted (Do Not Recreate)
+
+These systems were removed as compensatory complexity. Do not recreate them:
+
+- **Entailment engine** (`application/services/detection/signals/`) — 7 evaluators
+  + engine + pipeline that precomputed signals. The agent queries data directly now.
+- **Snapshot/rollup system** (`SnapshotService`, `RollupStore`) — point-in-time
+  metric captures. Replaced by the event system (`core/events.py`).
+- **Synthetic data generation** (`seeding/synthetic.py`, `_backfill_history`) —
+  fake data to populate snapshots.
+- **Dev cache** (`StoreBundle`, `dump_state`/`load_state`) — JSON snapshots of
+  in-memory stores for faster development cycles.
+- **Timeline recorder** (`TimelineRecorder`, `KnowledgeGraphTimelineRecorder`) —
+  dead abstraction that was never properly wired.

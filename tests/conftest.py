@@ -1,10 +1,9 @@
-"""Shared test fixtures for the signal-layer test suite."""
+"""Shared test fixtures for the test suite."""
 
 from __future__ import annotations
 
 import pytest
 
-from remi.application.services.monitoring.signals.engine import EntailmentEngine
 from remi.application.infra.ontology.schema import load_domain_yaml
 from remi.application.core.models import (
     Address,
@@ -31,19 +30,6 @@ def signal_store() -> InMemorySignalStore:
 @pytest.fixture
 def property_store() -> InMemoryPropertyStore:
     return InMemoryPropertyStore()
-
-
-@pytest.fixture
-def engine(
-    domain_tbox: DomainTBox,
-    property_store: InMemoryPropertyStore,
-    signal_store: InMemorySignalStore,
-) -> EntailmentEngine:
-    return EntailmentEngine(
-        domain=domain_tbox,
-        property_store=property_store,
-        signal_store=signal_store,
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,7 @@ class ContextBuilder:
         signal_store: SignalStore | None = None,
         graph_retriever: GraphRetriever | None = None,
         embedder: Embedder | None = None,
+        vector_store: VectorStore | None = None,
         token_budget: int = _DEFAULT_TOKEN_BUDGET,
         empty_state_label: str = "monitored entities",
     ) -> None:
@@ -65,6 +66,7 @@ class ContextBuilder:
         self._signal_store = signal_store
         self._graph_retriever = graph_retriever
         self._embedder = embedder
+        self._vector_store = vector_store
         self._token_budget = token_budget
         self._empty_state_label = empty_state_label
 
@@ -91,6 +93,7 @@ class ContextBuilder:
         run_all = phases is None
         needs_signals = run_all or (phases is not None and "signals" in phases)
         needs_graph = run_all or (phases is not None and "graph" in phases)
+        needs_documents = run_all or (phases is not None and "documents" in phases)
 
         frame.policies = list(getattr(self._domain, "policies", []))
         frame.causal_chains = list(getattr(self._domain, "causal_chains", []))
@@ -170,7 +173,32 @@ class ContextBuilder:
             except Exception:
                 _log.warning(Event.GRAPH_RETRIEVAL_FAILED, exc_info=True)
 
-        await asyncio.gather(_fetch_signals(), _fetch_graph())
+        async def _fetch_documents() -> None:
+            if not (needs_documents and question and self._vector_store and self._embedder):
+                return
+            try:
+                query_vec = await self._embedder.embed_one(question)
+                results = await self._vector_store.search(
+                    query_vec,
+                    limit=5,
+                    min_score=0.3,
+                    metadata_filter=None,
+                )
+                doc_types = {"DocumentRow", "DocumentChunk"}
+                doc_hits = [r for r in results if r.record.source_entity_type in doc_types]
+                if doc_hits:
+                    parts = ["Relevant knowledge base passages:"]
+                    for hit in doc_hits[:5]:
+                        fname = hit.record.metadata.get("filename", "unknown")
+                        page = hit.record.metadata.get("page")
+                        loc = f" (page {page})" if page is not None else ""
+                        snippet = hit.record.text[:400]
+                        parts.append(f"- [{fname}{loc}]: {snippet}")
+                    frame.document_context = "\n".join(parts)
+            except Exception:
+                _log.warning("document_context_fetch_failed", exc_info=True)
+
+        await asyncio.gather(_fetch_signals(), _fetch_graph(), _fetch_documents())
 
         return frame
 
@@ -207,6 +235,20 @@ class ContextBuilder:
                 if trimmed:
                     thread.insert(insert_idx, Message(role="system", content=trimmed))
                     remaining -= estimate_tokens(trimmed)
+                    insert_idx += 1
+
+        if frame.document_context and remaining > 200:
+            doc_budget = min(remaining // 3, 2000)
+            doc_cost = estimate_tokens(frame.document_context)
+            if doc_cost <= doc_budget:
+                thread.insert(insert_idx, Message(role="system", content=frame.document_context))
+                remaining -= doc_cost
+                insert_idx += 1
+            else:
+                trimmed_doc = truncate_to_tokens(frame.document_context, doc_budget)
+                if trimmed_doc:
+                    thread.insert(insert_idx, Message(role="system", content=trimmed_doc))
+                    remaining -= estimate_tokens(trimmed_doc)
                     insert_idx += 1
 
         if remaining > 200:
@@ -260,5 +302,6 @@ def build_context_builder(
         signal_store=signal_store,
         graph_retriever=graph_retriever,
         embedder=embedder,
+        vector_store=vector_store,
         empty_state_label=empty_state_label,
     )

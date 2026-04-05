@@ -1,8 +1,8 @@
 import type {
   ActionItemResponse,
   AgentMeta,
+  ChangeSetSummary,
   EntityNoteResponse,
-  MetricsHistoryResponse,
   ModelsConfig,
   ManagerListItem,
   ManagerNoteResponse,
@@ -16,7 +16,9 @@ import type {
   RentRollResponse,
   DocumentMeta,
   SearchResponse,
-  SnapshotHistory,
+  SignalDigest,
+  SignalExplain,
+  SignalSummary,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -54,20 +56,10 @@ export const api = {
   needsManager: () =>
     get<NeedsManagerResponse>("/api/v1/dashboard/needs-manager"),
 
-  snapshots: (managerId?: string) =>
-    get<SnapshotHistory>(`/api/v1/dashboard/snapshots${qs({ manager_id: managerId })}`),
-
   // --- Search ---
 
   search: (q: string, limit = 10) =>
     get<SearchResponse>(`/api/v1/search${qs({ q, limit })}`),
-
-  // --- Metrics History ---
-
-  metricsHistory: (entityType: string, entityId?: string, days?: number, managerId?: string) =>
-    get<MetricsHistoryResponse>(`/api/v1/dashboard/metrics-history${qs({
-      entity_type: entityType, entity_id: entityId, days, manager_id: managerId,
-    })}`),
 
   // --- Managers ---
 
@@ -89,10 +81,12 @@ export const api = {
   getRentRoll: (propertyId: string) =>
     get<RentRollResponse>(`/api/v1/properties/${propertyId}/rent-roll`),
 
-  // --- Documents ---
+  // --- Documents / Knowledge Base ---
 
-  listDocuments: () =>
-    get<{ documents: DocumentMeta[] }>("/api/v1/documents").then((r) => r.documents),
+  listDocuments: (params?: { q?: string; kind?: string; tags?: string; sort?: string; limit?: number }) =>
+    get<{ documents: DocumentMeta[] }>(
+      `/api/v1/documents${qs(params || {})}`
+    ).then((r) => r.documents),
 
   getDocument: (id: string) =>
     get<DocumentMeta & { preview: Record<string, unknown>[] }>(`/api/v1/documents/${id}`),
@@ -101,6 +95,24 @@ export const api = {
     get<{ rows: Record<string, unknown>[]; count: number }>(
       `/api/v1/documents/${id}/rows?limit=${limit}`
     ),
+
+  queryChunks: (id: string, limit = 100) =>
+    get<{ document_id: string; chunks: { index: number; text: string; page: number | null }[]; count: number }>(
+      `/api/v1/documents/${id}/chunks?limit=${limit}`
+    ),
+
+  listDocumentTags: () =>
+    get<{ tags: string[] }>("/api/v1/documents/tags").then((r) => r.tags),
+
+  updateDocumentTags: async (id: string, tags: string[]) => {
+    const res = await fetch(`${BASE}/api/v1/documents/${id}/tags`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ tags: string[] }>;
+  },
 
   uploadDocument: async (file: File, manager?: string) => {
     const form = new FormData();
@@ -117,9 +129,14 @@ export const api = {
     return res.json() as Promise<{
       id: string;
       filename: string;
+      kind: string;
       row_count: number;
       report_type: string;
       columns: string[];
+      chunk_count: number;
+      page_count: number;
+      tags: string[];
+      size_bytes: number;
       knowledge: {
         entities_extracted: number;
         relationships_extracted: number;
@@ -328,4 +345,48 @@ export const api = {
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
     return res.json() as Promise<{ deleted: boolean }>;
   },
+
+  // --- Signals ---
+
+  listSignals: (params?: { manager_id?: string; property_id?: string; severity?: string; signal_type?: string }) =>
+    get<{ count: number; signals: SignalSummary[] }>(`/api/v1/signals${qs(params || {})}`),
+
+  signalDigest: () =>
+    get<SignalDigest>("/api/v1/signals/digest"),
+
+  getSignal: (signalId: string) =>
+    get<SignalSummary>(`/api/v1/signals/${signalId}`),
+
+  explainSignal: (signalId: string) =>
+    get<SignalExplain>(`/api/v1/signals/${signalId}/explain`),
+
+  signalFeedback: async (signalId: string, outcome: string, notes?: string) => {
+    const res = await fetch(`${BASE}/api/v1/signals/${signalId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome, notes: notes ?? "" }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ feedback_id: string; signal_id: string; outcome: string }>;
+  },
+
+  // --- Events / Audit Trail ---
+
+  listEvents: (limit = 20) =>
+    get<{ count: number; changesets: ChangeSetSummary[] }>(`/api/v1/events${qs({ limit })}`),
+
+  getEvent: (changesetId: string) =>
+    get<ChangeSetSummary>(`/api/v1/events/${changesetId}`),
+
+  entityEvents: (entityId: string, limit = 50) =>
+    get<{ entity_id: string; count: number; changesets: ChangeSetSummary[] }>(
+      `/api/v1/events/entity/${entityId}${qs({ limit })}`,
+    ),
+
+  // --- Usage ---
+
+  usageSummary: () =>
+    get<{ total_cost: number; total_tokens: number; total_calls: number; by_provider: Record<string, unknown> }>(
+      "/api/v1/usage/summary",
+    ),
 };

@@ -82,7 +82,7 @@ def print_banner(
     server_table.add_column(style="dim", width=16)
     server_table.add_column()
     server_table.add_row("API", f"http://{host}:{port}")
-    server_table.add_row("WebSocket", f"ws://{host}:{port}/ws/chat")
+    server_table.add_row("Events WS", f"ws://{host}:{port}/ws/events")
     server_table.add_row("Frontend", "http://localhost:3000")
     server_table.add_row(
         "Options",

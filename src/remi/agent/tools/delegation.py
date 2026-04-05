@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 import structlog
 
-from remi.agent.types import ToolArg, ToolDefinition, ToolRegistry
+from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 
 logger = structlog.get_logger("remi.agent.tools.delegation")
 
@@ -32,112 +32,103 @@ class AgentInvoker(Protocol):
     ) -> tuple[str | None, str]: ...
 
 
-def register_delegation_tools(
-    registry: ToolRegistry,
-    *,
-    agent_invoker: AgentInvoker | None = None,
-    available_agents: dict[str, str] | None = None,
-) -> None:
-    """Register the ``delegate_to_agent`` tool.
+class DelegationToolProvider(ToolProvider):
+    def __init__(
+        self,
+        agent_invoker: AgentInvoker,
+        available_agents: dict[str, str],
+    ) -> None:
+        self._invoker = agent_invoker
+        self._agents = available_agents
 
-    *available_agents* maps agent name → description. Supplied by the
-    domain profile; when empty, the tool is not registered.
+    def register(self, registry: ToolRegistry) -> None:
+        agents = self._agents
+        _invoker = self._invoker
 
-    Only registered when both an ``agent_invoker`` and at least one
-    available agent are provided.
-    """
-    if agent_invoker is None:
-        return
-    agents = available_agents or {}
-    if not agents:
-        return
+        async def delegate_to_agent(args: dict[str, Any]) -> Any:
+            agent_name = args.get("agent_name", "")
+            task = args.get("task", "")
+            context = args.get("context", "")
 
-    _invoker = agent_invoker
+            if not agent_name:
+                return {"error": "agent_name is required"}
+            if not task:
+                return {"error": "task is required"}
 
-    async def delegate_to_agent(args: dict[str, Any]) -> Any:
-        agent_name = args.get("agent_name", "")
-        task = args.get("task", "")
-        context = args.get("context", "")
+            if agent_name not in agents:
+                return {
+                    "error": f"Unknown agent '{agent_name}'",
+                    "available_agents": list(agents.keys()),
+                }
 
-        if not agent_name:
-            return {"error": "agent_name is required"}
-        if not task:
-            return {"error": "task is required"}
+            prompt = task
+            if context:
+                prompt = f"{task}\n\n## Context from parent agent\n{context}"
 
-        if agent_name not in agents:
+            logger.info(
+                "delegate_to_agent",
+                agent_name=agent_name,
+                task_length=len(task),
+                has_context=bool(context),
+            )
+
+            try:
+                answer, run_id = await _invoker.ask(agent_name, prompt, mode="agent")
+            except Exception as exc:
+                logger.error(
+                    "delegate_to_agent_error",
+                    agent_name=agent_name,
+                    error=str(exc),
+                )
+                return {"error": str(exc), "agent_name": agent_name}
+
             return {
-                "error": f"Unknown agent '{agent_name}'",
-                "available_agents": list(agents.keys()),
+                "agent_name": agent_name,
+                "run_id": run_id,
+                "response": answer or "",
             }
 
-        prompt = task
-        if context:
-            prompt = f"{task}\n\n## Context from parent agent\n{context}"
-
-        logger.info(
-            "delegate_to_agent",
-            agent_name=agent_name,
-            task_length=len(task),
-            has_context=bool(context),
+        agent_descriptions = "\n".join(
+            f"  - **{name}**: {desc}" for name, desc in agents.items()
         )
 
-        try:
-            answer, run_id = await _invoker.ask(agent_name, prompt, mode="agent")
-        except Exception as exc:
-            logger.error(
-                "delegate_to_agent_error",
-                agent_name=agent_name,
-                error=str(exc),
-            )
-            return {"error": str(exc), "agent_name": agent_name}
-
-        return {
-            "agent_name": agent_name,
-            "run_id": run_id,
-            "response": answer or "",
-        }
-
-    agent_descriptions = "\n".join(
-        f"  - **{name}**: {desc}" for name, desc in agents.items()
-    )
-
-    registry.register(
-        "delegate_to_agent",
-        delegate_to_agent,
-        ToolDefinition(
-            name="delegate_to_agent",
-            description=(
-                "Delegate a task to a specialist agent. "
-                "The specialist runs autonomously with its own tools and "
-                "returns its output. Use this for tasks that require deep "
-                "analysis, structured research, or specialized workflows.\n\n"
-                f"Available agents:\n{agent_descriptions}"
+        registry.register(
+            "delegate_to_agent",
+            delegate_to_agent,
+            ToolDefinition(
+                name="delegate_to_agent",
+                description=(
+                    "Delegate a task to a specialist agent. "
+                    "The specialist runs autonomously with its own tools and "
+                    "returns its output. Use this for tasks that require deep "
+                    "analysis, structured research, or specialized workflows.\n\n"
+                    f"Available agents:\n{agent_descriptions}"
+                ),
+                args=[
+                    ToolArg(
+                        name="agent_name",
+                        description=(
+                            f"Name of the specialist agent to invoke. "
+                            f"One of: {', '.join(agents.keys())}"
+                        ),
+                        required=True,
+                    ),
+                    ToolArg(
+                        name="task",
+                        description=(
+                            "The task or question to delegate. Be specific — the "
+                            "specialist has no context from your conversation unless "
+                            "you provide it."
+                        ),
+                        required=True,
+                    ),
+                    ToolArg(
+                        name="context",
+                        description=(
+                            "Optional context to pass to the specialist: relevant "
+                            "data, constraints, or prior findings from your analysis."
+                        ),
+                    ),
+                ],
             ),
-            args=[
-                ToolArg(
-                    name="agent_name",
-                    description=(
-                        f"Name of the specialist agent to invoke. "
-                        f"One of: {', '.join(agents.keys())}"
-                    ),
-                    required=True,
-                ),
-                ToolArg(
-                    name="task",
-                    description=(
-                        "The task or question to delegate. Be specific — the "
-                        "specialist has no context from your conversation unless "
-                        "you provide it."
-                    ),
-                    required=True,
-                ),
-                ToolArg(
-                    name="context",
-                    description=(
-                        "Optional context to pass to the specialist: relevant "
-                        "data, constraints, or prior findings from your analysis."
-                    ),
-                ),
-            ],
-        ),
-    )
+        )

@@ -187,29 +187,6 @@ export interface NeedsManagerResponse {
   properties: NeedsManagerProperty[];
 }
 
-// --- Performance Snapshots ---
-
-export interface ManagerSnapshot {
-  manager_id: string;
-  manager_name: string;
-  timestamp: string;
-  property_count: number;
-  total_units: number;
-  occupied: number;
-  vacant: number;
-  occupancy_rate: number;
-  total_rent: number;
-  total_market_rent: number;
-  loss_to_lease: number;
-  delinquent_count: number;
-  delinquent_balance: number;
-}
-
-export interface SnapshotHistory {
-  total: number;
-  snapshots: ManagerSnapshot[];
-}
-
 // --- Portfolio & Property ---
 
 export interface PortfolioSummary {
@@ -357,15 +334,28 @@ export interface MaintenanceSummary {
   total_cost: number;
 }
 
-// --- Documents ---
+// --- Documents / Knowledge Base ---
+
+export type DocumentKind = "tabular" | "text" | "image";
+
+export interface TextChunk {
+  index: number;
+  text: string;
+  page: number | null;
+}
 
 export interface DocumentMeta {
   id: string;
   filename: string;
   content_type: string;
+  kind: DocumentKind;
   row_count: number;
   columns: string[];
   report_type: string;
+  chunk_count: number;
+  page_count: number;
+  tags: string[];
+  size_bytes: number;
   uploaded_at: string;
 }
 
@@ -534,30 +524,60 @@ export interface SearchResponse {
   total: number;
 }
 
-// --- Metrics History ---
+// --- Signals ---
 
-export interface PropertySnapshot {
-  property_id: string;
-  property_name: string;
-  manager_id: string;
-  manager_name: string;
-  timestamp: string;
-  total_units: number;
-  occupied: number;
-  vacant: number;
-  occupancy_rate: number;
-  total_rent: number;
-  total_market_rent: number;
-  loss_to_lease: number;
-  maintenance_open: number;
-  maintenance_closed: number;
-  avg_maintenance_cost: number;
+export interface SignalSummary {
+  signal_id: string;
+  signal_type: string;
+  severity: "critical" | "high" | "medium" | "low";
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  description: string;
+  detected_at: string;
 }
 
-export interface MetricsHistoryResponse {
+export interface SignalDigestEntity {
+  entity_id: string;
   entity_type: string;
-  total: number;
-  snapshots: (ManagerSnapshot | PropertySnapshot)[];
+  entity_name: string;
+  worst_severity: "critical" | "high" | "medium" | "low";
+  signal_count: number;
+  severity_counts: Record<string, number>;
+  signals: SignalSummary[];
+}
+
+export interface SignalDigest {
+  total_signals: number;
+  total_entities: number;
+  severity_counts: Record<string, number>;
+  entities: SignalDigestEntity[];
+}
+
+export interface SignalExplain extends SignalSummary {
+  provenance: string;
+  evidence: Record<string, unknown>;
+}
+
+// --- Events / Audit ---
+
+export interface ChangeEvent {
+  entity_type: string;
+  entity_id: string;
+  action: "created" | "updated" | "removed";
+  changes: Record<string, unknown>;
+}
+
+export interface ChangeSetSummary {
+  changeset_id: string;
+  source: string;
+  report_type: string | null;
+  document_id: string | null;
+  timestamp: string;
+  created: number;
+  updated: number;
+  removed: number;
+  events: ChangeEvent[];
 }
 
 // --- Agents ---

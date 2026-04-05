@@ -56,10 +56,13 @@ Use `structlog` for all logging, not `print` or `logging` directly.
 ```
 src/remi/
   agent/           # AI infrastructure — LLM, vectors, sandbox, tracing, signals,
-                   # graph, documents, DB, runtime, context, conversation,
-                   # ingestion runner, tools
-  application/     # RE product (hexagonal) — core models/protocols, services,
-                   # infra adapters, API routers, CLI commands, tools, agents
+                   # graph, documents, DB, runtime (incl. conversation), pipeline,
+                   # sessions, tools, workspace
+  application/     # RE product (hexagonal) — core models/protocols, services
+                   # (detection, ingestion, embedding, queries, seeding),
+                   # infra (stores, ontology, adapters), tools, agents
+                   # API: portfolio/ operations/ intelligence/ system/
+                   # CLI: portfolio/ operations/ intelligence/ system/
   types/           # Shared vocabulary — ids, clock, errors, enums
   shell/           # Composition root — DI container, settings, API factory, CLI entry
 ```
@@ -81,7 +84,7 @@ The LLM's job is abductive reasoning: explain, connect, recommend, codify.
 | `src/remi/application/agents/director/app.yaml` | Director agent manifest |
 | `src/remi/application/agents/researcher/app.yaml` | Researcher agent manifest |
 | `src/remi/agent/runtime/node.py` | AgentNode — config-driven think-act-observe loop |
-| `src/remi/application/services/monitoring/signals/engine.py` | Entailment engine — evaluates rules, produces signals |
+| `src/remi/application/services/detection/signals/engine.py` | Entailment engine — evaluates rules, produces signals |
 | `src/remi/application/services/ingestion/service.py` | IngestionService — report type detection + dispatch |
 | `src/remi/application/services/ingestion/managers.py` | Manager classification + ManagerResolver |
 | `src/remi/agent/context/builder.py` | Assembles agent context from graph + signals |

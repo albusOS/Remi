@@ -7,9 +7,8 @@ Subpackages:
 Core modules (types layer):
   enums      — Severity, RuleCondition, Horizon, Deontic, SignalOutcome
   tbox       — SignalDefinition, Policy, CausalChain, DomainTBox, MutableTBox
-  signal     — Signal, ProducerResult, SignalProducer
+  signal     — Signal, ProducerResult, SignalProducer, signal_id
   feedback   — SignalFeedback, SignalFeedbackSummary
-  evaluation — MakeSignalFn, EntailmentResult, signal_id
 """
 
 from remi.agent.graph.types import KnowledgeProvenance as Provenance
@@ -20,10 +19,10 @@ from remi.agent.signals.enums import (
     Severity,
     SignalOutcome,
 )
-from remi.agent.signals.evaluation import EntailmentResult, MakeSignalFn, signal_id
 from remi.agent.signals.feedback import SignalFeedback, SignalFeedbackSummary
+from remi.agent.signals.persistence.factory import build_feedback_store, build_signal_store
 from remi.agent.signals.persistence.stores import FeedbackStore, SignalStore
-from remi.agent.signals.signal import ProducerResult, Signal, SignalProducer
+from remi.agent.signals.signal import ProducerResult, Signal, SignalProducer, signal_id
 from remi.agent.signals.tbox import (
     CausalChain,
     CompositionRule,
@@ -58,14 +57,14 @@ __all__ = [
     "ProducerResult",
     "Signal",
     "SignalProducer",
+    "signal_id",
     # feedback
     "SignalFeedback",
     "SignalFeedbackSummary",
-    # evaluation primitives
-    "EntailmentResult",
-    "MakeSignalFn",
-    "signal_id",
     # stores (re-exported from persistence/)
     "FeedbackStore",
     "SignalStore",
+    # factories
+    "build_feedback_store",
+    "build_signal_store",
 ]

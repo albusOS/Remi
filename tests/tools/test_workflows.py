@@ -8,6 +8,8 @@ from decimal import Decimal
 import pytest
 
 from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
+from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
+from remi.agent.tools.registry import InMemoryToolRegistry
 from remi.application.core.models import (
     ActionItem,
     ActionItemPriority,
@@ -22,12 +24,10 @@ from remi.application.core.models import (
     Unit,
     UnitStatus,
 )
+from remi.application.infra.stores.mem import InMemoryPropertyStore
 from remi.application.services.queries.dashboard import DashboardQueryService
 from remi.application.services.queries.managers import ManagerReviewService
-from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
-from remi.application.infra.stores.mem import InMemoryPropertyStore
-from remi.agent.tools.registry import InMemoryToolRegistry
-from remi.application.tools.workflows import register_workflow_tools
+from remi.application.tools.workflows import WorkflowToolProvider
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 TODAY = date.today()
@@ -52,16 +52,12 @@ def setup():
     )
 
     mr = ManagerReviewService(property_store=ps)
-    ds = DashboardQueryService(property_store=ps, knowledge_store=ks)
+    from remi.application.infra.ports import KnowledgeStoreReader
+
+    ds = DashboardQueryService(property_store=ps, knowledge_reader=KnowledgeStoreReader(ks))
 
     registry = InMemoryToolRegistry()
-    register_workflow_tools(
-        registry,
-        property_store=ps,
-        knowledge_graph=kg,
-        manager_review=mr,
-        dashboard_service=ds,
-    )
+    WorkflowToolProvider(ps, kg, mr, ds).register(registry)
 
     return registry, ps, kg
 

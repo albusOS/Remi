@@ -17,6 +17,11 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def signal_id(signal_type: str, entity_id: str) -> str:
+    """Deterministic signal ID from type + entity."""
+    return f"signal:{signal_type.lower()}:{entity_id}"
+
+
 class Signal(BaseModel, frozen=True):
     """A named, evidenced, severity-ranked entailed state.
 

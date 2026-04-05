@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import structlog
 
-from remi.agent.graph.stores import KnowledgeStore
-from remi.application.core.protocols import PropertyStore
+from remi.application.core.protocols import KnowledgeReader, PropertyStore
 from remi.application.core.rules import manager_name_from_tag
-from remi.application.services.monitoring.snapshots.service import SnapshotService
 from remi.types.text import slugify
 
 from ._models import AutoAssignResult
@@ -19,18 +17,16 @@ class AutoAssignService:
     def __init__(
         self,
         property_store: PropertyStore,
-        knowledge_store: KnowledgeStore,
-        snapshot_service: SnapshotService,
+        knowledge_reader: KnowledgeReader,
     ) -> None:
         self._ps = property_store
-        self._ks = knowledge_store
-        self._snapshot = snapshot_service
+        self._kr = knowledge_reader
 
     async def _collect_property_tags(self) -> dict[str, str]:
         prop_to_tag: dict[str, str] = {}
-        namespaces = await self._ks.list_namespaces()
+        namespaces = await self._kr.list_namespaces()
         for ns in namespaces:
-            entities = await self._ks.find_entities(
+            entities = await self._kr.find_entities(
                 ns, entity_type="appfolio_property", limit=5000
             )
             for entity in entities:
@@ -104,11 +100,6 @@ class AutoAssignService:
             updated = prop.model_copy(update={"portfolio_id": portfolio_id})
             await self._ps.upsert_property(updated)
             assigned += 1
-
-        try:
-            await self._snapshot.capture()
-        except Exception:
-            logger.warning("snapshot_after_auto_assign_failed", exc_info=True)
 
         msg = (
             f"Assigned {assigned} properties to existing managers. "

@@ -1,5 +1,14 @@
 """CLI — Typer command delivery layer.
 
-    One module per concept: properties, units, leases, tenants, managers,
-    portfolios, maintenance, rent_roll, documents, ontology, search, seed, agents.
+Organized by director capability:
+
+    portfolio/       managers, property, units, portfolios, rent_roll
+    operations/      leases, maintenance, tenants
+    intelligence/    dashboard, search, ontology, graph, trace, research
+    system/          agents, documents, seed, demo, vectors, bench, db
+
+Cross-cutting modules at root:
+    shared.py        Container bootstrap, formatting, output helpers
+    http.py          HTTP client for sandbox CLI mode
+    banner.py        Server startup banner
 """

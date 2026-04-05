@@ -6,9 +6,12 @@ and configures the generic GraphProjector with RE-specific FK mappings.
 
 from __future__ import annotations
 
-from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph, CoreTypeBindings
-from remi.agent.graph.projector import GraphProjector
-from remi.agent.graph.stores import KnowledgeStore
+from remi.agent.graph import (
+    BridgedKnowledgeGraph,
+    CoreTypeBindings,
+    GraphProjector,
+    KnowledgeStore,
+)
 from remi.application.core.protocols import PropertyStore
 from remi.application.infra.ontology.schema import FK_PROJECTION_MAP
 

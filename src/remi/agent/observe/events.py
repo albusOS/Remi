@@ -52,9 +52,6 @@ class Event:
     SIGNAL_RETRIEVAL_FAILED = "signal_retrieval_failed"
     VECTOR_SEARCH_FAILED = "vector_search_failed"
 
-    ENTAILMENT_COMPLETE = "entailment_complete"
-    ENTAILMENT_EVAL_FAILED = "entailment_eval_failed"
-    SIGNAL_PIPELINE_FAILED = "signal_pipeline_failed"
     PATTERN_DETECTION_FAILED = "pattern_detection_failed"
 
     PRODUCER_STARTING = "producer_starting"

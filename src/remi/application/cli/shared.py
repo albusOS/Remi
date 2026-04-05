@@ -10,7 +10,7 @@ from typing import Any
 
 import typer
 
-from remi.agent.observe.logging import configure_logging
+from remi.agent.observe import configure_logging
 from remi.shell.config.container import Container
 from remi.shell.config.settings import load_settings
 

@@ -218,35 +218,6 @@ def dashboard_delinquency(manager_id=None, as_df=False):
 
 
 # ---------------------------------------------------------------------------
-# Metrics history (snapshots over time)
-# ---------------------------------------------------------------------------
-
-def metrics_history(entity_type="manager", entity_id=None, manager_id=None, days=90, as_df=False):
-    """Return historical performance snapshots for trend analysis.
-
-    Parameters
-    ----------
-    entity_type : str
-        "manager" (default) or "property".
-    entity_id : str, optional
-        Filter to a specific manager_id (when entity_type="manager") or
-        property_id (when entity_type="property").
-    manager_id : str, optional
-        When entity_type="property", also filter by manager.
-    days : int
-        How many days of history to return (default 90, max 3650).
-    as_df : bool
-        Return a pandas DataFrame instead of a list of dicts.
-    """
-    data = _get(
-        f"/dashboard/metrics-history"
-        f"{_qs(entity_type=entity_type, entity_id=entity_id, manager_id=manager_id, days=days)}"
-    )
-    result = data.get("snapshots", data)
-    return _maybe_df(result, as_df)
-
-
-# ---------------------------------------------------------------------------
 # Mutations (POST/PATCH/DELETE)
 # ---------------------------------------------------------------------------
 
@@ -370,9 +341,4 @@ def search(query, types=None, manager_id=None, limit=10, as_df=False):
 def trigger_signal_inference():
     """Trigger the signal inference pipeline to re-evaluate all signals."""
     return _post("/signals/infer")
-
-
-def capture_snapshot():
-    """Trigger a point-in-time snapshot capture of all manager/property metrics."""
-    return _post("/dashboard/snapshots/capture")
 '''

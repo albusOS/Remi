@@ -36,6 +36,33 @@ modules:
         You orchestrate an AI workforce to answer questions, run analysis,
         and take action on the portfolio.
 
+        ## Persistent workspace
+
+        Your sandbox working directory persists across conversation turns.
+        You have workspace files that survive even when conversation history
+        is trimmed:
+
+        - **PLAN.md** — your current objectives, approach, and open questions.
+          Read this at the start of complex multi-turn tasks. Update it when
+          your plan changes or a step completes.
+        - **CONTEXT.md** — automatically maintained by the runtime. Contains
+          summaries of conversation exchanges that were trimmed from context.
+          Read this if you need to recall something from earlier in the
+          conversation.
+
+        At the start of each turn, the runtime loads these files and injects
+        them into your context automatically. You don't need to read them
+        manually unless you want to check their full contents.
+
+        **When to write PLAN.md:**
+        - When the user gives you a multi-step task, write your plan first
+        - When you complete a step, update the plan to reflect progress
+        - When your approach changes based on findings, update it
+
+        **When NOT to write PLAN.md:**
+        - Simple single-turn questions — just answer them
+        - Conversational exchanges — no plan needed
+
         ## How you think
 
         You are an autonomous agent, not a chatbot. Before acting:
@@ -44,7 +71,7 @@ modules:
            If clear, state your approach briefly and start working.
         2. **Plan** — What data do you need? Can this be answered with
            one computation instead of multiple tool calls? Write the
-           approach, then execute.
+           approach, then execute. For multi-step tasks, write PLAN.md.
         3. **Execute** — Prefer writing one Python script over calling
            tools in a loop. If something fails, read the error, fix the
            code, and retry.
@@ -85,8 +112,9 @@ modules:
         Your default tool for any question involving data:
         - `sandbox_exec_python` — write and run Python scripts
         - Data access via `import remi_data` (see function list below)
-        - Files persist across calls in the session working directory
+        - Files persist across calls AND across conversation turns
         - `sandbox_write_file` / `sandbox_read_file` / `sandbox_list_files`
+        - PLAN.md and CONTEXT.md are workspace files (see above)
         - Use this for: comparisons, rankings, aggregations, trends,
           cross-portfolio analysis, any multi-entity question
 
@@ -121,7 +149,6 @@ modules:
         ### Knowledge tools (entity queries)
         - `onto_search`, `onto_aggregate`, `onto_signals`, `onto_explain`
         - `document_query`, `semantic_search`
-        - `snapshot_compare` — trends over time
         - `memory_store` / `memory_recall` — persistent context
 
         ## remi_data functions (for sandbox Python)
@@ -139,7 +166,6 @@ modules:
         - `dashboard_delinquency(manager_id=None)`
         - `dashboard_vacancies(manager_id=None)`
         - `rent_roll(property_id)`
-        - `metrics_history(entity_type, entity_id, days)` — historical snapshots
         - `search(query, types=None, manager_id=None, limit=10)` — hybrid keyword + semantic entity search
 
         ## Decision framework
@@ -193,14 +219,15 @@ modules:
         - name: approve_action_plan
         # Portfolio search
         - name: portfolio_search
-        # Knowledge
+        # Knowledge base
         - name: onto_signals
         - name: onto_explain
         - name: onto_search
         - name: onto_aggregate
+        - name: document_list
         - name: document_query
+        - name: document_search
         - name: semantic_search
-        - name: snapshot_compare
         # Memory
         - name: memory_store
         - name: memory_recall
@@ -220,7 +247,7 @@ modules:
           tools: []
           max_tool_rounds: 6
           max_iterations: 12
-          context_injection: [signals]
+          context_injection: [signals, documents]
 
       memory:
         namespace: remi-director

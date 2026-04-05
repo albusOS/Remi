@@ -1,24 +1,29 @@
 """Multi-source text extraction for the embedding pipeline.
 
 These extractors aggregate across multiple stores (PropertyStore +
-SignalStore, or DocumentStore) to build rich embedding text.
+signal store, or DocumentRepository) to build rich embedding text.
 Single-entity extractors that only need a PropertyStore live in
 ``extraction.py``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
-from remi.agent.documents.types import DocumentStore
-from remi.agent.signals import SignalStore
-from remi.agent.vectors.types import EmbeddingRequest
-from remi.application.core.protocols import PropertyStore
+from remi.application.core.protocols import DocumentRepository, EmbedRequest, PropertyStore
 
 _log = structlog.get_logger(__name__)
+
+
+@runtime_checkable
+class SignalStoreProtocol(Protocol):
+    """Minimal protocol for listing signals — avoids importing agent.signals."""
+
+    async def list_signals(self) -> Sequence[Any]: ...
 
 
 def _decimal_str(d: Decimal) -> str:
@@ -27,8 +32,8 @@ def _decimal_str(d: Decimal) -> str:
 
 async def extract_managers(
     ps: PropertyStore,
-    ss: SignalStore | None,
-) -> list[EmbeddingRequest]:
+    ss: SignalStoreProtocol | None,
+) -> list[EmbedRequest]:
     """Build rich embedding text per manager by aggregating portfolio metrics."""
     managers = await ps.list_managers()
     if not managers:
@@ -75,7 +80,7 @@ async def extract_managers(
                 maintenance_by_property.get(req.property_id, 0) + 1
             )
 
-    requests: list[EmbeddingRequest] = []
+    requests: list[EmbedRequest] = []
     for mgr in managers:
         prop_ids = portfolio_by_manager.get(mgr.id, [])
         property_count = len(prop_ids)
@@ -131,7 +136,7 @@ async def extract_managers(
 
         portfolios_for_mgr = [pf for pf in all_portfolios if pf.manager_id == mgr.id]
         requests.append(
-            EmbeddingRequest(
+            EmbedRequest(
                 id=f"vec:manager:{mgr.id}:profile",
                 text=text,
                 source_entity_id=mgr.id,
@@ -150,15 +155,18 @@ async def extract_managers(
     return requests
 
 
-async def extract_document_rows(ds: DocumentStore) -> list[EmbeddingRequest]:
-    """Embed each row of every stored document as a searchable evidence record.
+async def extract_document_rows(doc_repo: DocumentRepository) -> list[EmbedRequest]:
+    """Embed each row of every stored tabular document as a searchable evidence record.
 
     Rows with fewer than 10 characters of serialized text are skipped.
     """
-    requests: list[EmbeddingRequest] = []
-    docs = await ds.list_documents()
+    requests: list[EmbedRequest] = []
+    docs = await doc_repo.list_documents()
 
     for doc in docs:
+        if doc.kind != "tabular":
+            continue
+
         report_type = doc.metadata.get("report_type", "unknown")
         manager_id = doc.metadata.get("manager_id", "")
 
@@ -169,7 +177,7 @@ async def extract_document_rows(ds: DocumentStore) -> list[EmbeddingRequest]:
                 continue
 
             requests.append(
-                EmbeddingRequest(
+                EmbedRequest(
                     id=f"vec:document:{doc.id}:row:{i}",
                     text=text,
                     source_entity_id=doc.id,
@@ -181,6 +189,39 @@ async def extract_document_rows(ds: DocumentStore) -> list[EmbeddingRequest]:
                         "report_type": report_type,
                         "row_index": i,
                         "manager_id": manager_id,
+                    },
+                )
+            )
+
+    return requests
+
+
+async def extract_document_chunks(doc_repo: DocumentRepository) -> list[EmbedRequest]:
+    """Embed each text chunk of every stored text document as a searchable passage."""
+    requests: list[EmbedRequest] = []
+    docs = await doc_repo.list_documents()
+
+    for doc in docs:
+        if doc.kind != "text":
+            continue
+
+        for chunk in doc.chunks:
+            if len(chunk.text.strip()) < 10:
+                continue
+
+            requests.append(
+                EmbedRequest(
+                    id=f"vec:document:{doc.id}:chunk:{chunk.index}",
+                    text=chunk.text,
+                    source_entity_id=doc.id,
+                    source_entity_type="DocumentChunk",
+                    source_field="chunk",
+                    metadata={
+                        "document_id": doc.id,
+                        "filename": doc.filename,
+                        "page": chunk.page,
+                        "chunk_index": chunk.index,
+                        "tags": ",".join(doc.tags),
                     },
                 )
             )

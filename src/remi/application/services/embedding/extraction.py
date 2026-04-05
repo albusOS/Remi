@@ -1,6 +1,6 @@
 """Entity text extraction for the embedding pipeline — PropertyStore entities.
 
-Each function takes a PropertyStore and returns a list of EmbeddingRequest
+Each function takes a PropertyStore and returns a list of EmbedRequest
 objects. The EmbeddingPipeline calls these to gather text that needs
 vectorising, then handles batching and storage.
 
@@ -14,8 +14,7 @@ from decimal import Decimal
 
 import structlog
 
-from remi.agent.vectors.types import EmbeddingRequest
-from remi.application.core.protocols import PropertyStore
+from remi.application.core.protocols import EmbedRequest, PropertyStore
 
 _log = structlog.get_logger(__name__)
 
@@ -24,9 +23,9 @@ def _decimal_str(d: Decimal) -> str:
     return f"${d:,.2f}" if d else ""
 
 
-async def extract_tenants(ps: PropertyStore) -> list[EmbeddingRequest]:
+async def extract_tenants(ps: PropertyStore) -> list[EmbedRequest]:
     tenants = await ps.list_tenants()
-    requests: list[EmbeddingRequest] = []
+    requests: list[EmbedRequest] = []
 
     for t in tenants:
         parts = [f"Tenant: {t.name}"]
@@ -59,7 +58,7 @@ async def extract_tenants(ps: PropertyStore) -> list[EmbeddingRequest]:
                         break
 
         requests.append(
-            EmbeddingRequest(
+            EmbedRequest(
                 id=f"vec:tenant:{t.id}:profile",
                 text=text,
                 source_entity_id=t.id,
@@ -75,9 +74,9 @@ async def extract_tenants(ps: PropertyStore) -> list[EmbeddingRequest]:
     return requests
 
 
-async def extract_units(ps: PropertyStore) -> list[EmbeddingRequest]:
+async def extract_units(ps: PropertyStore) -> list[EmbedRequest]:
     units = await ps.list_units()
-    requests: list[EmbeddingRequest] = []
+    requests: list[EmbedRequest] = []
 
     for u in units:
         prop = await ps.get_property(u.property_id)
@@ -109,7 +108,7 @@ async def extract_units(ps: PropertyStore) -> list[EmbeddingRequest]:
                     break
 
         requests.append(
-            EmbeddingRequest(
+            EmbedRequest(
                 id=f"vec:unit:{u.id}:profile",
                 text=text,
                 source_entity_id=u.id,
@@ -125,8 +124,8 @@ async def extract_units(ps: PropertyStore) -> list[EmbeddingRequest]:
     return requests
 
 
-async def extract_maintenance(ps: PropertyStore) -> list[EmbeddingRequest]:
-    requests_out: list[EmbeddingRequest] = []
+async def extract_maintenance(ps: PropertyStore) -> list[EmbedRequest]:
+    requests_out: list[EmbedRequest] = []
     all_requests = await ps.list_maintenance_requests()
 
     for req in all_requests:
@@ -157,7 +156,7 @@ async def extract_maintenance(ps: PropertyStore) -> list[EmbeddingRequest]:
                     break
 
         requests_out.append(
-            EmbeddingRequest(
+            EmbedRequest(
                 id=f"vec:maintenance:{req.id}:description",
                 text=text,
                 source_entity_id=req.id,
@@ -175,9 +174,9 @@ async def extract_maintenance(ps: PropertyStore) -> list[EmbeddingRequest]:
     return requests_out
 
 
-async def extract_properties(ps: PropertyStore) -> list[EmbeddingRequest]:
+async def extract_properties(ps: PropertyStore) -> list[EmbedRequest]:
     properties = await ps.list_properties()
-    requests: list[EmbeddingRequest] = []
+    requests: list[EmbedRequest] = []
 
     for p in properties:
         parts = [f"Property: {p.name}"]
@@ -197,7 +196,7 @@ async def extract_properties(ps: PropertyStore) -> list[EmbeddingRequest]:
                 break
 
         requests.append(
-            EmbeddingRequest(
+            EmbedRequest(
                 id=f"vec:property:{p.id}:profile",
                 text=text,
                 source_entity_id=p.id,

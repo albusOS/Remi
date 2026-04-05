@@ -1,9 +1,14 @@
 """API — HTTP delivery layer (FastAPI routers + schemas).
 
-    dependencies.py     DI accessors for route handlers
-    shared_schemas.py   Shared response types (UpdatedResponse, DeletedResponse, etc.)
+Organized by director capability, not by entity:
 
-    One module per resource: properties, units, leases, tenants, managers,
-    portfolios, maintenance, actions, dashboard, documents, ontology, signals,
-    search, seed, agents, usage, realtime.
+    portfolio/       Managers, properties, units, portfolios
+    operations/      Leases, maintenance, tenants, actions, notes
+    intelligence/    Signals, dashboard, search, ontology, knowledge, events
+    system/          Agents, documents, seed, usage, realtime
+
+Cross-cutting modules at root:
+    dependencies.py     DI accessors for route handlers
+    schemas.py          Entity response types shared across slices
+    shared_schemas.py   Common response envelopes (UpdatedResponse, etc.)
 """

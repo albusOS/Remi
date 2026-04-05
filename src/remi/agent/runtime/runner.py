@@ -231,13 +231,16 @@ class ChatAgentService:
             default_provider=self._default_provider,
             default_model=self._default_model,
         )
+        merged_extras = {"sandbox": self._sandbox}
+        if extra:
+            merged_extras.update(extra)
         return RuntimeContext(
             app_id="remi",
             run_id=run_id or new_run_id(),
             deps=deps,
             params=params or RunParams(),
             scope=scope or ScopeContext(),
-            extras=extra or {},
+            extras=merged_extras,
         )
 
     async def _ensure_sandbox_session(

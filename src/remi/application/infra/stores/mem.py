@@ -45,21 +45,6 @@ def _merge(existing: BaseModel, incoming: BaseModel) -> BaseModel:
     return existing.model_copy(update=incoming_data)
 
 
-_COLLECTION_MODELS: dict[str, type[BaseModel]] = {
-    "owners": Owner,
-    "managers": PropertyManager,
-    "portfolios": Portfolio,
-    "properties": Property,
-    "units": Unit,
-    "leases": Lease,
-    "tenants": Tenant,
-    "maintenance": MaintenanceRequest,
-    "vendors": Vendor,
-    "action_items": ActionItem,
-    "notes": Note,
-}
-
-
 class InMemoryPropertyStore(PropertyStore):
     def __init__(self) -> None:
         self._owners: dict[str, Owner] = {}
@@ -73,51 +58,6 @@ class InMemoryPropertyStore(PropertyStore):
         self._vendors: dict[str, Vendor] = {}
         self._action_items: dict[str, ActionItem] = {}
         self._notes: dict[str, Note] = {}
-
-    def dump_state(self) -> dict[str, list[dict[str, object]]]:
-        """Serialize all collections for snapshot cache."""
-        collections = {
-            "owners": self._owners,
-            "managers": self._managers,
-            "portfolios": self._portfolios,
-            "properties": self._properties,
-            "units": self._units,
-            "leases": self._leases,
-            "tenants": self._tenants,
-            "maintenance": self._maintenance,
-            "vendors": self._vendors,
-            "action_items": self._action_items,
-            "notes": self._notes,
-        }
-        return {
-            name: [v.model_dump(mode="json") for v in coll.values()]
-            for name, coll in collections.items()
-        }
-
-    def load_state(self, data: dict[str, list[dict[str, object]]]) -> None:
-        """Restore all collections from a previously dumped snapshot."""
-        attr_map: dict[str, dict[str, BaseModel]] = {
-            "owners": self._owners,
-            "managers": self._managers,
-            "portfolios": self._portfolios,
-            "properties": self._properties,
-            "units": self._units,
-            "leases": self._leases,
-            "tenants": self._tenants,
-            "maintenance": self._maintenance,
-            "vendors": self._vendors,
-            "action_items": self._action_items,
-            "notes": self._notes,
-        }
-        for name, raw_items in data.items():
-            model_cls = _COLLECTION_MODELS.get(name)
-            coll = attr_map.get(name)
-            if model_cls is None or coll is None:
-                continue
-            coll.clear()
-            for raw in raw_items:
-                obj = model_cls.model_validate(raw)
-                coll[obj.id] = obj  # type: ignore[attr-defined]
 
     # -- Owner --
     async def get_owner(self, owner_id: str) -> Owner | None:

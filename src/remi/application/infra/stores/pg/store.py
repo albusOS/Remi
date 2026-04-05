@@ -15,6 +15,7 @@ from remi.application.core.models import (
     Note,
     NoteProvenance,
     OccupancyStatus,
+    Owner,
     Portfolio,
     Property,
     PropertyManager,
@@ -22,6 +23,8 @@ from remi.application.core.models import (
     TenantStatus,
     Unit,
     UnitStatus,
+    Vendor,
+    VendorCategory,
 )
 from remi.application.core.protocols import PropertyStore
 from remi.application.infra.stores.pg.converters import (
@@ -36,6 +39,8 @@ from remi.application.infra.stores.pg.converters import (
     manager_to_row,
     note_from_row,
     note_to_row,
+    owner_from_row,
+    owner_to_row,
     portfolio_from_row,
     portfolio_to_row,
     property_from_row,
@@ -44,17 +49,21 @@ from remi.application.infra.stores.pg.converters import (
     tenant_to_row,
     unit_from_row,
     unit_to_row,
+    vendor_from_row,
+    vendor_to_row,
 )
 from remi.application.infra.stores.pg.tables import (
     ActionItemRow,
     LeaseRow,
     MaintenanceRequestRow,
     NoteRow,
+    OwnerRow,
     PortfolioRow,
     PropertyManagerRow,
     PropertyRow,
     TenantRow,
     UnitRow,
+    VendorRow,
 )
 from remi.types.result import WriteOutcome, WriteResult
 
@@ -379,6 +388,84 @@ class PostgresPropertyStore(PropertyStore):
             session.add(maintenance_to_row(request))
             await session.commit()
             return WriteResult(entity=request, outcome=WriteOutcome.CREATED)
+
+    # -- Owners ---------------------------------------------------------------
+
+    async def get_owner(self, owner_id: str) -> Owner | None:
+        async with self._session_factory() as session:
+            row = await session.get(OwnerRow, owner_id)
+            return owner_from_row(row) if row else None
+
+    async def list_owners(self) -> list[Owner]:
+        async with self._session_factory() as session:
+            result = await session.execute(select(OwnerRow))
+            return [owner_from_row(r) for r in result.scalars().all()]
+
+    async def upsert_owner(self, owner: Owner) -> WriteResult[Owner]:
+        async with self._session_factory() as session:
+            existing = await session.get(OwnerRow, owner.id)
+            if existing:
+                apply_merge(existing, owner)
+                session.add(existing)
+                await session.commit()
+                await session.refresh(existing)
+                return WriteResult(entity=owner_from_row(existing), outcome=WriteOutcome.UPDATED)
+            session.add(owner_to_row(owner))
+            await session.commit()
+            return WriteResult(entity=owner, outcome=WriteOutcome.CREATED)
+
+    async def delete_owner(self, owner_id: str) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(OwnerRow, owner_id)
+            if not row:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    # -- Vendors --------------------------------------------------------------
+
+    async def get_vendor(self, vendor_id: str) -> Vendor | None:
+        async with self._session_factory() as session:
+            row = await session.get(VendorRow, vendor_id)
+            return vendor_from_row(row) if row else None
+
+    async def list_vendors(
+        self,
+        *,
+        category: VendorCategory | None = None,
+        is_internal: bool | None = None,
+    ) -> list[Vendor]:
+        async with self._session_factory() as session:
+            stmt = select(VendorRow)
+            if category:
+                stmt = stmt.where(VendorRow.category == category.value)
+            if is_internal is not None:
+                stmt = stmt.where(VendorRow.is_internal == is_internal)
+            result = await session.execute(stmt)
+            return [vendor_from_row(r) for r in result.scalars().all()]
+
+    async def upsert_vendor(self, vendor: Vendor) -> WriteResult[Vendor]:
+        async with self._session_factory() as session:
+            existing = await session.get(VendorRow, vendor.id)
+            if existing:
+                apply_merge(existing, vendor)
+                session.add(existing)
+                await session.commit()
+                await session.refresh(existing)
+                return WriteResult(entity=vendor_from_row(existing), outcome=WriteOutcome.UPDATED)
+            session.add(vendor_to_row(vendor))
+            await session.commit()
+            return WriteResult(entity=vendor, outcome=WriteOutcome.CREATED)
+
+    async def delete_vendor(self, vendor_id: str) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(VendorRow, vendor_id)
+            if not row:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
 
     # -- Action Items -------------------------------------------------------
 

@@ -23,6 +23,7 @@ import re
 import uuid
 from typing import Any
 
+from remi.agent.documents.text_parsers import parse_docx, parse_image, parse_pdf, parse_text
 from remi.agent.documents.types import Document
 
 _GENERIC_METADATA_PATTERNS = (
@@ -44,6 +45,12 @@ _EXCEL_CONTENT_TYPES = frozenset({
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
 })
+_PDF_CONTENT_TYPES = frozenset({"application/pdf"})
+_DOCX_CONTENT_TYPES = frozenset({
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+})
+_TEXT_CONTENT_TYPES = frozenset({"text/plain", "text/markdown"})
+_IMAGE_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
 
 # ---------------------------------------------------------------------------
@@ -70,14 +77,27 @@ def parse_document(
     ct = content_type.lower()
     name = filename.lower()
 
+    # Tabular formats
     if ct in _CSV_CONTENT_TYPES or name.endswith(".csv"):
         return parse_csv(filename, content)
     if ct in _EXCEL_CONTENT_TYPES or name.endswith((".xlsx", ".xls")):
         return parse_excel(filename, content, extra_skip_patterns=extra_skip_patterns)
 
+    # Text formats
+    if ct in _PDF_CONTENT_TYPES or name.endswith(".pdf"):
+        return parse_pdf(filename, content)
+    if ct in _DOCX_CONTENT_TYPES or name.endswith(".docx"):
+        return parse_docx(filename, content)
+    if ct in _TEXT_CONTENT_TYPES or name.endswith((".txt", ".md")):
+        return parse_text(filename, content, ct or "text/plain")
+
+    # Image formats
+    if ct in _IMAGE_CONTENT_TYPES or name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+        return parse_image(filename, content, ct or "image/jpeg")
+
     raise ValueError(
         f"Unsupported file type: {content_type!r}. "
-        "Supported formats: CSV (.csv), Excel (.xlsx, .xls)."
+        "Supported formats: CSV, Excel, PDF, Word, text, and images."
     )
 
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSessions } from "@/hooks/useSessions";
 import { SessionThread } from "./SessionThread";
 import { SessionInput } from "./SessionInput";
@@ -11,12 +12,14 @@ import { api } from "@/lib/api";
 import type { ManagerListItem } from "@/lib/types";
 
 export function AskView() {
+  const searchParams = useSearchParams();
   const [provider, setProvider] = useState("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-20250514");
   const [managers, setManagers] = useState<ManagerListItem[]>([]);
   const [managerId, setManagerId] = useState("");
   const [showWorkDetails, setShowWorkDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const initialQuerySent = useRef(false);
 
   const lastSendRef = useRef<string | null>(null);
 
@@ -40,6 +43,14 @@ export function AskView() {
     dismissError,
     stopGenerating,
   } = useSessions("director");
+
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q && !initialQuerySent.current && connected) {
+      initialQuerySent.current = true;
+      send(q, "ask", { provider, model, managerId: managerId || undefined });
+    }
+  }, [searchParams, connected, send, provider, model, managerId]);
 
   const handleSend = (text: string) => {
     lastSendRef.current = text;

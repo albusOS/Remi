@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remi.agent.conversation.thread import trim_thread
+from remi.agent.runtime.conversation.thread import trim_thread
 from remi.agent.types import Message
 
 

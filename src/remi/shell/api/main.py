@@ -14,27 +14,35 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from remi.agent.observe.events import Event
-from remi.agent.observe.logging import configure_logging
-from remi.application.api.actions import router as actions_router
-from remi.application.api.agents import router as agents_router
-from remi.application.api.dashboard import router as dashboard_router
-from remi.application.api.documents import router as documents_router
-from remi.application.api.knowledge import router as knowledge_router
-from remi.application.api.leases import router as leases_router
-from remi.application.api.maintenance import router as maintenance_router
-from remi.application.api.managers import router as managers_router
-from remi.application.api.notes import router as notes_router
-from remi.application.api.ontology import router as ontology_router
-from remi.application.api.portfolios import router as portfolios_router
-from remi.application.api.properties import router as properties_router
-from remi.application.api.realtime import router as realtime_router
-from remi.application.api.search import router as search_router
-from remi.application.api.seed import router as seed_router
-from remi.application.api.signals import router as signals_router
-from remi.application.api.tenants import router as tenants_router
-from remi.application.api.units import router as units_router
-from remi.application.api.usage import router as usage_router
+from remi.agent.observe import Event, configure_logging
+from remi.application.api.intelligence import (
+    dashboard_router,
+    events_router,
+    knowledge_router,
+    ontology_router,
+    search_router,
+    signals_router,
+)
+from remi.application.api.operations import (
+    actions_router,
+    leases_router,
+    maintenance_router,
+    notes_router,
+    tenants_router,
+)
+from remi.application.api.portfolio import (
+    managers_router,
+    portfolios_router,
+    properties_router,
+    units_router,
+)
+from remi.application.api.system import (
+    agents_router,
+    documents_router,
+    realtime_router,
+    seed_router,
+    usage_router,
+)
 from remi.shell.api.error_handler import install_error_handlers
 from remi.shell.api.middleware import RequestIDMiddleware
 from remi.shell.config.container import Container
@@ -49,6 +57,7 @@ def _attach_routers(application: FastAPI) -> None:
     application.include_router(maintenance_router, prefix="/api/v1")
     application.include_router(agents_router, prefix="/api/v1")
     application.include_router(documents_router, prefix="/api/v1")
+    application.include_router(events_router, prefix="/api/v1")
     application.include_router(dashboard_router, prefix="/api/v1")
     application.include_router(signals_router, prefix="/api/v1")
     application.include_router(tenants_router, prefix="/api/v1")
@@ -109,13 +118,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.seed_task = seed_task
 
-    capture_task = asyncio.create_task(
-        _periodic_capture(container, settings.api.capture_interval_minutes, log)
-    )
     yield
     if seed_task and not seed_task.done():
         seed_task.cancel()
-    capture_task.cancel()
     log.info(Event.SERVER_SHUTDOWN)
 
 
@@ -132,26 +137,10 @@ async def _run_seed(
             managers=seed_result.managers_created,
             properties=seed_result.properties_created,
             reports=len(seed_result.reports_ingested),
-            signals=seed_result.signals_produced,
-            history_snapshots=seed_result.history_snapshots,
             errors=seed_result.errors,
         )
     except Exception:
         log.exception("seed_failed")
-
-
-async def _periodic_capture(container: Container, interval_minutes: int, log: Any) -> None:
-    """Background task: capture rollup snapshots on a fixed interval."""
-    import asyncio
-
-    interval = interval_minutes * 60
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            snapshots = await container.snapshot_service.capture()
-            log.info("periodic_capture_complete", managers=len(snapshots))
-        except Exception:
-            log.exception("periodic_capture_failed")
 
 
 def create_app() -> FastAPI:
