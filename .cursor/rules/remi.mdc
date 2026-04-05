@@ -99,6 +99,57 @@ Every package with external consumers must define its public API in
 - Do not write tests that just confirm a function returns without crashing
 - Ask before writing tests if the value isn't obvious
 
+## Structural Design Principles
+
+Three rules govern every file and folder decision:
+
+### Screaming Architecture
+The directory tree IS the documentation. A new developer reading
+`ls src/remi/` should immediately know this is an agent operating
+system for real estate — not a generic web app. Folders are named
+for what the system **does**, not what technical role they play.
+
+- **Good:** `ingestion/`, `signals/`, `portfolio/`, `intelligence/`
+- **Bad:** `controllers/`, `helpers/`, `utils/`, `misc/`
+
+### Vertical Slicing (Package by Feature)
+Group code by **business capability**, not by technical layer.
+Everything related to a feature lives together.
+
+- `api/portfolio/` contains managers, properties, units, portfolios
+- `cli/intelligence/` contains dashboard, search, ontology, trace
+- `services/ingestion/` contains rules, pipeline, persist, resolver
+
+Horizontal grouping (all query services in `queries/`) is acceptable
+only when the grouped items share a contract, not just a technical role.
+
+### Clean Architecture Boundaries
+The four packages enforce strict dependency rings:
+
+- **Core** (`types/`, `application/core/`) — pure models, protocols.
+  No dependencies on frameworks, databases, or external services.
+- **Agent kernel** (`agent/`) — AI infrastructure. Depends only on `types/`.
+- **Application** (`application/`) — RE product. Depends on `agent/` + `types/`.
+- **Shell** (`shell/`) — composition root. Depends on everything.
+
+A module in an inner ring must never import from an outer ring.
+If it needs something from an outer ring, define a protocol in the
+inner ring and implement it in the outer ring.
+
+### When Creating New Files or Folders
+
+1. **State the intended package** before creating a new file.
+2. **Name it for what it does**, not for what pattern it uses.
+   `delinquency.py` not `delinquency_evaluator.py`.
+   `bridge.py` not `knowledge_graph_adapter.py`.
+3. **One clear responsibility per module.** If a file is growing
+   beyond ~300 lines or serving two distinct concerns, split it.
+4. **New folders need a reason.** Don't create a folder for one file.
+   A folder implies a boundary — it should contain a cohesive set
+   of modules that change together and are consumed as a unit.
+5. **Principle of Least Astonishment.** If a new developer would be
+   surprised to find a file where you put it, the path is wrong.
+
 ## Architecture: An Agent Operating System
 
 REMI is an agent operating system — the runtime that lets an AI agent
