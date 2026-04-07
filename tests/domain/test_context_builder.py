@@ -3,22 +3,12 @@
 from __future__ import annotations
 
 from remi.agent.context.builder import ContextBuilder
-from remi.agent.context.frame import (
-    ContextFrame,
-    PerceptionSnapshot,
-    WorldState,
-)
-from remi.agent.context.rendering import (
-    render_active_signals,
-    render_domain_context,
-    render_graph_context,
-)
+from remi.agent.context.frame import ContextFrame, WorldState
+from remi.agent.context.rendering import render_domain_context, render_graph_context
 from remi.agent.graph.retrieval.retriever import ResolvedEntity
 from remi.agent.graph.types import KnowledgeLink
-from remi.agent.signals import DomainTBox, Severity, Signal
-from remi.agent.signals.persistence.mem import InMemorySignalStore
+from remi.agent.signals import DomainTBox, load_domain_yaml
 from remi.agent.types import Message
-from remi.application.infra.graph.schema import load_domain_yaml
 from remi.types.text import estimate_tokens, truncate_to_tokens
 
 # -- token utilities ----------------------------------------------------------
@@ -102,44 +92,6 @@ def test_render_graph_context_with_neighborhood() -> None:
     assert "unit-1" in result
 
 
-def test_render_graph_context_with_signals() -> None:
-    frame = ContextFrame(
-        entities=[
-            ResolvedEntity(
-                entity_id="mgr-1",
-                entity_type="PropertyManager",
-                properties={"name": "Jake Kraus"},
-                score=0.8,
-            ),
-        ],
-        signals=[
-            Signal(
-                signal_id="signal:delinquencyconcentration:mgr-1",
-                signal_type="DelinquencyConcentration",
-                severity=Severity.HIGH,
-                entity_type="PropertyManager",
-                entity_id="mgr-1",
-                entity_name="Jake Kraus",
-                description="High delinquency rate",
-            ),
-            Signal(
-                signal_id="signal:leasecliff:mgr-1",
-                signal_type="LeaseExpirationCliff",
-                severity=Severity.HIGH,
-                entity_type="PropertyManager",
-                entity_id="mgr-1",
-                entity_name="Jake Kraus",
-                description="Lease cliff approaching",
-            ),
-        ],
-    )
-
-    result = render_graph_context(frame)
-    assert "DelinquencyConcentration" in result
-    assert "LeaseExpirationCliff" in result
-    assert "HIGH" in result
-
-
 def test_render_graph_context_caps_entities() -> None:
     entities = [
         ResolvedEntity(
@@ -154,32 +106,6 @@ def test_render_graph_context_caps_entities() -> None:
 
     result = render_graph_context(frame, max_entities=3)
     assert "3 relevant entities" in result
-
-
-def test_render_graph_context_signals_not_on_entity_excluded() -> None:
-    frame = ContextFrame(
-        entities=[
-            ResolvedEntity(
-                entity_id="mgr-1",
-                entity_type="PropertyManager",
-                properties={"name": "Jake Kraus"},
-                score=0.8,
-            ),
-        ],
-        signals=[
-            Signal(
-                signal_id="signal:other:mgr-2",
-                signal_type="SomeSignal",
-                severity=Severity.LOW,
-                entity_type="PropertyManager",
-                entity_id="mgr-2",
-                description="Signal on different entity",
-            ),
-        ],
-    )
-
-    result = render_graph_context(frame)
-    assert "SomeSignal" not in result
 
 
 def test_render_graph_context_respects_max_tokens() -> None:
@@ -212,64 +138,10 @@ def test_render_domain_context_includes_compositions() -> None:
     assert "DecliningPortfolio" in result
 
 
-# -- signal ranking -----------------------------------------------------------
-
-
-def _make_signal(
-    signal_type: str,
-    severity: Severity = Severity.HIGH,
-    entity_name: str = "Jake Kraus",
-    description: str = "test description",
-    entity_id: str = "mgr-1",
-    evidence: dict | None = None,
-) -> Signal:
-    return Signal(
-        signal_id=f"signal:{signal_type.lower()}:{entity_id}",
-        signal_type=signal_type,
-        severity=severity,
-        entity_type="PropertyManager",
-        entity_id=entity_id,
-        entity_name=entity_name,
-        description=description,
-        evidence=evidence or {},
-    )
-
-
-# -- render_active_signals with ranking ---------------------------------------
-
-
-async def test_render_active_signals_ranked() -> None:
-    store = InMemorySignalStore()
-    await store.put_signal(_make_signal("LowSig", severity=Severity.LOW))
-    await store.put_signal(_make_signal("CritSig", severity=Severity.CRITICAL))
-
-    result = await render_active_signals(store, question="critical issues")
-    crit_pos = result.find("CritSig")
-    low_pos = result.find("LowSig")
-    assert crit_pos < low_pos
-
-
-async def test_render_active_signals_max_signals() -> None:
-    store = InMemorySignalStore()
-    for i in range(20):
-        await store.put_signal(_make_signal(f"Sig{i}", entity_id=f"e-{i}"))
-
-    result = await render_active_signals(store, max_signals=5)
-    assert "20 total:" in result
-    assert "showing top 5" in result
-
-
-async def test_render_active_signals_truncates_descriptions() -> None:
-    store = InMemorySignalStore()
-    await store.put_signal(_make_signal("LongDesc", description="A" * 200))
-    result = await render_active_signals(store)
-    assert "…" in result
-
-
 # -- token-budgeted injection -------------------------------------------------
 
 
-async def test_inject_respects_token_budget() -> None:
+def test_inject_respects_token_budget() -> None:
     """When the thread already consumes most of the budget, injection is limited."""
     builder = ContextBuilder(
         domain=DomainTBox(),
@@ -281,7 +153,7 @@ async def test_inject_respects_token_budget() -> None:
         Message(role="user", content="hello"),
     ]
     frame = ContextFrame(
-        signal_summary="Signal summary " * 50,
+        document_context="Document context " * 50,
     )
 
     builder.inject_into_thread(thread, frame)
@@ -290,8 +162,8 @@ async def test_inject_respects_token_budget() -> None:
     assert total_tokens <= 600
 
 
-async def test_inject_includes_signals_when_budget_allows() -> None:
-    """Signal summary is injected when there is budget headroom."""
+def test_inject_includes_document_context_when_budget_allows() -> None:
+    """Document context is injected when there is budget headroom."""
     builder = ContextBuilder(
         domain=DomainTBox(),
         token_budget=50_000,
@@ -301,17 +173,16 @@ async def test_inject_includes_signals_when_budget_allows() -> None:
         Message(role="user", content="hello"),
     ]
     frame = ContextFrame(
-        signal_summary="Active signals here.",
+        document_context="Relevant knowledge base passages:\n- [doc.pdf]: excerpt here.",
     )
 
     builder.inject_into_thread(thread, frame)
 
     contents = [str(m.content) for m in thread]
-    assert any("Active signals" in c for c in contents)
+    assert any("Relevant knowledge base" in c for c in contents)
 
 
-# -- WorldState / PerceptionSnapshot -----------------------------------------
-
+# -- WorldState ---------------------------------------------------------------
 
 def test_world_state_from_tbox() -> None:
     tbox = DomainTBox.from_yaml(load_domain_yaml())
@@ -323,21 +194,10 @@ def test_world_state_from_tbox() -> None:
     assert world.causal_chains > 0
     d = world.to_dict()
     assert d["tbox_loaded"] is True
+    assert "compositions" in d
 
 
 def test_world_state_none_tbox() -> None:
     world = WorldState.from_tbox(None)
     assert not world.loaded
     assert world.signal_definitions == 0
-
-
-def test_perception_snapshot_severity_ordering() -> None:
-    snap = PerceptionSnapshot(
-        active_signals=10,
-        severity_counts={"low": 3, "critical": 2, "medium": 1, "high": 4},
-    )
-    order = list(snap.severity_breakdown.keys())
-    assert order == ["critical", "high", "medium", "low"]
-    d = snap.to_dict()
-    assert d["active_signals"] == 10
-    assert d["severity"] == {"critical": 2, "high": 4, "medium": 1, "low": 3}

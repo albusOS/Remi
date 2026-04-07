@@ -1,10 +1,10 @@
-"""AutoAssignService — KB-tag-based property-to-manager assignment."""
+"""AutoAssignService — tag-based property-to-manager assignment."""
 
 from __future__ import annotations
 
 import structlog
 
-from remi.application.core.protocols import KnowledgeReader, PropertyStore
+from remi.application.core.protocols import PropertyStore
 from remi.application.core.rules import manager_name_from_tag
 from remi.application.views import AutoAssignResult
 from remi.types.identity import manager_id as _manager_id
@@ -16,21 +16,17 @@ class AutoAssignService:
     def __init__(
         self,
         property_store: PropertyStore,
-        knowledge_reader: KnowledgeReader,
     ) -> None:
         self._ps = property_store
-        self._kr = knowledge_reader
 
     async def _collect_property_tags(self) -> dict[str, str]:
-        prop_to_tag: dict[str, str] = {}
-        namespaces = await self._kr.list_namespaces()
-        for ns in namespaces:
-            entities = await self._kr.find_entities(ns, entity_type="appfolio_property", limit=5000)
-            for entity in entities:
-                tag = entity.properties.get("manager_tag", "")
-                if tag and tag.lower() != "month-to-month" and entity.entity_id not in prop_to_tag:
-                    prop_to_tag[entity.entity_id] = tag
-        return prop_to_tag
+        """Build property_id -> manager_tag from Property.manager_tag field."""
+        props = await self._ps.list_properties()
+        return {
+            p.id: p.manager_tag
+            for p in props
+            if p.manager_tag and p.manager_tag.lower() != "month-to-month"
+        }
 
     async def _build_tag_to_manager(self) -> dict[str, str]:
         """Map manager tags/names to manager_id."""

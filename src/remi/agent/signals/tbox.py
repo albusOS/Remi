@@ -7,6 +7,7 @@ a thin forwarding wrapper providing the same read interface.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -266,3 +267,30 @@ class MutableTBox:
 
     def all_signal_names(self) -> list[str]:
         return self._base.all_signal_names()
+
+
+_domain_yaml_path: Path | None = None
+
+
+def set_domain_yaml_path(path: Path) -> None:
+    """Configure the path to domain.yaml.
+
+    Called once at startup by the composition root (container).
+    """
+    global _domain_yaml_path
+    _domain_yaml_path = path
+
+
+def load_domain_yaml(*, path: Path | None = None) -> dict[str, Any]:
+    """Load domain.yaml and return the raw parsed dict.
+
+    Use ``DomainTBox.from_yaml(raw)`` to get a typed TBox.
+    """
+    import yaml
+
+    resolved = path or _domain_yaml_path
+    if resolved is None or not resolved.exists():
+        return {}
+    with open(resolved) as fh:
+        data: dict[str, Any] = yaml.safe_load(fh) or {}
+    return data

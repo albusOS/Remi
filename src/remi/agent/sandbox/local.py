@@ -16,7 +16,6 @@ from typing import Any
 
 import structlog
 
-from remi.agent.sandbox.bridge import DATA_BRIDGE_SOURCE
 from remi.agent.sandbox.policy import build_subprocess_env, is_dangerous_command, resolve_python_bin
 from remi.agent.sandbox.types import ExecResult, ExecStatus, Sandbox, SandboxSession
 
@@ -58,7 +57,7 @@ class LocalSandbox(Sandbox):
         if extra_env:
             self._session_env[sid] = extra_env
 
-        (work_dir / "remi_data.py").write_text(DATA_BRIDGE_SOURCE, encoding="utf-8")
+        self._write_session_files(work_dir)
 
         _log.info("sandbox_session_created", session_id=sid, dir=str(work_dir))
         return session

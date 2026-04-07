@@ -14,7 +14,7 @@ from remi.agent.signals import (
     SignalDefinition,
 )
 from remi.application.core.models.enums import EntityType
-from remi.application.infra.graph.schema import load_domain_yaml
+from remi.agent.signals import load_domain_yaml
 
 EXPECTED_SIGNAL_NAMES = {
     "OccupancyDrift",

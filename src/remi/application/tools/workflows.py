@@ -4,8 +4,8 @@ Provides: manager_review, delinquency_review, lease_risk_review,
           draft_action_plan, approve_action_plan.
 
 Workflow tools compose existing resolvers (ManagerResolver,
-DashboardResolver, PropertyStore, KnowledgeGraph) into pre-built
-data packages the agent would otherwise need 5–15 tool calls to assemble.
+DashboardResolver, PropertyStore) into pre-built data packages
+the agent would otherwise need 5–15 tool calls to assemble.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from typing import Any, Protocol
 
 import structlog
 
-from remi.agent.graph import KnowledgeGraph
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.models import (
     ActionItem,
@@ -82,7 +81,6 @@ class WorkflowToolProvider(ToolProvider):
     def __init__(
         self,
         property_store: PropertyStore,
-        knowledge_graph: KnowledgeGraph,
         manager_resolver: ManagerResolver,
         dashboard_resolver: DashboardResolver,
         *,

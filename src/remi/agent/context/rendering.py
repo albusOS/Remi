@@ -1,7 +1,6 @@
 """LLM context rendering — projects typed perception into prose for injection.
 
 ``render_domain_context`` renders TBox knowledge for agent priming (once).
-``render_active_signals`` renders ABox perception for per-turn injection.
 ``render_graph_context`` renders entity neighborhood for per-turn injection.
 """
 
@@ -10,14 +9,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import structlog
-
 from remi.agent.context.frame import ContextFrame
-from remi.agent.signals import DomainTBox, MutableTBox, Signal
-from remi.agent.vectors.types import Embedder
+from remi.agent.signals import DomainTBox, MutableTBox
 from remi.types.text import estimate_tokens
-
-_log = structlog.get_logger(__name__)
 
 
 def render_domain_context(domain: Any, *, compact: bool = False) -> str:
@@ -100,112 +94,6 @@ def render_domain_context(domain: Any, *, compact: bool = False) -> str:
     return "\n".join(parts)
 
 
-async def render_active_signals(
-    signal_store: Any,
-    *,
-    question: str | None = None,
-    embedder: Embedder | None = None,
-    max_signals: int = 15,
-    empty_state_label: str = "monitored entities",
-) -> str:
-    """Fetch current signals, rank by semantic relevance, and render a compact summary."""
-    try:
-        signals = await signal_store.list_signals()
-    except Exception:
-        _log.warning("signal_summary_fetch_failed", exc_info=True)
-        return ""
-
-    if not signals:
-        return (
-            "## Active Signals (0)\n\n"
-            f"No signals currently active. The {empty_state_label} appear within "
-            "normal parameters. "
-            "If the user asks about problems, verify by querying the data directly."
-        )
-
-    ranked = await _rank_signals(signals, question, embedder)
-    ranked = ranked[:max_signals]
-
-    severity_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "⚪"}
-
-    severity_counts: dict[str, int] = {}
-    for s in signals:
-        sev = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
-        severity_counts[sev] = severity_counts.get(sev, 0) + 1
-    sev_order = ["critical", "high", "medium", "low"]
-    breakdown = ", ".join(
-        f"{severity_counts[sev]} {sev}" for sev in sev_order if severity_counts.get(sev)
-    )
-    header = f"{len(signals)} total: {breakdown}" if breakdown else f"{len(signals)} total"
-    lines = [f"## Active Signals ({header}, showing top {len(ranked)})\n"]
-    for s in ranked:
-        sev_val = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
-        icon = severity_icon.get(sev_val, "❓")
-        desc = s.description[:120] + ("…" if len(s.description) > 120 else "")
-        lines.append(
-            f"- {icon} **[{sev_val.upper()}] {s.signal_type}**: "
-            f"{s.entity_name} — {desc}  \n"
-            f"  `{s.signal_id}`"
-        )
-
-    lines.append(
-        "\nThese signals are pre-computed from the data. Reference them by name in your response."
-    )
-    return "\n".join(lines)
-
-
-async def _rank_signals(
-    signals: list[Signal],
-    question: str | None,
-    embedder: Embedder | None = None,
-) -> list[Signal]:
-    """Rank signals by semantic relevance to the question."""
-    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-
-    def _signal_text(s: Signal) -> str:
-        return f"{s.signal_type} {s.entity_name} {s.description}"
-
-    similarity_scores: dict[str, float] = {}
-    if question and embedder is not None:
-        try:
-            signal_texts = [_signal_text(s) for s in signals]
-            all_texts = [question] + signal_texts
-            all_vectors = await embedder.embed(all_texts)
-
-            question_vec = all_vectors[0]
-            for i, s in enumerate(signals):
-                signal_vec = all_vectors[i + 1]
-                dot = sum(a * b for a, b in zip(question_vec, signal_vec, strict=True))
-                norm_q = sum(a * a for a in question_vec) ** 0.5
-                norm_s = sum(a * a for a in signal_vec) ** 0.5
-                denom = norm_q * norm_s
-                similarity_scores[s.signal_id] = dot / denom if denom else 0.0
-        except Exception:
-            _log.debug("embedding_signal_rank_failed", exc_info=True)
-
-    keyword_scores: dict[str, int] = {}
-    if not similarity_scores and question:
-        question_words = {w.lower() for w in re.findall(r"[a-zA-Z]{3,}", question)}
-        for s in signals:
-            haystack_words = set(re.findall(r"[a-zA-Z]{3,}", _signal_text(s).lower()))
-            keyword_scores[s.signal_id] = len(question_words & haystack_words)
-
-    def sort_key(s: Signal) -> tuple[int, int, float, str]:
-        sev = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
-        tier = severity_order.get(sev, 4)
-        is_composite = "composition_rule" in (s.evidence or {})
-        composite_boost = 0 if is_composite else 1
-
-        if similarity_scores:
-            relevance = -similarity_scores.get(s.signal_id, 0.0)
-        else:
-            relevance = -float(keyword_scores.get(s.signal_id, 0))
-
-        return (composite_boost, tier, relevance, s.signal_type)
-
-    return sorted(signals, key=sort_key)
-
-
 def render_graph_context(
     frame: ContextFrame,
     *,
@@ -218,11 +106,6 @@ def render_graph_context(
         return ""
 
     entities = sorted(frame.entities, key=lambda e: e.score, reverse=True)[:max_entities]
-    entity_ids = {e.entity_id for e in entities}
-    entity_signals: dict[str, list[Signal]] = {}
-    for s in frame.signals:
-        if s.entity_id in entity_ids:
-            entity_signals.setdefault(s.entity_id, []).append(s)
 
     lines = [f"## Graph Context ({len(entities)} relevant entities)\n"]
     token_count = estimate_tokens("\n".join(lines))
@@ -246,16 +129,9 @@ def render_graph_context(
         if links:
             entity_lines.append("  Relationships:")
             for link in links:
-                direction = "→" if link.source_id == entity.entity_id else "←"
+                direction = "\u2192" if link.source_id == entity.entity_id else "\u2190"
                 other_id = link.target_id if link.source_id == entity.entity_id else link.source_id
-                entity_lines.append(f"  - {direction} {link.link_type} → `{other_id}`")
-
-        sigs = entity_signals.get(entity.entity_id, [])
-        for sig in sigs:
-            sev = sig.severity.value if hasattr(sig.severity, "value") else str(sig.severity)
-            entity_lines.append(
-                f"  Active signal: [{sev.upper()}] {sig.signal_type} — {sig.description[:100]}"
-            )
+                entity_lines.append(f"  - {direction} {link.link_type} \u2192 `{other_id}`")
 
         entity_lines.append("")
 
@@ -275,7 +151,7 @@ def render_graph_context(
 
 
 def extract_signal_references(text: str, domain: Any) -> list[str]:
-    """Find signal names mentioned in the agent's output."""
+    """Find TBox signal definition names mentioned in the agent's output."""
     if domain is None or not hasattr(domain, "all_signal_names"):
         return []
     found = []

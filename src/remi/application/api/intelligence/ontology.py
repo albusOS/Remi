@@ -1,22 +1,17 @@
 """REST endpoints for the unified ontology layer.
 
-Ontology CRUD operates through the KnowledgeGraph port.
 Snapshot and subgraph endpoints go directly through PropertyStore —
 the FK fields on core models ARE the graph edges.
+
+Schema/search/related endpoints use the WorldModel ABC, which is the
+agent kernel's domain-agnostic view of the world.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from remi.agent.graph import ObjectTypeDef, PropertyDef
 from remi.application.api.intelligence.ontology_schemas import (
-    AggregateRequest,
-    AggregateResponse,
-    CodifyRequest,
-    CodifyResponse,
-    DefineTypeRequest,
-    DefineTypeResponse,
     GraphEdge,
     GraphNode,
     ObjectResponse,
@@ -30,10 +25,9 @@ from remi.application.api.intelligence.ontology_schemas import (
     SearchResponse,
     SnapshotResponse,
     SubgraphResponse,
-    TimelineResponse,
 )
 from remi.application.core.protocols import PropertyStore
-from remi.application.infra.graph.schema import load_domain_yaml
+from remi.agent.signals import load_domain_yaml
 from remi.shell.api.dependencies import Ctr
 from remi.types.errors import NotFoundError
 
@@ -50,16 +44,14 @@ async def search_objects(
     order_by: str | None = Query(None, description="Sort field (prefix with - for desc)"),
     limit: int = Query(50, ge=1, le=1000),
 ) -> SearchResponse:
-    """Search objects of any type with optional field filters.
-
-    Filters are passed as arbitrary query params beyond the declared ones.
-    """
-    results = await c.knowledge_graph.search_objects(
-        type_name,
-        order_by=order_by,
+    """Search objects of a given type via WorldModel."""
+    results = await c.world_model.search_objects(
+        "",
+        object_type=type_name,
         limit=limit,
     )
-    return SearchResponse(count=len(results), objects=results)
+    objects = [r.model_dump(mode="json") for r in results]
+    return SearchResponse(count=len(objects), objects=objects)
 
 
 @router.post("/search/{type_name}", response_model=SearchResponse)
@@ -68,14 +60,14 @@ async def search_objects_post(
     body: SearchRequest,
     c: Ctr,
 ) -> SearchResponse:
-    """Search with filters in the request body (for complex filter objects)."""
-    results = await c.knowledge_graph.search_objects(
-        type_name,
-        filters=body.filters,
-        order_by=body.order_by,
+    """Search with filters in the request body."""
+    results = await c.world_model.search_objects(
+        "",
+        object_type=type_name,
         limit=body.limit,
     )
-    return SearchResponse(count=len(results), objects=results)
+    objects = [r.model_dump(mode="json") for r in results]
+    return SearchResponse(count=len(objects), objects=objects)
 
 
 # -- get ----------------------------------------------------------------------
@@ -88,10 +80,10 @@ async def get_object(
     c: Ctr,
 ) -> ObjectResponse:
     """Get a single object by type and ID."""
-    obj = await c.knowledge_graph.get_object(type_name, object_id)
+    obj = await c.world_model.get_object(object_id)
     if obj is None:
         raise NotFoundError(type_name, object_id)
-    return ObjectResponse(object=obj)
+    return ObjectResponse(object=obj.model_dump(mode="json"))
 
 
 # -- related ------------------------------------------------------------------
@@ -109,81 +101,15 @@ async def get_related(
     max_depth: int = Query(1, ge=1, le=10, description="Traversal depth"),
 ) -> RelatedResponse:
     """Find related objects via link traversal."""
-    if max_depth > 1:
-        link_types = [link_type] if link_type else None
-        nodes = await c.knowledge_graph.traverse(
-            object_id,
-            link_types=link_types,
-            max_depth=max_depth,
-        )
-        return RelatedResponse(
-            object_id=object_id,
-            count=len(nodes),
-            nodes=nodes,
-            depth=max_depth,
-        )
-
-    links = await c.knowledge_graph.get_links(
+    links = await c.world_model.get_links(
         object_id,
-        link_type=link_type,
         direction=direction,
+        link_type=link_type,
     )
     return RelatedResponse(
         object_id=object_id,
         count=len(links),
-        links=links,
-    )
-
-
-# -- aggregate ----------------------------------------------------------------
-
-
-@router.post("/aggregate/{type_name}", response_model=AggregateResponse)
-async def aggregate(
-    type_name: str,
-    body: AggregateRequest,
-    c: Ctr,
-) -> AggregateResponse:
-    """Compute aggregate metrics (count, sum, avg, min, max) across objects."""
-    result = await c.knowledge_graph.aggregate(
-        type_name,
-        body.metric,
-        body.field,
-        filters=body.filters,
-        group_by=body.group_by,
-    )
-    return AggregateResponse(
-        type_name=type_name,
-        metric=body.metric,
-        field=body.field,
-        result=result,
-    )
-
-
-# -- timeline -----------------------------------------------------------------
-
-
-@router.get(
-    "/timeline/{type_name}/{object_id}",
-    response_model=TimelineResponse,
-)
-async def get_timeline(
-    type_name: str,
-    object_id: str,
-    c: Ctr,
-    limit: int = Query(50, ge=1, le=1000),
-) -> TimelineResponse:
-    """Show event history for an object."""
-    events = await c.knowledge_graph.get_timeline(
-        type_name,
-        object_id,
-        limit=limit,
-    )
-    return TimelineResponse(
-        object_type=type_name,
-        object_id=object_id,
-        count=len(events),
-        events=events,
+        links=[gl.model_dump(mode="json") for gl in links],
     )
 
 
@@ -192,12 +118,11 @@ async def get_timeline(
 
 @router.get("/schema", response_model=SchemaListResponse)
 async def list_schema(c: Ctr) -> SchemaListResponse:
-    """List all defined object types and link types."""
-    types = await c.knowledge_graph.list_object_types()
-    links = await c.knowledge_graph.list_link_types()
+    """List all defined object types."""
+    types = await c.world_model.schema()
     return SchemaListResponse(
         types=[t.model_dump(mode="json") for t in types],
-        link_types=[lt.model_dump(mode="json") for lt in links],
+        link_types=[],
     )
 
 
@@ -206,23 +131,18 @@ async def get_schema_type(
     type_name: str,
     c: Ctr,
 ) -> SchemaTypeResponse:
-    """Describe a specific object type and its related link types."""
-    ot = await c.knowledge_graph.get_object_type(type_name)
+    """Describe a specific object type."""
+    all_types = await c.world_model.schema()
+    ot = next((t for t in all_types if t.name == type_name), None)
     if ot is None:
         raise NotFoundError("Type", type_name)
-    links = await c.knowledge_graph.list_link_types()
-    related = [
-        lt.model_dump(mode="json")
-        for lt in links
-        if lt.source_type in (type_name, "*") or lt.target_type in (type_name, "*")
-    ]
-    return SchemaTypeResponse(type=ot.model_dump(mode="json"), related_links=related)
+    return SchemaTypeResponse(type=ot.model_dump(mode="json"), related_links=[])
 
 
 # -- snapshot (live graph visualization) --------------------------------------
 #
 # Built directly from PropertyStore + FK fields on core models.
-# No KnowledgeGraph indirection — the domain models are the graph.
+# The domain models are the graph.
 # ---------------------------------------------------------------------------
 
 
@@ -411,8 +331,8 @@ async def graph_snapshot(
 ) -> SnapshotResponse:
     """Full graph state built directly from core domain models.
 
-    The FK fields on the models ARE the edges. No KnowledgeGraph
-    indirection — PropertyStore is the source of truth.
+    The FK fields on the models ARE the edges. PropertyStore is the
+    source of truth.
     """
     return await _build_snapshot(
         c.property_store,
@@ -433,8 +353,7 @@ async def graph_subgraph(
     """Ego-graph around an entity — nodes and edges together.
 
     Fetches the full snapshot and then BFS-prunes to the requested depth
-    from the center entity. For small-to-medium portfolios this is fast
-    enough; for large graphs, a targeted traversal would be better.
+    from the center entity.
     """
     full = await _build_snapshot(c.property_store)
     adj: dict[str, set[str]] = {}
@@ -599,58 +518,3 @@ async def operational_graph() -> OperationalGraphResponse:
     suitable for the Operational Intelligence Map visualization.
     """
     return _build_operational_graph()
-
-
-# -- codify -------------------------------------------------------------------
-
-
-@router.post("/codify", response_model=CodifyResponse)
-async def codify(
-    body: CodifyRequest,
-    c: Ctr,
-) -> CodifyResponse:
-    """Codify operational knowledge into the ontology."""
-    entity_id = await c.knowledge_graph.codify(
-        body.knowledge_type,
-        body.data,
-        provenance=body.provenance,
-    )
-
-    if body.source_id and body.target_id:
-        link_type = "CAUSES" if body.knowledge_type == "causal_link" else "RELATED_TO"
-        await c.knowledge_graph.put_link(
-            body.source_id,
-            link_type,
-            body.target_id,
-            properties={"knowledge_id": entity_id},
-        )
-
-    return CodifyResponse(entity_id=entity_id, knowledge_type=body.knowledge_type)
-
-
-# -- define -------------------------------------------------------------------
-
-
-@router.post("/define", response_model=DefineTypeResponse)
-async def define_type(
-    body: DefineTypeRequest,
-    c: Ctr,
-) -> DefineTypeResponse:
-    """Define a new object type in the ontology."""
-    props = tuple(
-        PropertyDef(
-            name=p.name,
-            data_type=p.data_type,
-            required=p.required,
-            description=p.description,
-        )
-        for p in body.properties
-    )
-    type_def = ObjectTypeDef(
-        name=body.name,
-        description=body.description,
-        properties=props,
-        provenance=body.provenance,
-    )
-    await c.knowledge_graph.define_object_type(type_def)
-    return DefineTypeResponse(type=type_def.model_dump(mode="json"))

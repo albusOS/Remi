@@ -10,7 +10,7 @@ from remi.agent.graph.stores import MemoryStore
 from remi.agent.llm.factory import LLMProviderFactory
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
-from remi.agent.signals import DomainTBox, SignalStore
+from remi.agent.signals import DomainTBox
 from remi.agent.types import ToolRegistry
 
 
@@ -29,7 +29,6 @@ class RunDeps:
     tracer: Tracer | None = None
     usage_ledger: LLMUsageLedger | None = None
     memory_store: MemoryStore | None = None
-    signal_store: SignalStore | None = None
     domain_tbox: DomainTBox | None = None
     context_builder: ContextBuilder | None = None
     default_provider: str = ""
@@ -51,8 +50,7 @@ class RunParams:
 class ScopeContext:
     """Domain-supplied focus scope injected into agent runs.
 
-    Built by the product layer (e.g. real-estate manager focus,
-    medical provider focus) and consumed generically by the runtime.
+    Built by the product layer and consumed generically by the runtime.
     The runtime injects ``scope_message`` as a system message without
     knowing what domain concepts it contains.
     """

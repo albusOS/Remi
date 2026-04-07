@@ -25,6 +25,7 @@ class Property(BaseModel, frozen=True):
     year_renovated: int | None = None
     acquisition_date: date | None = None
     management_start_date: date | None = None
+    manager_tag: str | None = None
     content_hash: str | None = None
     source_document_id: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)

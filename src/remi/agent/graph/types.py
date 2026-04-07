@@ -1,4 +1,4 @@
-"""Knowledge graph DTOs — entities, relationships, schema definitions.
+"""Knowledge graph DTOs — schema definitions, links, memory, and query results.
 
 ABCs live in ``remi.agent.graph.stores``.  This module owns pure data
 types only — no abstract base classes.
@@ -6,7 +6,6 @@ types only — no abstract base classes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -99,71 +98,6 @@ class ObjectTypeDef(BaseModel, frozen=True):
         return tuple(p for p in self.properties if p.required)
 
 
-# ---------------------------------------------------------------------------
-# FK-to-edge projection mapping (domain-agnostic structure)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class FKProjection:
-    """Declares that ``fk_field`` on ``source_type`` should materialise
-    a ``link_type`` edge pointing at an entity of ``target_type``."""
-
-    fk_field: str
-    link_type: str
-    target_type: str
-
-
-ProjectionMapping = dict[str, list[FKProjection]]
-
-
-# ---------------------------------------------------------------------------
-# Annotation DTO — domain-agnostic unstructured attachment
-# ---------------------------------------------------------------------------
-
-
-class Annotation(BaseModel, frozen=True):
-    """Unstructured text attached to any entity in the knowledge graph."""
-
-    annotation_id: str
-    content: str
-    annotation_type: str = "note"
-    target_entity_id: str = ""
-    target_entity_type: str = ""
-    provenance: FactProvenance = Field(default_factory=FactProvenance)
-
-
-# ---------------------------------------------------------------------------
-# Low-level graph persistence DTOs
-# ---------------------------------------------------------------------------
-
-
-class Entity(BaseModel):
-    """A typed entity in the knowledge graph."""
-
-    entity_id: str
-    entity_type: str
-    namespace: str = "default"
-    properties: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    provenance: FactProvenance | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class Relationship(BaseModel, frozen=True):
-    """A typed, directed relationship between two entities."""
-
-    source_id: str
-    target_id: str
-    relation_type: str
-    namespace: str = "default"
-    properties: dict[str, Any] = Field(default_factory=dict)
-    provenance: FactProvenance | None = None
-    weight: float = 1.0
-    created_at: datetime | None = None
-
-
 class MemoryEntry(BaseModel, frozen=True):
     namespace: str
     key: str
@@ -173,7 +107,7 @@ class MemoryEntry(BaseModel, frozen=True):
 
 
 # ---------------------------------------------------------------------------
-# Typed return models for KnowledgeGraph port methods
+# Typed return models for WorldModel port methods
 # ---------------------------------------------------------------------------
 
 

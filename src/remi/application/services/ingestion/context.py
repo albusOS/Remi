@@ -1,9 +1,6 @@
-"""Shared ingestion context — PropertyStore writes + provenance tracking.
+"""Shared ingestion context — PropertyStore writes + entity tracking.
 
-All entity writes go through PropertyStore only. The ProjectingPropertyStore
-decorator auto-creates structural graph edges from FK fields. This module
-adds EXTRACTED_FROM provenance edges linking entities back to their source
-document via KnowledgeWriter.
+All entity writes go through PropertyStore only.
 """
 
 from __future__ import annotations
@@ -14,7 +11,7 @@ import structlog
 
 from remi.application.core.models import Property
 from remi.application.core.models.enums import ReportType
-from remi.application.core.protocols import KBRelationship, KnowledgeWriter, PropertyStore
+from remi.application.core.protocols import PropertyStore
 from remi.application.services.ingestion.base import (
     IngestionResult,
     ReviewItem,
@@ -37,7 +34,6 @@ class IngestionCtx:
         "report_type",
         "doc_id",
         "namespace",
-        "kb",
         "ps",
         "manager_resolver",
         "result",
@@ -56,7 +52,6 @@ class IngestionCtx:
         report_type: ReportType,
         doc_id: str,
         namespace: str,
-        kb: KnowledgeWriter,
         ps: PropertyStore,
         manager_resolver: ManagerResolver,
         result: IngestionResult,
@@ -66,7 +61,6 @@ class IngestionCtx:
         self.report_type = report_type
         self.doc_id = doc_id
         self.namespace = namespace
-        self.kb = kb
         self.ps = ps
         self.manager_resolver = manager_resolver
         self.result = result
@@ -83,23 +77,9 @@ async def record_extracted(
     entity_id: str,
     entity_type: str,
 ) -> None:
-    """Record that this entity was extracted from the current document.
-
-    Creates an EXTRACTED_FROM edge in the knowledge graph and tracks
-    the entity for later Document FK wiring.
-    """
+    """Record that this entity was extracted from the current document."""
     ctx.extracted_entity_ids.append((entity_id, entity_type))
     ctx.result.entities_created += 1
-
-    await ctx.kb.put_relationship(
-        KBRelationship(
-            source_id=entity_id,
-            target_id=ctx.doc_id,
-            relation_type="EXTRACTED_FROM",
-            namespace=ctx.namespace,
-        )
-    )
-    ctx.result.relationships_created += 1
 
 
 async def ensure_property(
@@ -111,11 +91,11 @@ async def ensure_property(
     Replace semantics are derived from ``ctx.report_type`` so that each report
     type owns only the data it is authoritative over:
 
-    - ``rent_roll``         → replaces units (authoritative unit inventory)
-    - ``delinquency``       → replaces leases only (authoritative balance state;
+    - ``rent_roll``         \u2192 replaces units (authoritative unit inventory)
+    - ``delinquency``       \u2192 replaces leases only (authoritative balance state;
                               does *not* touch unit inventory)
-    - ``lease_expiration``  → no replacement (merge-only; does not own inventory)
-    - ``property_directory`` → no replacement (additive; establishes registry)
+    - ``lease_expiration``  \u2192 no replacement (merge-only; does not own inventory)
+    - ``property_directory`` \u2192 no replacement (additive; establishes registry)
     """
     raw_addr = str(row.get("property_address", "")).strip()
     name = property_name(raw_addr) or raw_addr
@@ -125,10 +105,7 @@ async def ensure_property(
         return prop_id
     ctx.seen_properties.add(prop_id)
 
-    # Ingestion is now additive — units and leases accumulate across reports.
-    # Reconciliation happens at the row level (persist_lease marks displaced
-    # leases TERMINATED; persist_tenant inserts BalanceObservations).
-    _ = ctx.report_type  # kept for future report-type-specific logic
+    _ = ctx.report_type
 
     existing = await ctx.ps.get_property(prop_id)
 
@@ -191,6 +168,7 @@ async def ensure_property(
             manager_id=mid,
             name=name,
             address=address,
+            manager_tag=tag,
             source_document_id=ctx.doc_id,
         )
     )

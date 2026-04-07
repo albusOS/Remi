@@ -6,13 +6,11 @@ The frame separates two concerns:
   definitions, thresholds, policies, and causal chains the agent operates
   with.  This is set once at agent priming time and does not change per turn.
 
-- **PerceptionSnapshot** (ABox state): the current situational awareness —
-  active signal counts, severity distribution, compounding situations.
-  This is assembled fresh each turn by the ContextBuilder.
+- **ContextFrame** (per-turn ABox): entities, graph neighborhood, and
+  document context assembled by the ContextBuilder each turn.
 
 Both stay typed until the injection boundary, where rendering projects
-them into prose for the LLM.  Before that point, any code (runtime,
-tools, CLI) can inspect the structured data directly.
+them into prose for the LLM.
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ from dataclasses import dataclass, field
 
 from remi.agent.graph.retrieval.retriever import ResolvedEntity
 from remi.agent.graph.types import KnowledgeLink
-from remi.agent.signals import CausalChain, DomainTBox, MutableTBox, Policy, Signal
+from remi.agent.signals import CausalChain, DomainTBox, MutableTBox, Policy
 
 
 @dataclass(frozen=True)
@@ -65,70 +63,23 @@ class WorldState:
         }
 
 
-@dataclass(frozen=True)
-class CompoundingSituation:
-    """A composition rule that is currently firing."""
-
-    name: str
-    severity: str
-    constituents: list[str]
-    entity_ids: list[str]
-
-
-@dataclass
-class PerceptionSnapshot:
-    """Current ABox situational awareness — what's happening right now.
-
-    Assembled fresh each turn by the ContextBuilder from the signal store.
-    """
-
-    active_signals: int = 0
-    severity_counts: dict[str, int] = field(default_factory=dict)
-    compounding: list[CompoundingSituation] = field(default_factory=list)
-
-    @property
-    def severity_breakdown(self) -> dict[str, int]:
-        """Severity counts in canonical worst-to-best order."""
-        order = ["critical", "high", "medium", "low"]
-        return {s: self.severity_counts[s] for s in order if self.severity_counts.get(s)}
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "active_signals": self.active_signals,
-            "severity": self.severity_breakdown,
-            "compounding": [
-                {"name": c.name, "severity": c.severity, "constituents": c.constituents}
-                for c in self.compounding
-            ],
-        }
-
-
 @dataclass
 class ContextFrame:
     """The agent's typed perception of its world.
 
-    Contains everything the agent needs to reason — entities, signals,
-    policies, causal chains, and graph neighborhood — without making
-    tool calls to discover it.
+    Contains entities, policies, causal chains, and graph neighborhood
+    the agent needs to reason without making tool calls.
 
-    ``world`` and ``perception`` hold structured data that stays typed
-    until the injection boundary.  ``signal_summary`` is the rendered
-    prose projection of ABox perception, filled at injection time.
-    The TBox is not here — it lives in the agent's priming (system prompt).
+    ``world`` holds structured TBox shape data.
+    The TBox itself lives in the agent's priming (system prompt).
     """
 
-    # Typed perception (structured, inspectable)
     world: WorldState = field(default_factory=WorldState)
-    perception: PerceptionSnapshot = field(default_factory=PerceptionSnapshot)
 
-    # Detailed data
     entities: list[ResolvedEntity] = field(default_factory=list)
-    signals: list[Signal] = field(default_factory=list)
     policies: list[Policy] = field(default_factory=list)
     causal_chains: list[CausalChain] = field(default_factory=list)
     neighborhood: dict[str, list[KnowledgeLink]] = field(default_factory=dict)
 
-    # Rendered ABox prose (filled at injection boundary)
-    signal_summary: str = ""
     document_context: str = ""
     question: str | None = None

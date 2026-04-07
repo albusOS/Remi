@@ -1,0 +1,15 @@
+Property Address,Unit,Unit Type,Beds,Baths,Sq Ft,Market Rent,Tenant Name,Monthly Rent,Lease Start,Lease End,Status,Site Manager Name
+412 Maple Ave,1A,Apartment,2,1,850,1200.00,James Holloway,1170.00,06/01/2025,05/31/2026,Current,Ryan Steen
+412 Maple Ave,2B,Apartment,2,1,850,1200.00,Tanya Morrison,1170.00,03/01/2025,02/28/2026,Current,Ryan Steen
+412 Maple Ave,3A,Apartment,1,1,650,950.00,Robert Kim,900.00,09/01/2025,08/31/2026,Current,Ryan Steen
+412 Maple Ave,4B,Apartment,1,1,650,950.00,,,,Vacant,Ryan Steen
+1847 Beechwood Blvd,1C,Apartment,3,2,1100,1600.00,Angela Torres,1500.00,01/01/2025,12/31/2025,Current,Ryan Steen
+1847 Beechwood Blvd,2A,Apartment,2,1,900,1300.00,Devon Clarke,1200.00,07/01/2024,06/30/2025,Current,Ryan Steen
+1847 Beechwood Blvd,3B,Apartment,2,1,900,1300.00,Linda Chen,1250.00,04/01/2025,03/31/2026,Current,Ryan Steen
+2204 Penn Ave,1A,Apartment,2,1,800,1150.00,Samuel Okonkwo,1100.00,08/01/2025,07/31/2026,Current,Kim Dalton
+2204 Penn Ave,2C,Apartment,1,1,600,900.00,Maria Santos,850.00,10/01/2025,09/30/2026,Current,Kim Dalton
+2204 Penn Ave,3B,Apartment,2,1,800,1150.00,,,,Vacant,Kim Dalton
+714 Shady Ave,1A,Apartment,3,2,1200,1700.00,Kevin Washington,1600.00,02/01/2025,01/31/2026,Current,Kim Dalton
+714 Shady Ave,2D,Apartment,2,1,850,1200.00,Patricia Hayes,1150.00,05/01/2025,04/30/2026,Current,Kim Dalton
+714 Shady Ave,3A,Apartment,1,1,650,950.00,Derek Simmons,900.00,11/01/2025,10/31/2026,Current,Kim Dalton
+714 Shady Ave,4B,Apartment,1,1,650,950.00,Jasmine Liu,920.00,01/01/2026,12/31/2026,Current,Kim Dalton

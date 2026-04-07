@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from remi.agent.sandbox.bridge import DATA_BRIDGE_SOURCE
+from remi.application.sandbox_bridge import _RE_BRIDGE_SOURCE as DATA_BRIDGE_SOURCE
 
 # -- US-4 prerequisite: bridge is valid Python --------------------------------
 
@@ -135,16 +135,15 @@ def test_bridge_handles_connection_error() -> None:
 
 def test_bridge_query_string_skips_none(mock_api: tuple) -> None:
     url, handler = mock_api
-    handler.response_data = {"signals": []}
+    handler.response_data = {"units": []}
 
     bridge = _load_bridge(url)
-    bridge.signals(severity="high")
+    bridge.units(property_id="p1")
 
-    matched = [r for r in handler.requests if "/api/v1/signals" in r]
+    matched = [r for r in handler.requests if "/api/v1/units" in r]
     assert matched
-    assert "severity=high" in matched[0]
-    assert "manager_id" not in matched[0]
-    assert "property_id" not in matched[0]
+    assert "property_id=p1" in matched[0]
+    assert "status" not in matched[0]
 
 
 def test_bridge_managers_endpoint(mock_api: tuple) -> None:

@@ -6,8 +6,8 @@ metadata:
   version: "1.0.0"
   description: >
     Two-stage pipeline that generates a structured manager review meeting
-    brief from property data. Runs via IngestionPipelineRunner — no chat
-    runtime, just sequential LLM calls.
+    brief from property data. Runs via WorkflowRunner — no chat runtime,
+    just sequential LLM calls.
 
     Stage 1 (analyze): Identifies the top issues, patterns, and risks
     across the manager's properties and produces a structured analysis.

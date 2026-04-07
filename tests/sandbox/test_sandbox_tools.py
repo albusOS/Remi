@@ -18,7 +18,11 @@ from remi.agent.tools.sandbox import SandboxToolProvider
 
 @pytest.fixture
 def sandbox(tmp_path: Path) -> LocalSandbox:
-    return LocalSandbox(root=tmp_path / "sandbox")
+    from remi.application.sandbox_bridge import RE_BRIDGE_FILES
+
+    sb = LocalSandbox(root=tmp_path / "sandbox")
+    sb.set_session_files(RE_BRIDGE_FILES)
+    return sb
 
 
 @pytest.fixture

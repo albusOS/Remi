@@ -68,6 +68,7 @@ def parse_document(
     content_type: str,
     *,
     extra_skip_patterns: tuple[str, ...] = (),
+    section_labels: frozenset[str] = frozenset(),
 ) -> DocumentContent:
     """Parse uploaded file bytes into a Document.
 
@@ -85,7 +86,7 @@ def parse_document(
     if ct in _CSV_CONTENT_TYPES or name.endswith(".csv"):
         return parse_csv(filename, content)
     if ct in _EXCEL_CONTENT_TYPES or name.endswith((".xlsx", ".xls")):
-        return parse_excel(filename, content, extra_skip_patterns=extra_skip_patterns)
+        return parse_excel(filename, content, extra_skip_patterns=extra_skip_patterns, section_labels=section_labels)
 
     # Text formats
     if ct in _PDF_CONTENT_TYPES or name.endswith(".pdf"):
@@ -137,12 +138,17 @@ def parse_excel(
     content: bytes,
     *,
     extra_skip_patterns: tuple[str, ...] = (),
+    section_labels: frozenset[str] = frozenset(),
 ) -> DocumentContent:
     """Parse an Excel file (.xlsx / .xls) into a Document.
 
-    Handles report-style exports (AppFolio, Yardi, etc.) that prepend several
-    rows of metadata before the real column header.  The parser scans forward
-    to find the first row that looks like a genuine header.
+    Handles report-style exports that prepend several rows of metadata
+    before the real column header.  The parser scans forward to find the
+    first row that looks like a genuine header.
+
+    *section_labels* are domain-specific labels (e.g. ``"current"``,
+    ``"vacant"``) that identify section context rows in hierarchical
+    reports.  When empty, section detection is skipped.
 
     Requires the openpyxl optional dependency.
     """
@@ -179,7 +185,7 @@ def parse_excel(
     header = all_rows[header_idx]
     columns = [str(h).strip() if h is not None else f"col_{i}" for i, h in enumerate(header)]
 
-    rows, _section_ctx = _parse_data_rows(all_rows[header_idx + 1 :], columns)
+    rows, _section_ctx = _parse_data_rows(all_rows[header_idx + 1 :], columns, section_labels=section_labels)
 
     return DocumentContent(
         id=f"doc-{uuid.uuid4().hex[:12]}",
@@ -198,27 +204,6 @@ def parse_excel(
 
 _DO_NOT_USE_RE = re.compile(r"^do\s+not\s+use\s*[-–]?\s*", re.I)
 
-# Section-label values that appear as standalone rows in hierarchical reports
-# (e.g. AppFolio rent rolls). These propagate as _section_label context.
-_SECTION_LABELS = frozenset(
-    {
-        "current",
-        "vacant",
-        "notice",
-        "past",
-        "future",
-        "eviction",
-        "month-to-month",
-        "total",
-        "grand total",
-        "subtotal",
-        "vacant-unrented",
-        "vacant-rented",
-        "notice-unrented",
-        "notice-rented",
-    }
-)
-
 
 def _normalize_cell_address(val: str) -> str:
     """Strip 'DO NOT USE' prefixes from address strings."""
@@ -228,17 +213,18 @@ def _normalize_cell_address(val: str) -> str:
 def _parse_data_rows(
     raw_rows: list[tuple[Any, ...]],
     columns: list[str],
+    *,
+    section_labels: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Convert raw sheet rows into data row dicts with section context propagated.
 
-    Hierarchical reports (AppFolio rent rolls, etc.) embed context rows between
-    data rows — a row with a single non-null value that identifies either:
-      - A property address  → stored as ``_ctx_property_address``
-      - A section label     → stored as ``_ctx_section_label``
+    Hierarchical reports embed context rows between data rows — a row with a
+    single non-null value that identifies either:
+      - A section label (matched against *section_labels*) → ``_ctx_section_label``
+      - A free-text value (e.g. address)                   → ``_ctx_property_address``
 
-    These are NOT emitted as data rows. Instead their values are attached to
-    every subsequent data row until the next context row overwrites them.
-    Address values have "DO NOT USE" prefixes stripped before propagation.
+    When *section_labels* is empty, single-cell rows are still captured as
+    ``_ctx_property_address`` context (address heuristic).
 
     Returns (data_rows, final_context).
     """
@@ -261,7 +247,7 @@ def _parse_data_rows(
             raw_val = str(non_empty[0][1]).strip()
             clean_val = _normalize_cell_address(raw_val)
             lower_val = clean_val.lower()
-            if lower_val in _SECTION_LABELS:
+            if section_labels and lower_val in section_labels:
                 context["_ctx_section_label"] = clean_val
             else:
                 # Treat as a property/section address
@@ -295,8 +281,8 @@ _METADATA_KV_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 ]+?):\s*(.+)$")
 def _extract_metadata(rows: list[tuple[Any, ...]], header_idx: int) -> dict[str, str]:
     """Extract key-value metadata from the rows above the column header.
 
-    AppFolio (and similar) reports prepend lines like:
-      ``Property Groups: Ryan Steen Mgmt``
+    Report-style exports often prepend lines like:
+      ``Report Group: Acme Corp``
       ``Exported On: 03/23/2026 11:54 AM``
 
     Returns a dict of normalised keys → raw values.

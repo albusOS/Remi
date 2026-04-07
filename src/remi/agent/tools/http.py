@@ -15,7 +15,7 @@ import structlog
 
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 
-logger = structlog.get_logger("remi.application.tools.http")
+logger = structlog.get_logger("remi.agent.tools.http")
 
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
 
@@ -120,7 +120,7 @@ class HttpToolProvider(ToolProvider):
                     ),
                     ToolArg(
                         name="path",
-                        description="API path (e.g. /api/v1/managers). Base URL is automatic.",
+                        description="API path (e.g. /api/v1/entities). Base URL is automatic.",
                         required=True,
                     ),
                     ToolArg(

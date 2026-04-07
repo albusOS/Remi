@@ -1,14 +1,10 @@
-"""User assertion tools — assert, correct, and contextualize facts in the KG.
+"""User assertion tools — assert and contextualize facts.
 
 These tools let the director (or the agent on their behalf) teach the system:
-- **assert_fact**: add a new piece of knowledge
-- **correct_entity**: fix a wrong value on an existing entity
-- **add_context**: attach an annotation (user context) to an entity
+- **assert_fact**: record a new observation as a Note on PropertyStore
+- **add_context**: attach a note (user context) to an entity
 
-All writes go through the ``KnowledgeGraph`` with ``source="user"`` and
-``confidence=1.0``.  Corrections also produce a ``ChangeEvent`` with
-``MANAGER_CORRECTION`` source so the PropertyStore stays in sync and
-future adapter imports won't silently overwrite user corrections.
+All writes produce a ``ChangeEvent`` so the audit trail stays intact.
 """
 
 from __future__ import annotations
@@ -18,7 +14,6 @@ from uuid import uuid4
 
 import structlog
 
-from remi.agent.graph import FactProvenance, KnowledgeGraph, KnowledgeProvenance
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.events import (
     ChangeEvent,
@@ -28,18 +23,13 @@ from remi.application.core.events import (
     EventStore,
     FieldChange,
 )
+from remi.application.core.protocols import PropertyStore
 
 _log = structlog.get_logger(__name__)
 
-_USER_PROVENANCE = FactProvenance(
-    source="user",
-    confidence=1.0,
-    provenance_type=KnowledgeProvenance.USER_STATED,
-)
-
 
 async def _assert_fact(
-    kg: KnowledgeGraph,
+    ps: PropertyStore,
     event_store: EventStore | None,
     *,
     entity_type: str,
@@ -48,19 +38,25 @@ async def _assert_fact(
     related_to: str | None = None,
     relation_type: str | None = None,
 ) -> dict[str, str]:
-    """Assert a new fact into the knowledge graph with user provenance."""
+    """Assert a new fact by creating a Note on PropertyStore."""
+    from remi.application.core.models import Note
+
     eid = entity_id or f"{entity_type.lower()}:{uuid4().hex[:12]}"
-
-    props = {**properties, "asserted_by": "user", "asserted_at": datetime.now(UTC).isoformat()}
-    await kg.put_object(entity_type, eid, props)
-
+    note_id = f"assertion:{uuid4().hex[:12]}"
+    content_parts = [f"Asserted {entity_type} fact:"]
+    for k, v in properties.items():
+        content_parts.append(f"  {k}: {v}")
     if related_to and relation_type:
-        await kg.put_link(
-            eid,
-            relation_type,
-            related_to,
-            properties={"provenance_source": "user"},
-        )
+        content_parts.append(f"  Related: {relation_type} -> {related_to}")
+
+    note = Note(
+        id=note_id,
+        content="\n".join(content_parts),
+        entity_type=entity_type,
+        entity_id=eid,
+        tags=["assertion", "user"],
+    )
+    await ps.upsert_note(note)
 
     if event_store is not None:
         now = datetime.now(UTC)
@@ -85,116 +81,47 @@ async def _assert_fact(
     return {"status": "asserted", "entity_id": eid, "entity_type": entity_type}
 
 
-async def _correct_entity(
-    kg: KnowledgeGraph,
-    event_store: EventStore | None,
-    *,
-    entity_type: str,
-    entity_id: str,
-    corrections: dict[str, str],
-) -> dict[str, str]:
-    """Correct field values on an existing entity."""
-    existing = await kg.get_object(entity_type, entity_id)
-    if existing is None:
-        return {"status": "not_found", "entity_id": entity_id}
-
-    updated_props = {
-        **existing.properties,
-        **corrections,
-        "corrected_by": "user",
-        "corrected_at": datetime.now(UTC).isoformat(),
-        "overridden_by": "user",
-    }
-    await kg.put_object(entity_type, entity_id, updated_props)
-
-    if event_store is not None:
-        now = datetime.now(UTC)
-        field_changes = tuple(
-            FieldChange(
-                field=k,
-                old_value=existing.properties.get(k),
-                new_value=v,
-            )
-            for k, v in corrections.items()
-        )
-        cs = ChangeSet(
-            source=ChangeSource.MANAGER_CORRECTION,
-            source_detail=f"correct_entity:{entity_type}",
-            timestamp=now,
-            updated=[
-                ChangeEvent(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    change_type=ChangeType.UPDATED,
-                    fields=field_changes,
-                    source=ChangeSource.MANAGER_CORRECTION,
-                    timestamp=now,
-                ),
-            ],
-        )
-        await event_store.append(cs)
-
-    _log.info(
-        "user_correction_applied",
-        entity_type=entity_type,
-        entity_id=entity_id,
-        fields=list(corrections.keys()),
-    )
-    return {"status": "corrected", "entity_id": entity_id, "fields": str(list(corrections.keys()))}
-
-
 async def _add_context(
-    kg: KnowledgeGraph,
+    ps: PropertyStore,
     *,
     entity_type: str,
     entity_id: str,
     context: str,
 ) -> dict[str, str]:
-    """Attach a user-context annotation to an entity."""
-    aid = f"annotation:{uuid4().hex[:12]}"
+    """Attach a user-context annotation as a Note."""
+    from remi.application.core.models import Note
 
-    await kg.put_object(
-        "Annotation",
-        aid,
-        {
-            "annotation_id": aid,
-            "content": context,
-            "annotation_type": "user_context",
-            "target_entity_id": entity_id,
-            "target_entity_type": entity_type,
-            "source": "user",
-            "confidence": "1.0",
-            "extracted_at": datetime.now(UTC).isoformat(),
-        },
+    note_id = f"context:{uuid4().hex[:12]}"
+    note = Note(
+        id=note_id,
+        content=context,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        tags=["user_context"],
     )
-    await kg.put_link(
-        entity_id,
-        "HAS_ANNOTATION",
-        aid,
-        properties={"annotation_type": "user_context"},
-    )
+    await ps.upsert_note(note)
 
     _log.info(
         "user_context_added",
         entity_type=entity_type,
         entity_id=entity_id,
-        annotation_id=aid,
+        note_id=note_id,
     )
-    return {"status": "context_added", "annotation_id": aid, "entity_id": entity_id}
+    return {"status": "context_added", "note_id": note_id, "entity_id": entity_id}
 
 
 class AssertionToolProvider(ToolProvider):
     def __init__(
         self,
-        knowledge_graph: KnowledgeGraph,
+        property_store: PropertyStore,
         event_store: EventStore | None = None,
     ) -> None:
-        self._knowledge_graph = knowledge_graph
+        self._property_store = property_store
         self._event_store = event_store
 
     def register(self, registry: ToolRegistry) -> None:
         """Register user-assertion tools on the agent tool registry."""
-        knowledge_graph = self._knowledge_graph
+        ps = self._property_store
         event_store = self._event_store
 
         async def assert_fact(
@@ -204,9 +131,9 @@ class AssertionToolProvider(ToolProvider):
             related_to: str | None = None,
             relation_type: str | None = None,
         ) -> dict[str, str]:
-            """Assert a new fact into the knowledge graph."""
+            """Assert a new fact."""
             return await _assert_fact(
-                knowledge_graph,
+                ps,
                 event_store,
                 entity_type=entity_type,
                 entity_id=entity_id,
@@ -215,28 +142,14 @@ class AssertionToolProvider(ToolProvider):
                 relation_type=relation_type,
             )
 
-        async def correct_entity(
-            entity_type: str,
-            entity_id: str,
-            corrections: dict[str, str],
-        ) -> dict[str, str]:
-            """Correct field values on an existing entity in the knowledge graph."""
-            return await _correct_entity(
-                knowledge_graph,
-                event_store,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                corrections=corrections,
-            )
-
         async def add_context(
             entity_type: str,
             entity_id: str,
             context: str,
         ) -> dict[str, str]:
-            """Attach user context/annotation to an entity in the knowledge graph."""
+            """Attach user context to an entity."""
             return await _add_context(
-                knowledge_graph,
+                ps,
                 entity_type=entity_type,
                 entity_id=entity_id,
                 context=context,
@@ -248,9 +161,9 @@ class AssertionToolProvider(ToolProvider):
             ToolDefinition(
                 name="assert_fact",
                 description=(
-                    "Assert a new fact into the knowledge graph. Creates an entity with "
-                    "user-level provenance (highest confidence). Optionally link it to "
-                    "an existing entity."
+                    "Record a new fact or observation. Creates a note with "
+                    "user-level provenance (highest confidence). Optionally "
+                    "note a relationship to an existing entity."
                 ),
                 args=[
                     ToolArg(name="entity_type", description="Entity type name", required=True),
@@ -263,27 +176,6 @@ class AssertionToolProvider(ToolProvider):
                     ToolArg(name="entity_id", description="Optional entity ID"),
                     ToolArg(name="related_to", description="ID of entity to link to"),
                     ToolArg(name="relation_type", description="Link type for relation"),
-                ],
-            ),
-        )
-        registry.register(
-            "correct_entity",
-            correct_entity,
-            ToolDefinition(
-                name="correct_entity",
-                description=(
-                    "Correct field values on an existing entity. User corrections have "
-                    "highest confidence and won't be overwritten by automated imports."
-                ),
-                args=[
-                    ToolArg(name="entity_type", description="Entity type name", required=True),
-                    ToolArg(name="entity_id", description="Entity ID to correct", required=True),
-                    ToolArg(
-                        name="corrections",
-                        description="Field corrections as JSON",
-                        type="object",
-                        required=True,
-                    ),
                 ],
             ),
         )

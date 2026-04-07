@@ -20,7 +20,6 @@ from remi.application.api.intelligence import (
     knowledge_router,
     ontology_router,
     search_router,
-    signals_router,
 )
 from remi.application.api.operations import (
     actions_router,
@@ -57,7 +56,6 @@ def _attach_routers(application: FastAPI) -> None:
     application.include_router(documents_router, prefix="/api/v1")
     application.include_router(events_router, prefix="/api/v1")
     application.include_router(dashboard_router, prefix="/api/v1")
-    application.include_router(signals_router, prefix="/api/v1")
     application.include_router(tenants_router, prefix="/api/v1")
     application.include_router(units_router, prefix="/api/v1")
     application.include_router(ontology_router, prefix="/api/v1")

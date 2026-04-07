@@ -1,63 +1,121 @@
 """Workflow engine — DAG scheduler with parallel step execution.
 
-Builds a dependency graph from ``StepConfig.depends_on``, identifies
-independent steps that can run concurrently, and dispatches them through
-an ``asyncio.Semaphore`` to cap parallel LLM calls.
+Builds a dependency graph from node ``depends_on`` and ``Wire``
+connections, dispatches nodes through an ``asyncio.Semaphore``, and
+emits structured ``NodeEvent`` objects for observability.
 
-Gate steps propagate downward: if a gate fails, all transitive
-dependents are skipped without execution.
+Features:
+  - Typed Pydantic node models (LLMNode, TransformNode, ForEachNode, GateNode)
+  - Wire-based structured data routing between nodes
+  - Retry policies with configurable backoff
+  - Output schema validation via Pydantic models
+  - Event callbacks for real-time UI updates
+  - Gate propagation and inline ``when`` conditions
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
+from typing import Any
 
 import structlog
 
 from remi.agent.llm.factory import LLMProviderFactory
 from remi.agent.llm.types import ToolDefinition
 from remi.agent.observe.usage import LLMUsageLedger
+from remi.agent.types import ToolRegistry
+from remi.agent.workflow.plan import build_execution_plan
+from remi.agent.workflow.resolve import evaluate_condition
 from remi.agent.workflow.steps import (
+    OutputSchemaRegistry,
     ToolExecuteFn,
-    TransformRegistry,
+    run_for_each_step,
     run_gate_step,
     run_llm_step,
     run_llm_tools_step,
     run_transform_step,
 )
 from remi.agent.workflow.types import (
-    StepConfig,
-    StepKind,
+    EventCallback,
+    ForEachNode,
+    GateNode,
+    InboundBinding,
+    LLMNode,
+    LLMToolsNode,
+    NodeCompleted,
+    NodeEvent,
+    NodeFailed,
+    NodeRetrying,
+    NodeSkipped,
+    NodeStarted,
     StepResult,
     StepValue,
+    TransformNode,
     WorkflowDef,
     WorkflowDefaults,
+    WorkflowNode,
     WorkflowResult,
 )
 
 _log = structlog.get_logger(__name__)
 
 
-class WorkflowRunner:
-    """Executes workflow DAGs with parallel scheduling.
+# ---------------------------------------------------------------------------
+# Port data routing
+# ---------------------------------------------------------------------------
 
-    Construction requires the LLM factory and usage ledger. Tool
-    definitions and transforms are passed per-run since they may vary
-    by workflow.
-    """
+
+def _route_port_data(
+    step_id: str,
+    inbound: tuple[InboundBinding, ...],
+    step_outputs: dict[str, StepValue],
+) -> dict[str, Any]:
+    """Build a dict of routed input port values from upstream wires."""
+    routed: dict[str, Any] = {}
+    for binding in inbound:
+        src_output = step_outputs.get(binding.source_step)
+        if src_output is None:
+            continue
+        if isinstance(src_output, dict):
+            routed[binding.target_port] = src_output.get(
+                binding.source_port, src_output
+            )
+        else:
+            routed[binding.target_port] = src_output
+    return routed
+
+
+# ---------------------------------------------------------------------------
+# Event emission helper
+# ---------------------------------------------------------------------------
+
+
+def _emit(callback: EventCallback | None, event: NodeEvent) -> None:
+    if callback is not None:
+        callback(event)
+
+
+# ---------------------------------------------------------------------------
+# WorkflowRunner
+# ---------------------------------------------------------------------------
+
+
+class WorkflowRunner:
+    """Executes workflow DAGs with parallel scheduling."""
 
     def __init__(
         self,
         provider_factory: LLMProviderFactory,
         default_provider: str,
         default_model: str,
+        tool_registry: ToolRegistry,
         usage_ledger: LLMUsageLedger | None = None,
     ) -> None:
         self._factory = provider_factory
         self._default_provider = default_provider
         self._default_model = default_model
         self._usage_ledger = usage_ledger
+        self._tool_registry = tool_registry
 
     async def run(
         self,
@@ -68,27 +126,28 @@ class WorkflowRunner:
         skip_steps: set[str] | None = None,
         tool_definitions: list[ToolDefinition] | None = None,
         tool_execute: ToolExecuteFn | None = None,
-        transforms: TransformRegistry | None = None,
+        output_schemas: OutputSchemaRegistry | None = None,
+        on_event: EventCallback | None = None,
     ) -> WorkflowResult:
         """Execute the workflow and return accumulated results."""
         skip = skip_steps or set()
-        transforms = transforms or {}
+        output_schemas = output_schemas or {}
 
         defaults = workflow.defaults
         if not defaults.provider:
-            defaults = type(defaults)(
+            defaults = WorkflowDefaults(
                 provider=self._default_provider,
                 model=defaults.model or self._default_model,
                 max_concurrency=defaults.max_concurrency,
             )
         elif not defaults.model:
-            defaults = type(defaults)(
+            defaults = WorkflowDefaults(
                 provider=defaults.provider,
                 model=self._default_model,
                 max_concurrency=defaults.max_concurrency,
             )
 
-        adjacency, in_degree = _build_graph(workflow)
+        plan = build_execution_plan(workflow)
         semaphore = asyncio.Semaphore(defaults.max_concurrency)
 
         step_outputs: dict[str, StepValue] = {}
@@ -102,57 +161,79 @@ class WorkflowRunner:
             "workflow_start",
             workflow=workflow.name,
             step_count=len(workflow.steps),
+            wire_count=len(workflow.wires),
             skipped=list(skip) if skip else [],
             max_concurrency=defaults.max_concurrency,
         )
 
         async def execute_step(step_id: str) -> None:
-            step = workflow.get_step(step_id)
-            if step is None:
+            node = workflow.get_step(step_id)
+            if node is None:
                 return
 
-            # Wait for all dependencies to complete
-            for dep in step.depends_on:
-                await completion_events[dep].wait()
+            all_deps = set(node.depends_on)
+            for binding in plan.inbound.get(step_id, ()):
+                all_deps.add(binding.source_step)
+            for dep in all_deps:
+                if dep in completion_events:
+                    await completion_events[dep].wait()
 
-            # Check if any dependency was gated
-            if any(dep in gated_steps for dep in step.depends_on):
+            if any(dep in gated_steps for dep in all_deps):
                 gated_steps.add(step_id)
                 sr = StepResult(step_id=step_id, value={}, gated=True)
                 step_results[step_id] = sr
                 step_outputs[step_id] = {}
-                _log.info("workflow_step_gated", workflow=workflow.name, step=step_id)
+                _emit(on_event, NodeSkipped(
+                    workflow=workflow.name, node_id=step_id, reason="gate",
+                ))
                 completion_events[step_id].set()
                 return
 
-            # Check if explicitly skipped
             if step_id in skip:
                 sr = StepResult(step_id=step_id, value={}, skipped=True)
                 step_results[step_id] = sr
                 step_outputs[step_id] = {}
-                _log.info("workflow_step_skipped", workflow=workflow.name, step=step_id)
+                _emit(on_event, NodeSkipped(
+                    workflow=workflow.name, node_id=step_id, reason="explicit",
+                ))
                 completion_events[step_id].set()
                 return
 
+            if node.when and not evaluate_condition(node.when, step_outputs):
+                sr = StepResult(step_id=step_id, value={}, skipped=True)
+                step_results[step_id] = sr
+                step_outputs[step_id] = {}
+                _emit(on_event, NodeSkipped(
+                    workflow=workflow.name, node_id=step_id, reason="when",
+                ))
+                completion_events[step_id].set()
+                return
+
+            port_data = _route_port_data(
+                step_id,
+                plan.inbound.get(step_id, ()),
+                step_outputs,
+            )
+
             async with semaphore:
-                _log.info(
-                    "workflow_step_start",
-                    workflow=workflow.name,
-                    step=step_id,
-                    kind=step.kind,
-                )
-                sr = await _dispatch_step(
-                    step=step,
+                _emit(on_event, NodeStarted(
+                    workflow=workflow.name, node_id=step_id, kind=node.kind,
+                ))
+                sr = await _dispatch_with_retry(
+                    node=node,
                     workflow_input=workflow_input,
                     step_outputs=step_outputs,
+                    port_data=port_data,
                     context=context,
                     defaults=defaults,
                     provider_factory=self._factory,
                     usage_ledger=self._usage_ledger,
                     tool_definitions=tool_definitions,
                     tool_execute=tool_execute,
-                    transforms=transforms,
+                    output_schemas=output_schemas,
+                    tool_registry=self._tool_registry,
                     workflow_name=workflow.name,
+                    on_event=on_event,
                 )
 
             step_results[step_id] = sr
@@ -161,21 +242,13 @@ class WorkflowRunner:
             if sr.gated:
                 gated_steps.add(step_id)
 
-            _log.info(
-                "workflow_step_done",
-                workflow=workflow.name,
-                step=step_id,
-                kind=step.kind,
-                gated=sr.gated,
-                prompt_tokens=sr.usage.prompt_tokens,
-                completion_tokens=sr.usage.completion_tokens,
-            )
+            _emit(on_event, NodeCompleted(
+                workflow=workflow.name, node_id=step_id, usage=sr.usage,
+            ))
             completion_events[step_id].set()
 
-        # Launch all steps concurrently — they self-synchronize via events
         tasks = [asyncio.create_task(execute_step(s.id)) for s in workflow.steps]
 
-        # Gather and propagate any step-level exceptions
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -187,13 +260,14 @@ class WorkflowRunner:
                     error=str(result),
                     exc_info=result,
                 )
-                # Unblock anything waiting on this step
+                _emit(on_event, NodeFailed(
+                    workflow=workflow.name, node_id=step_id, error=str(result),
+                ))
                 if not completion_events[step_id].is_set():
                     gated_steps.add(step_id)
                     step_outputs[step_id] = {}
                     completion_events[step_id].set()
 
-        # Assemble final result in definition order
         wf_result = WorkflowResult()
         for step in workflow.steps:
             if step.id in step_results:
@@ -213,48 +287,73 @@ class WorkflowRunner:
 
 
 # ---------------------------------------------------------------------------
-# DAG construction
+# Retry wrapper
 # ---------------------------------------------------------------------------
 
 
-def _build_graph(
-    workflow: WorkflowDef,
-) -> tuple[dict[str, list[str]], dict[str, int]]:
-    """Build adjacency list and in-degree map from step dependencies.
+async def _dispatch_with_retry(
+    *,
+    node: WorkflowNode,
+    workflow_input: str,
+    step_outputs: dict[str, StepValue],
+    port_data: dict[str, Any],
+    context: dict[str, str] | None,
+    defaults: WorkflowDefaults,
+    provider_factory: LLMProviderFactory,
+    usage_ledger: LLMUsageLedger | None,
+    tool_definitions: list[ToolDefinition] | None,
+    tool_execute: ToolExecuteFn | None,
+    output_schemas: OutputSchemaRegistry,
+    tool_registry: ToolRegistry,
+    workflow_name: str,
+    on_event: EventCallback | None,
+) -> StepResult:
+    """Dispatch a node with optional retry policy."""
+    policy = node.retry
+    max_attempts = policy.max_attempts if policy else 1
 
-    Returns (adjacency, in_degree) where adjacency[A] = [B, C] means
-    A is a dependency of B and C.
-    """
-    adjacency: dict[str, list[str]] = defaultdict(list)
-    in_degree: dict[str, int] = {s.id: 0 for s in workflow.steps}
-    valid_ids = workflow.step_ids()
-
-    for step in workflow.steps:
-        for dep in step.depends_on:
-            if dep not in valid_ids:
-                raise ValueError(
-                    f"Step '{step.id}' depends on '{dep}' which does not exist "
-                    f"in workflow '{workflow.name}'"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await _dispatch_step(
+                node=node,
+                workflow_input=workflow_input,
+                step_outputs=step_outputs,
+                port_data=port_data,
+                context=context,
+                defaults=defaults,
+                provider_factory=provider_factory,
+                usage_ledger=usage_ledger,
+                tool_definitions=tool_definitions,
+                tool_execute=tool_execute,
+                output_schemas=output_schemas,
+                tool_registry=tool_registry,
+                workflow_name=workflow_name,
+            )
+        except Exception as exc:
+            if policy and attempt < max_attempts:
+                delay = policy.delay_for(attempt)
+                _log.warning(
+                    "node_retry",
+                    workflow=workflow_name,
+                    node=node.id,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    delay=delay,
+                    error=str(exc),
+                    exc_info=True,
                 )
-            adjacency[dep].append(step.id)
-            in_degree[step.id] += 1
+                _emit(on_event, NodeRetrying(
+                    workflow=workflow_name,
+                    node_id=node.id,
+                    attempt=attempt,
+                    error=str(exc),
+                ))
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                continue
+            raise
 
-    # Cycle detection via Kahn's algorithm
-    queue = [sid for sid, deg in in_degree.items() if deg == 0]
-    visited = 0
-    temp_degree = dict(in_degree)
-    while queue:
-        node = queue.pop(0)
-        visited += 1
-        for child in adjacency[node]:
-            temp_degree[child] -= 1
-            if temp_degree[child] == 0:
-                queue.append(child)
-
-    if visited != len(workflow.steps):
-        raise ValueError(f"Cycle detected in workflow '{workflow.name}'")
-
-    return adjacency, in_degree
+    raise RuntimeError(f"Exhausted {max_attempts} retry attempts for node '{node.id}'")
 
 
 # ---------------------------------------------------------------------------
@@ -264,44 +363,46 @@ def _build_graph(
 
 async def _dispatch_step(
     *,
-    step: StepConfig,
+    node: WorkflowNode,
     workflow_input: str,
     step_outputs: dict[str, StepValue],
+    port_data: dict[str, Any],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
     provider_factory: LLMProviderFactory,
     usage_ledger: LLMUsageLedger | None,
     tool_definitions: list[ToolDefinition] | None,
     tool_execute: ToolExecuteFn | None,
-    transforms: TransformRegistry,
+    output_schemas: OutputSchemaRegistry,
+    tool_registry: ToolRegistry,
     workflow_name: str,
 ) -> StepResult:
-    """Route a step to its executor based on kind."""
+    """Route a node to its executor based on kind."""
 
-    if step.kind == StepKind.LLM:
+    if isinstance(node, LLMNode):
         return await run_llm_step(
-            step,
+            node,
             workflow_input,
             step_outputs,
             context,
             defaults,
             provider_factory,
             usage_ledger,
+            output_schemas,
             workflow_name=workflow_name,
         )
 
-    if step.kind == StepKind.LLM_TOOLS:
+    if isinstance(node, LLMToolsNode):
         if tool_execute is None:
-            raise ValueError(f"Step '{step.id}' is kind=llm_tools but no tool_execute was provided")
-        # Filter tool definitions to only the tools this step declared
-        step_tool_names = set(step.tools)
+            raise ValueError(f"Node '{node.id}' is llm_tools but no tool_execute was provided")
+        step_tool_names = set(node.tools)
         if step_tool_names and tool_definitions:
             filtered_defs = [td for td in tool_definitions if td.name in step_tool_names]
         else:
             filtered_defs = tool_definitions or []
 
         return await run_llm_tools_step(
-            step,
+            node,
             workflow_input,
             step_outputs,
             context,
@@ -310,13 +411,17 @@ async def _dispatch_step(
             usage_ledger,
             filtered_defs,
             tool_execute,
+            output_schemas,
             workflow_name=workflow_name,
         )
 
-    if step.kind == StepKind.TRANSFORM:
-        return await run_transform_step(step, step_outputs, transforms)
+    if isinstance(node, TransformNode):
+        return await run_transform_step(node, step_outputs, tool_registry, port_data)
 
-    if step.kind == StepKind.GATE:
-        return await run_gate_step(step, step_outputs)
+    if isinstance(node, ForEachNode):
+        return await run_for_each_step(node, step_outputs, tool_registry)
 
-    raise ValueError(f"Unknown step kind: {step.kind}")
+    if isinstance(node, GateNode):
+        return await run_gate_step(node, step_outputs)
+
+    raise ValueError(f"Unknown node type: {type(node).__name__}")

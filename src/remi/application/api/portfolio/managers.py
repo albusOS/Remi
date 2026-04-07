@@ -348,15 +348,11 @@ async def manager_context(
     """Composite context for a manager — one call for the frontend manager page."""
     import asyncio
 
-    from remi.application.api.intelligence.signal_schemas import SignalSummary
-
     summary_task = c.manager_resolver.aggregate_manager(manager_id)
-    sig_task = c.signal_store.list_signals(scope={"manager_id": manager_id})
     ev_task = c.event_store.list_recent(limit=20)
 
-    summary, sigs, changesets = await asyncio.gather(
+    summary, changesets = await asyncio.gather(
         summary_task,
-        sig_task,
         ev_task,
     )
 
@@ -365,19 +361,6 @@ async def manager_context(
 
     return {
         "manager": summary.model_dump(mode="json"),
-        "signals": [
-            SignalSummary(
-                signal_id=s.signal_id,
-                signal_type=s.signal_type,
-                severity=s.severity.value,
-                entity_type=s.entity_type,
-                entity_id=s.entity_id,
-                entity_name=s.entity_name,
-                description=s.description,
-                detected_at=s.detected_at.isoformat(),
-            ).model_dump(mode="json")
-            for s in sigs
-        ],
         "recent_events": len(changesets),
     }
 

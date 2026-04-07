@@ -3,7 +3,6 @@
 Provides: action_create, action_update, action_list, note_create.
 
 Action items and notes both live in PropertyStore (SQL-backed).
-The ProjectingPropertyStore syncs notes to the KnowledgeGraph automatically.
 """
 
 from __future__ import annotations

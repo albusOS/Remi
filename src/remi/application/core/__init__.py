@@ -4,7 +4,6 @@ Public API::
 
     from remi.application.core import PropertyStore
     from remi.application.core import ChangeSet, EventStore, ...
-    from remi.application.core import KnowledgeWriter, ...
 """
 
 from remi.application.core.events import (
@@ -17,10 +16,6 @@ from remi.application.core.events import (
 )
 from remi.application.core.protocols import (
     EmbedRequest,
-    KBEntity,
-    KBRelationship,
-    KnowledgeReader,
-    KnowledgeWriter,
     PropertyStore,
     TextIndexer,
     TextSearchHit,
@@ -35,10 +30,6 @@ __all__ = [
     "EmbedRequest",
     "EventStore",
     "FieldChange",
-    "KBEntity",
-    "KBRelationship",
-    "KnowledgeReader",
-    "KnowledgeWriter",
     "PropertyStore",
     "TextIndexer",
     "TextSearchHit",

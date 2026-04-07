@@ -1,6 +1,6 @@
-"""Auto-generated data bridge written into every sandbox session.
+"""RE domain data bridge — Python source injected into sandbox sessions.
 
-``DATA_BRIDGE_SOURCE`` is a Python source string that becomes ``remi_data.py``
+``RE_BRIDGE_SOURCE`` is a Python source string that becomes ``remi_data.py``
 in the sandbox working directory.  It uses **only stdlib** (``urllib.request``,
 ``json``, ``os``) so it works even when pandas is not installed.  When pandas
 *is* available, each function can return a DataFrame via the ``as_df`` flag.
@@ -8,7 +8,10 @@ in the sandbox working directory.  It uses **only stdlib** (``urllib.request``,
 
 from __future__ import annotations
 
-DATA_BRIDGE_SOURCE = '''\
+RE_BRIDGE_FILES: dict[str, str] = {}
+"""Populated at module level below — maps filename → source code."""
+
+_RE_BRIDGE_SOURCE = '''\
 """remi_data — query the live REMI platform from sandbox Python code.
 
 Every function hits the REMI REST API and returns plain Python dicts/lists.
@@ -154,22 +157,6 @@ def maintenance_summary(property_id=None, unit_id=None, manager_id=None):
     """Get maintenance summary stats (counts by status/category, total cost)."""
     qs = _qs(property_id=property_id, unit_id=unit_id, manager_id=manager_id)
     return _get(f"/maintenance/summary{qs}")
-
-
-# ---------------------------------------------------------------------------
-# Signals
-# ---------------------------------------------------------------------------
-
-def signals(severity=None, manager_id=None, property_id=None, as_df=False):
-    """List active signals with optional filters."""
-    data = _get(f"/signals{_qs(severity=severity, manager_id=manager_id, property_id=property_id)}")
-    result = data.get("signals", data)
-    return _maybe_df(result, as_df)
-
-
-def signal_detail(signal_id):
-    """Get a single signal with full evidence chain."""
-    return _get(f"/signals/{signal_id}/explain")
 
 
 # ---------------------------------------------------------------------------
@@ -400,8 +387,7 @@ def search(query, types=None, manager_id=None, limit=10, as_df=False):
     query : str
         Search query — a name, address, description, or natural language phrase.
     types : str or list, optional
-        Comma-separated (or list) of entity types to filter:
-        PropertyManager, Property, Tenant, Unit, MaintenanceRequest, DocumentRow.
+        Comma-separated (or list) of entity types to filter.
     manager_id : str, optional
         Scope results to a specific manager's entities.
     limit : int
@@ -426,16 +412,6 @@ def search(query, types=None, manager_id=None, limit=10, as_df=False):
     return _maybe_df(results, as_df)
 
 
-def trigger_signal_inference():
-    """Trigger the signal inference pipeline to re-evaluate all signals.
-
-    NOTE: The precomputed signal engine has been removed. Signals are now
-    evaluated on demand by the agent. This function is a no-op stub.
-    """
-    import warnings
-    warnings.warn(
-        "trigger_signal_inference is a no-op — signals are evaluated on demand by the agent",
-        stacklevel=2,
-    )
-    return {"status": "noop", "message": "signal inference removed — agent evaluates on demand"}
 '''
+
+RE_BRIDGE_FILES = {"remi_data.py": _RE_BRIDGE_SOURCE}

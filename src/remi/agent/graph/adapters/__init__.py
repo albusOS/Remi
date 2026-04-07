@@ -1,15 +1,10 @@
-"""Graph adapters — concrete KnowledgeGraph and KnowledgeStore implementations.
+"""Graph adapters — concrete store implementations.
 
-- BridgedKnowledgeGraph: routes to domain stores + KnowledgeStore
-- InMemoryMemoryStore / InMemoryKnowledgeStore: dev/test adapters
+- InMemoryMemoryStore: dev/test adapter for episodic memory
 """
 
-from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph, CoreTypeBindings
-from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore, InMemoryMemoryStore
+from remi.agent.graph.adapters.mem import InMemoryMemoryStore
 
 __all__ = [
-    "BridgedKnowledgeGraph",
-    "CoreTypeBindings",
-    "InMemoryKnowledgeStore",
     "InMemoryMemoryStore",
 ]

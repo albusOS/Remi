@@ -10,6 +10,7 @@ from __future__ import annotations
 import abc
 from datetime import UTC, datetime
 from enum import StrEnum, unique
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -62,6 +63,19 @@ class Sandbox(abc.ABC):
         *,
         extra_env: dict[str, str] | None = None,
     ) -> SandboxSession: ...
+
+    def set_session_files(self, files: dict[str, str]) -> None:
+        """Set files to write into every new session's working directory.
+
+        Products use this to inject data bridges or helper scripts into
+        the sandbox without the framework knowing what they contain.
+        """
+        self._session_files = files
+
+    def _write_session_files(self, work_dir: Path) -> None:
+        """Write any registered session files into *work_dir*."""
+        for name, content in getattr(self, "_session_files", {}).items():
+            (work_dir / name).write_text(content, encoding="utf-8")
 
     @abc.abstractmethod
     async def exec_python(

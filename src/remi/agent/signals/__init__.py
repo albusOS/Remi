@@ -1,27 +1,16 @@
-"""signals — signal system: types, persistence, TBox.
+"""signals — TBox domain ontology and enums.
 
-Subpackages:
-  persistence/ — SignalStore, FeedbackStore ABCs + in-memory adapters
-
-Core modules (types layer):
-  enums      — Severity, RuleCondition, Horizon, Deontic, SignalOutcome
+Core modules:
+  enums      — Severity, RuleCondition, Horizon, Deontic
   tbox       — SignalDefinition, Policy, CausalChain, DomainTBox, MutableTBox
-  signal     — Signal, ProducerResult, SignalProducer, signal_id
-  feedback   — SignalFeedback, SignalFeedbackSummary
 """
 
-from remi.agent.graph.types import KnowledgeProvenance as Provenance
 from remi.agent.signals.enums import (
     Deontic,
     Horizon,
     RuleCondition,
     Severity,
-    SignalOutcome,
 )
-from remi.agent.signals.feedback import SignalFeedback, SignalFeedbackSummary
-from remi.agent.signals.persistence.factory import build_feedback_store, build_signal_store
-from remi.agent.signals.persistence.stores import FeedbackStore, SignalStore
-from remi.agent.signals.signal import ProducerResult, Signal, SignalProducer, signal_id
 from remi.agent.signals.tbox import (
     CausalChain,
     CompositionRule,
@@ -32,16 +21,16 @@ from remi.agent.signals.tbox import (
     SignalDefinition,
     WorkflowSeed,
     WorkflowStep,
+    load_domain_yaml,
+    set_domain_yaml_path,
 )
 
 __all__ = [
     # enums
     "Deontic",
     "Horizon",
-    "Provenance",
     "RuleCondition",
     "Severity",
-    "SignalOutcome",
     # tbox
     "CausalChain",
     "CompositionRule",
@@ -52,18 +41,7 @@ __all__ = [
     "SignalDefinition",
     "WorkflowSeed",
     "WorkflowStep",
-    # signal
-    "ProducerResult",
-    "Signal",
-    "SignalProducer",
-    "signal_id",
-    # feedback
-    "SignalFeedback",
-    "SignalFeedbackSummary",
-    # stores (re-exported from persistence/)
-    "FeedbackStore",
-    "SignalStore",
-    # factories
-    "build_feedback_store",
-    "build_signal_store",
+    # loaders
+    "load_domain_yaml",
+    "set_domain_yaml_path",
 ]

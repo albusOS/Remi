@@ -72,6 +72,23 @@ _RE_DATA_BRIDGE_HINT = (
     "(properties, units, leases, maintenance, signals)."
 )
 
+_RE_SECTION_LABELS = frozenset({
+    "current",
+    "vacant",
+    "notice",
+    "past",
+    "future",
+    "eviction",
+    "month-to-month",
+    "total",
+    "grand total",
+    "subtotal",
+    "vacant-unrented",
+    "vacant-rented",
+    "notice-unrented",
+    "notice-rented",
+})
+
 
 def build_re_profile() -> DomainProfile:
     """Build the real estate domain profile."""
@@ -84,4 +101,5 @@ def build_re_profile() -> DomainProfile:
         available_agents=dict(_RE_AVAILABLE_AGENTS),
         api_path_examples=_RE_API_PATH_EXAMPLES,
         data_bridge_hint=_RE_DATA_BRIDGE_HINT,
+        section_labels=_RE_SECTION_LABELS,
     )

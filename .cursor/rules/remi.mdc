@@ -72,8 +72,8 @@ Every package with external consumers must define its public API in
 
 **Rules:**
 - **Import from the package, not the module.** Write
-  `from remi.agent.graph import KnowledgeStore`, not
-  `from remi.agent.graph.stores import KnowledgeStore`.
+  `from remi.agent.graph import WorldModel`, not
+  `from remi.agent.graph.stores import WorldModel`.
 - **Factories belong on the barrel.** If a package has a `factory.py`,
   re-export its public functions from `__init__.py`.
 - **`__all__` is required** on every barrel — it defines the contract.
@@ -279,7 +279,7 @@ Port interfaces for storage live in `application/core/protocols.py` as
 
 Each module owns the factory for the thing it defines:
 
-- `application/infra/graph/bridge.py` -> `build_knowledge_graph()`
+- `application/infra/graph/world.py` -> `build_re_world_model()`
 - `agent/context/builder.py` -> `build_context_builder()`
 - `application/infra/stores/factory.py` -> `build_store_suite()`
 - `agent/llm/factory.py` -> `build_provider_factory()`

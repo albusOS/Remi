@@ -29,11 +29,14 @@ class DomainProfile:
     metadata_skip_patterns: tuple[str, ...] = ()
     """Regex patterns for report header rows that should be skipped during parsing."""
 
+    section_labels: frozenset[str] = frozenset()
+    """Section-label values that identify context rows in hierarchical reports."""
+
     empty_state_label: str = "monitored entities"
     """What to call the monitored universe when no signals are active."""
 
     scope_entity_type: str = ""
-    """The primary scoping entity label (e.g. 'PropertyManager')."""
+    """The primary scoping entity label (e.g. 'Organization')."""
 
     tool_hints: dict[str, str] = field(default_factory=dict)
     """Tool-name → supplemental description text appended to the generic description."""

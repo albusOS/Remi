@@ -2,22 +2,62 @@
 
 Supports two manifest kinds:
   - ``kind: Workflow`` — explicit ``depends_on`` per step, parallel by default
-  - ``kind: Pipeline`` — backward compat, steps run sequentially in YAML order
+  - ``kind: Pipeline`` — steps run sequentially in YAML order
 
 Both produce the same ``WorkflowDef`` for the engine.
+
+Node parsing uses Pydantic's ``TypeAdapter`` with the ``WorkflowNode``
+discriminated union — YAML dicts are validated directly into typed
+node models (``LLMNode``, ``TransformNode``, ``ForEachNode``, etc.).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import yaml
+from pydantic import TypeAdapter, ValidationError
 
-from remi.agent.workflow.types import StepConfig, StepKind, WorkflowDef, WorkflowDefaults
-from remi.types.paths import AGENTS_DIR
+from remi.agent.workflow.types import (
+    Wire,
+    WorkflowDef,
+    WorkflowDefaults,
+    WorkflowNode,
+)
+
+_node_adapter: TypeAdapter[WorkflowNode] = TypeAdapter(WorkflowNode)
+
+_agents_dir: Path | None = None
 
 
-def load_workflow(name: str) -> WorkflowDef:
-    """Load a workflow definition from ``application/agents/<name>/app.yaml``."""
-    path = AGENTS_DIR / name / "app.yaml"
+def set_agents_dir(path: Path) -> None:
+    """Configure the directory containing agent YAML manifests.
+
+    Called once at startup by the composition root (container).
+    """
+    global _agents_dir
+    _agents_dir = path
+
+
+def get_agents_dir() -> Path:
+    """Return the configured agents directory, or raise if not set."""
+    if _agents_dir is None:
+        raise RuntimeError(
+            "agents_dir not configured — call set_agents_dir() at startup"
+        )
+    return _agents_dir
+
+
+def load_workflow(name: str, *, agents_dir: Path | None = None) -> WorkflowDef:
+    """Load a workflow definition from ``<agents_dir>/<name>/app.yaml``."""
+    base = agents_dir or _agents_dir
+    if base is None:
+        raise RuntimeError(
+            "agents_dir not configured — call set_agents_dir() at startup "
+            "or pass agents_dir= explicitly"
+        )
+    path = base / name / "app.yaml"
     if not path.exists():
         raise ValueError(f"No workflow config at {path}")
 
@@ -41,82 +81,116 @@ def load_workflow(name: str) -> WorkflowDef:
     else:
         steps = _parse_pipeline_steps(raw_steps, name)
 
-    return WorkflowDef(name=name, defaults=defaults, steps=tuple(steps))
+    wires = _parse_wires(data.get("wires") or [])
+
+    return WorkflowDef(
+        name=name,
+        defaults=defaults,
+        steps=tuple(steps),
+        wires=tuple(wires),
+    )
 
 
-def _parse_workflow_steps(raw_steps: list[object], name: str) -> list[StepConfig]:
+def _parse_workflow_steps(raw_steps: list[object], name: str) -> list[WorkflowNode]:
     """Parse steps with explicit depends_on (kind: Workflow)."""
-    steps: list[StepConfig] = []
+    steps: list[WorkflowNode] = []
     for raw in raw_steps:
         if not isinstance(raw, dict):
             raise TypeError(
                 f"Step must be a mapping in workflow '{name}', got {type(raw).__name__}"
             )
-        steps.append(_parse_step(raw))
+        steps.append(_parse_node(raw, name))
     return steps
 
 
-def _parse_pipeline_steps(raw_steps: list[object], name: str) -> list[StepConfig]:
+def _parse_pipeline_steps(raw_steps: list[object], name: str) -> list[WorkflowNode]:
     """Parse sequential steps (kind: Pipeline) — each depends on the previous."""
-    steps: list[StepConfig] = []
+    steps: list[WorkflowNode] = []
     prev_id: str | None = None
     for raw in raw_steps:
         if not isinstance(raw, dict):
             raise TypeError(
                 f"Step must be a mapping in pipeline '{name}', got {type(raw).__name__}"
             )
-        step = _parse_step(raw, implicit_dep=prev_id)
-        steps.append(step)
-        prev_id = step.id
+        node = _parse_node(raw, name, implicit_dep=prev_id)
+        steps.append(node)
+        prev_id = node.id
     return steps
 
 
-def _parse_step(raw: dict, implicit_dep: str | None = None) -> StepConfig:
-    """Parse a single step from raw YAML dict."""
-    step_id = str(raw.get("id", ""))
-    if not step_id:
-        raise ValueError("Every step must have an 'id'")
+def _parse_node(
+    raw: dict[str, Any],
+    workflow_name: str,
+    implicit_dep: str | None = None,
+) -> WorkflowNode:
+    """Parse a single node from raw YAML dict via Pydantic TypeAdapter."""
+    if "id" not in raw:
+        raise ValueError(f"Every step must have an 'id' in workflow '{workflow_name}'")
 
-    kind_str = str(raw.get("kind", "llm"))
+    prepared = _prepare_raw(raw, implicit_dep)
+
     try:
-        kind = StepKind(kind_str)
-    except ValueError:
-        raise ValueError(f"Unknown step kind '{kind_str}' on step '{step_id}'") from None
+        return _node_adapter.validate_python(prepared)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Invalid step '{raw.get('id', '?')}' in workflow '{workflow_name}': {exc}"
+        ) from None
 
-    # Resolve depends_on: explicit from YAML, or implicit from pipeline ordering
-    raw_deps = raw.get("depends_on")
-    if raw_deps is not None:
-        if isinstance(raw_deps, str):
-            depends_on = (raw_deps,)
-        elif isinstance(raw_deps, list):
-            depends_on = tuple(str(d) for d in raw_deps)
-        else:
-            depends_on = ()
-    elif implicit_dep is not None:
-        depends_on = (implicit_dep,)
-    else:
-        depends_on = ()
 
-    # Tools for llm_tools steps
-    raw_tools = raw.get("tools") or []
-    if isinstance(raw_tools, str):
-        tools = tuple(t.strip() for t in raw_tools.split(","))
-    else:
-        tools = tuple(str(t) for t in raw_tools)
+def _prepare_raw(
+    raw: dict[str, Any],
+    implicit_dep: str | None,
+) -> dict[str, Any]:
+    """Normalize raw YAML dict before Pydantic validation.
 
-    return StepConfig(
-        id=step_id,
-        kind=kind,
-        depends_on=depends_on,
-        provider=str(raw.get("provider") or ""),
-        model=str(raw.get("model") or ""),
-        temperature=float(raw.get("temperature", 0.0)),
-        max_tokens=int(raw.get("max_tokens", 4096)),
-        response_format=str(raw.get("response_format", "text")),
-        system_prompt=str(raw.get("system_prompt", "")),
-        input_template=str(raw.get("input_template", "{input}")),
-        tools=tools,
-        max_tool_rounds=int(raw.get("max_tool_rounds", 3)),
-        transform=str(raw.get("transform", "")),
-        condition=str(raw.get("condition", "")),
-    )
+    Handles: implicit pipeline deps, tools as comma string, retry shorthand.
+    """
+    out = dict(raw)
+
+    if "depends_on" not in out and implicit_dep is not None:
+        out["depends_on"] = (implicit_dep,)
+    elif "depends_on" in out:
+        deps = out["depends_on"]
+        if isinstance(deps, str):
+            out["depends_on"] = (deps,)
+        elif isinstance(deps, list):
+            out["depends_on"] = tuple(deps)
+
+    if "tools" in out and isinstance(out["tools"], str):
+        out["tools"] = tuple(t.strip() for t in out["tools"].split(","))
+    elif "tools" in out and isinstance(out["tools"], list):
+        out["tools"] = tuple(out["tools"])
+
+    if "retry" in out and isinstance(out["retry"], dict):
+        pass  # Pydantic handles RetryPolicy validation
+    elif "retry" in out and out["retry"] is True:
+        out["retry"] = {"max_attempts": 3}
+
+    return out
+
+
+def _parse_wires(raw_wires: list[object]) -> list[Wire]:
+    """Parse wire declarations from YAML.
+
+    Each wire is ``{source: "step.port", target: "step.port"}``.
+    """
+    wires: list[Wire] = []
+    for raw in raw_wires:
+        if not isinstance(raw, dict):
+            continue
+        source = str(raw.get("source", ""))
+        target = str(raw.get("target", ""))
+        if "." not in source or "." not in target:
+            raise ValueError(
+                f"Wire endpoints must be 'step.port', got "
+                f"source={source!r} target={target!r}"
+            )
+        src_step, src_port = source.split(".", 1)
+        tgt_step, tgt_port = target.split(".", 1)
+        wires.append(Wire(
+            source_step=src_step,
+            source_port=src_port,
+            target_step=tgt_step,
+            target_port=tgt_port,
+        ))
+    return wires

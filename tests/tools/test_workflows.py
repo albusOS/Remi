@@ -7,8 +7,6 @@ from decimal import Decimal
 
 import pytest
 
-from remi.agent.graph.adapters.bridge import BridgedKnowledgeGraph
-from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
 from remi.agent.tools.registry import InMemoryToolRegistry
 from remi.application.core.models import (
     ActionItem,
@@ -33,30 +31,15 @@ TODAY = date.today()
 
 @pytest.fixture
 def setup():
-    """Build stores, services, and register workflow tools. Returns (registry, ps, kg)."""
+    """Build stores, services, and register workflow tools. Returns (registry, ps)."""
     ps = InMemoryPropertyStore()
-    ks = InMemoryKnowledgeStore()
-    kg = BridgedKnowledgeGraph(
-        ks,
-        core_types={
-            "PropertyManager": (ps.get_manager, ps.list_managers),
-            "Property": (ps.get_property, ps.list_properties),
-            "Unit": (ps.get_unit, ps.list_units),
-            "Lease": (ps.get_lease, ps.list_leases),
-            "Tenant": (ps.get_tenant, ps.list_tenants),
-            "ActionItem": (ps.get_action_item, ps.list_action_items),
-        },
-    )
-
     mr = ManagerResolver(property_store=ps)
-    from remi.application.infra.ports import KnowledgeStoreReader
-
-    ds = DashboardResolver(property_store=ps, knowledge_reader=KnowledgeStoreReader(ks))
+    ds = DashboardResolver(property_store=ps)
 
     registry = InMemoryToolRegistry()
-    WorkflowToolProvider(ps, kg, mr, ds).register(registry)
+    WorkflowToolProvider(ps, mr, ds).register(registry)
 
-    return registry, ps, kg
+    return registry, ps
 
 
 async def _seed_data(ps: InMemoryPropertyStore) -> None:
@@ -124,7 +107,7 @@ async def _seed_data(ps: InMemoryPropertyStore) -> None:
 
 @pytest.mark.asyncio
 async def test_manager_review_returns_summary(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("manager_review")
@@ -138,7 +121,7 @@ async def test_manager_review_returns_summary(setup):
 
 @pytest.mark.asyncio
 async def test_manager_review_includes_delinquency_when_present(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("manager_review")
@@ -150,7 +133,7 @@ async def test_manager_review_includes_delinquency_when_present(setup):
 
 @pytest.mark.asyncio
 async def test_manager_review_includes_vacancies(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("manager_review")
@@ -162,7 +145,7 @@ async def test_manager_review_includes_vacancies(setup):
 
 @pytest.mark.asyncio
 async def test_manager_review_includes_lease_expirations(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("manager_review")
@@ -174,7 +157,7 @@ async def test_manager_review_includes_lease_expirations(setup):
 
 @pytest.mark.asyncio
 async def test_manager_review_unknown_manager(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
 
     fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "nonexistent"})
@@ -184,7 +167,7 @@ async def test_manager_review_unknown_manager(setup):
 
 @pytest.mark.asyncio
 async def test_manager_review_includes_action_items(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     item = ActionItem(
@@ -205,7 +188,7 @@ async def test_manager_review_includes_action_items(setup):
 
 @pytest.mark.asyncio
 async def test_delinquency_review_returns_tenants(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("delinquency_review")
@@ -218,7 +201,7 @@ async def test_delinquency_review_returns_tenants(setup):
 
 @pytest.mark.asyncio
 async def test_delinquency_review_scoped_to_manager(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("delinquency_review")
@@ -229,7 +212,7 @@ async def test_delinquency_review_scoped_to_manager(setup):
 
 @pytest.mark.asyncio
 async def test_lease_risk_review_returns_data(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("lease_risk_review")
@@ -243,7 +226,7 @@ async def test_lease_risk_review_returns_data(setup):
 
 @pytest.mark.asyncio
 async def test_approve_action_plan_creates_items(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
     await _seed_data(ps)
 
     fn, _ = registry.get("approve_action_plan")
@@ -275,7 +258,7 @@ async def test_approve_action_plan_creates_items(setup):
 
 @pytest.mark.asyncio
 async def test_workflow_tools_all_registered(setup):
-    registry, ps, kg = setup
+    registry, ps = setup
 
     expected = (
         "manager_review",

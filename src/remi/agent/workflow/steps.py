@@ -1,12 +1,13 @@
 """Step executors — one function per step kind.
 
-Each executor takes a ``StepConfig``, the resolved inputs, and
+Each executor takes a node config, the resolved inputs, and
 infrastructure deps, and returns a ``StepResult``.
 
 Step kinds:
   llm        — single LLM completion, no tools
   llm_tools  — LLM with tool access, bounded tool-call loop
-  transform  — pure Python callable, no LLM
+  transform  — tool from ToolRegistry, no LLM
+  for_each   — iterate over a list, run a tool per item
   gate       — evaluates a condition, returns pass/fail
 """
 
@@ -18,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
+from pydantic import BaseModel, ValidationError
 
 from remi.agent.llm.factory import LLMProviderFactory
 from remi.agent.llm.types import (
@@ -29,8 +31,19 @@ from remi.agent.llm.types import (
     estimate_cost,
 )
 from remi.agent.observe.usage import LLMUsageLedger, UsageRecord, UsageSource
-from remi.agent.workflow.resolve import parse_json_output, resolve_template
-from remi.agent.workflow.types import StepConfig, StepResult, StepValue, WorkflowDefaults
+from remi.agent.types import ToolRegistry
+from remi.agent.workflow.resolve import evaluate_condition, parse_json_output, resolve_template
+from remi.agent.workflow.types import (
+    ForEachNode,
+    LLMNode,
+    LLMToolsNode,
+    OutputSchemaRegistry,
+    StepResult,
+    StepValue,
+    TransformNode,
+    WorkflowDefaults,
+    WorkflowNode,
+)
 
 _log = structlog.get_logger(__name__)
 
@@ -41,10 +54,35 @@ _log = structlog.get_logger(__name__)
 ToolExecuteFn = Callable[[str, dict[str, Any]], Awaitable[Any]]
 """Async callable: (tool_name, arguments) -> result."""
 
-TransformFn = Callable[[dict[str, StepValue]], Awaitable[StepValue] | StepValue]
-"""Registered Python transform: step_outputs -> merged value."""
+# ---------------------------------------------------------------------------
+# Output schema validation
+# ---------------------------------------------------------------------------
 
-TransformRegistry = dict[str, TransformFn]
+
+def _validate_output(
+    value: StepValue,
+    schema_name: str,
+    schema_registry: OutputSchemaRegistry,
+    step_id: str,
+) -> StepValue:
+    """Validate step output against a Pydantic model if registered."""
+    if not schema_name:
+        return value
+    schema_cls = schema_registry.get(schema_name)
+    if schema_cls is None:
+        _log.warning(
+            "output_schema_not_registered",
+            step=step_id,
+            schema=schema_name,
+        )
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Step '{step_id}' output_schema='{schema_name}' expects dict, "
+            f"got {type(value).__name__}"
+        )
+    schema_cls.model_validate(value)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -53,13 +91,14 @@ TransformRegistry = dict[str, TransformFn]
 
 
 async def run_llm_step(
-    step: StepConfig,
+    step: LLMNode,
     workflow_input: str,
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
     provider_factory: LLMProviderFactory,
     usage_ledger: LLMUsageLedger | None,
+    schema_registry: OutputSchemaRegistry,
     *,
     workflow_name: str = "",
 ) -> StepResult:
@@ -78,6 +117,7 @@ async def run_llm_step(
     )
 
     value = _extract_value(response, step.response_format)
+    _validate_output(value, step.output_schema, schema_registry, step.id)
     _record_usage(usage_ledger, step, provider_name, model, response, workflow_name)
 
     return StepResult(step_id=step.id, value=value, usage=response.usage)
@@ -89,7 +129,7 @@ async def run_llm_step(
 
 
 async def run_llm_tools_step(
-    step: StepConfig,
+    step: LLMToolsNode,
     workflow_input: str,
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
@@ -98,15 +138,11 @@ async def run_llm_tools_step(
     usage_ledger: LLMUsageLedger | None,
     tool_definitions: list[ToolDefinition],
     tool_execute: ToolExecuteFn,
+    schema_registry: OutputSchemaRegistry,
     *,
     workflow_name: str = "",
 ) -> StepResult:
-    """Execute an LLM step with tool access.
-
-    Runs a tight tool-call loop: the LLM can call tools up to
-    ``step.max_tool_rounds`` times, then must produce a final response.
-    No scratchpad, no phases, no workspace — just think-act-observe.
-    """
+    """Execute an LLM step with tool access."""
     provider_name = step.provider or defaults.provider
     model = step.model or defaults.model
     provider = provider_factory.create(provider_name)
@@ -132,6 +168,7 @@ async def run_llm_tools_step(
 
         if not response.tool_calls:
             value = _extract_value(response, step.response_format)
+            _validate_output(value, step.output_schema, schema_registry, step.id)
             return StepResult(step_id=step.id, value=value, usage=run_usage)
 
         thread.append(
@@ -148,6 +185,7 @@ async def run_llm_tools_step(
         thread.extend(tool_messages)
 
     value = _extract_value(response, step.response_format)
+    _validate_output(value, step.output_schema, schema_registry, step.id)
     return StepResult(step_id=step.id, value=value, usage=run_usage)
 
 
@@ -175,28 +213,115 @@ async def _execute_tool(
 
 
 # ---------------------------------------------------------------------------
-# Transform step — pure Python callable
+# Transform step — tool from ToolRegistry
 # ---------------------------------------------------------------------------
 
 
 async def run_transform_step(
-    step: StepConfig,
+    step: TransformNode,
     step_outputs: dict[str, StepValue],
-    transform_registry: TransformRegistry,
+    tool_registry: ToolRegistry,
+    port_data: dict[str, Any] | None = None,
 ) -> StepResult:
-    """Execute a registered Python transform."""
-    fn = transform_registry.get(step.transform)
-    if fn is None:
+    """Execute a tool from the shared registry as a transform step."""
+    entry = tool_registry.get(step.tool)
+    if entry is None:
         raise ValueError(
-            f"Transform '{step.transform}' not registered. "
-            f"Available: {list(transform_registry.keys())}"
+            f"Tool '{step.tool}' not found in registry. "
+            f"Available: {[t.name for t in tool_registry.list_tools()]}"
+        )
+    tool_fn = entry[0]
+
+    args: dict[str, Any] = {dep: step_outputs.get(dep, {}) for dep in step.depends_on}
+    if port_data:
+        args.update(port_data)
+
+    result = await tool_fn(args)
+    value: StepValue = result if isinstance(result, (str, list, dict)) else {"result": str(result)}
+    return StepResult(step_id=step.id, value=value)
+
+
+# ---------------------------------------------------------------------------
+# For-each step — iterate over a list, run a tool per item
+# ---------------------------------------------------------------------------
+
+
+async def run_for_each_step(
+    step: ForEachNode,
+    step_outputs: dict[str, StepValue],
+    tool_registry: ToolRegistry,
+) -> StepResult:
+    """Execute a tool for each item in a list from upstream output."""
+    entry = tool_registry.get(step.tool)
+    if entry is None:
+        raise ValueError(
+            f"Tool '{step.tool}' not found in registry. "
+            f"Available: {[t.name for t in tool_registry.list_tools()]}"
+        )
+    tool_fn = entry[0]
+
+    items = _resolve_items(step.items_from, step_outputs)
+    if not isinstance(items, list):
+        raise ValueError(
+            f"ForEachNode '{step.id}' items_from='{step.items_from}' "
+            f"resolved to {type(items).__name__}, expected list"
         )
 
-    upstream = {dep: step_outputs.get(dep, {}) for dep in step.depends_on}
-    result = fn(upstream)
-    if asyncio.iscoroutine(result):
-        result = await result
-    return StepResult(step_id=step.id, value=result)
+    results: list[Any] = []
+    errors: list[str] = []
+    semaphore = asyncio.Semaphore(step.concurrency)
+
+    async def _run_one(idx: int, item: Any) -> None:
+        async with semaphore:
+            try:
+                r = await tool_fn(item if isinstance(item, dict) else {"item": item})
+                results.append(r)
+            except Exception as exc:
+                if step.on_error == "abort":
+                    raise
+                _log.warning(
+                    "for_each_item_error",
+                    step=step.id,
+                    index=idx,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                errors.append(f"[{idx}] {exc}")
+
+    if step.concurrency <= 1:
+        for idx, item in enumerate(items):
+            await _run_one(idx, item)
+    else:
+        tasks = [
+            asyncio.create_task(_run_one(idx, item))
+            for idx, item in enumerate(items)
+        ]
+        await asyncio.gather(*tasks)
+
+    return StepResult(
+        step_id=step.id,
+        value={"results": results, "errors": errors, "total": len(items)},
+        errors=errors,
+    )
+
+
+def _resolve_items(path: str, step_outputs: dict[str, StepValue]) -> Any:
+    """Resolve a dot-path like ``steps.validate.accepted`` to a value."""
+    if path.startswith("steps."):
+        path = path[6:]
+
+    parts = path.split(".")
+    current: Any = step_outputs
+
+    for part in parts:
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+        if current is None:
+            return None
+
+    return current
 
 
 # ---------------------------------------------------------------------------
@@ -205,53 +330,17 @@ async def run_transform_step(
 
 
 async def run_gate_step(
-    step: StepConfig,
+    step: WorkflowNode,
     step_outputs: dict[str, StepValue],
 ) -> StepResult:
-    """Evaluate a gate condition against prior step outputs.
-
-    Condition syntax is intentionally simple — just dot-path truthiness
-    checks against step outputs:
-      - ``steps.extract.has_proposals``  →  step_outputs["extract"]["has_proposals"]
-      - ``steps.classify``               →  bool(step_outputs["classify"])
-
-    Returns a StepResult where ``gated=True`` means the condition FAILED
-    and downstream steps should be skipped.
-    """
-    passed = _evaluate_condition(step.condition, step_outputs)
+    """Evaluate a gate condition against prior step outputs."""
+    condition = getattr(step, "condition", "")
+    passed = evaluate_condition(condition, step_outputs)
     return StepResult(
         step_id=step.id,
         value={"passed": passed},
         gated=not passed,
     )
-
-
-def _evaluate_condition(condition: str, step_outputs: dict[str, StepValue]) -> bool:
-    """Evaluate a simple dot-path condition against step outputs."""
-    if not condition:
-        return True
-
-    path = condition.strip()
-
-    # Strip optional "steps." prefix
-    if path.startswith("steps."):
-        path = path[6:]
-
-    parts = path.split(".", 1)
-    step_id = parts[0]
-    value = step_outputs.get(step_id)
-
-    if value is None:
-        return False
-
-    if len(parts) == 1:
-        return bool(value)
-
-    field = parts[1]
-    if isinstance(value, dict):
-        return bool(value.get(field))
-
-    return bool(value)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +349,7 @@ def _evaluate_condition(condition: str, step_outputs: dict[str, StepValue]) -> b
 
 
 def _build_messages(
-    step: StepConfig,
+    step: LLMNode | LLMToolsNode,
     workflow_input: str,
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
@@ -296,7 +385,7 @@ def _extract_value(response: LLMResponse, response_format: str) -> StepValue:
 
 def _record_usage(
     ledger: LLMUsageLedger | None,
-    step: StepConfig,
+    step: LLMNode | LLMToolsNode,
     provider_name: str,
     model: str,
     response: LLMResponse,

@@ -33,7 +33,6 @@ class Event:
     CHAT_SEND_CANCELLED = "chat_send_cancelled"
     CHAT_STOP = "chat_stop"
     NOTIFICATION_SEND_FAILED = "notification_send_failed"
-    MANAGER_SCOPE_FAILED = "manager_scope_resolve_failed"
     SESSION_NOT_FOUND = "session_not_found"
     SESSIONS_EVICTED = "sessions_evicted"
 
@@ -46,17 +45,11 @@ class Event:
     WS_RPC_SEND_FAILED = "background_rpc_send_failed"
     WS_PING_FAILED = "ws_ping_failed"
 
-    # -- Knowledge / Signals ------------------------------------------------
+    # -- Graph / Vectors ----------------------------------------------------
     GRAPH_RETRIEVAL_FAILED = "graph_retrieval_failed"
     GRAPH_EXPAND_FAILED = "graph_expand_failed"
-    SIGNAL_RETRIEVAL_FAILED = "signal_retrieval_failed"
     VECTOR_SEARCH_FAILED = "vector_search_failed"
 
-    # -- Ingestion / Documents ----------------------------------------------
-    CLASSIFY_DOCUMENT_FAILED = "classify_document_failed"
-    ENRICH_ROWS_FAILED = "enrich_rows_failed"
-    INGESTION_FAILED = "ingestion_failed"
-    PROPERTY_DIRECTORY_EMPTY = "property_directory_empty"
     # -- Server lifecycle ---------------------------------------------------
     SERVER_READY = "server_ready"
     SERVER_SHUTDOWN = "server_shutdown"

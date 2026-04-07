@@ -22,7 +22,6 @@ from remi.agent.context.frame import WorldState
 from remi.agent.context.intent import classify_intent
 from remi.agent.context.rendering import (
     extract_signal_references,
-    render_active_signals,
     render_domain_context,
 )
 from remi.agent.llm.types import LLMProvider, estimate_cost
@@ -130,7 +129,7 @@ class AgentNode(BaseModule):
             world=world,
         )
 
-        injection_phases: set[str] = {"signals", "graph", "memory"}
+        injection_phases: set[str] = {"graph", "memory"}
         max_tool_rounds: int | None = None
         user_question = _extract_user_question(thread)
         intent_result = classify_intent(user_question, cfg.intents)
@@ -202,9 +201,7 @@ class AgentNode(BaseModule):
         )
         async with trace_cm:
             ctx_builder = context.deps.context_builder
-            signal_store = context.deps.signal_store or context.extras.get("signal_store")
 
-            needs_signals = "signals" in injection_phases
             needs_graph = "graph" in injection_phases
             needs_memory = "memory" in injection_phases
 
@@ -229,7 +226,7 @@ class AgentNode(BaseModule):
                         entries.append(f"- {key}: {val}")
                 return "\n".join(entries) if entries else None
 
-            if ctx_builder is not None and (needs_signals or needs_graph):
+            if ctx_builder is not None and needs_graph:
                 frame, memory_text = await asyncio.gather(
                     ctx_builder.build(
                         question=user_question,
@@ -241,15 +238,7 @@ class AgentNode(BaseModule):
                 )
                 ctx_builder.inject_into_thread(thread, frame)
             else:
-                memory_text_coro = _load_memory()
-
-                if needs_signals and signal_store is not None:
-                    signal_summary = await render_active_signals(signal_store)
-                    if signal_summary:
-                        insert_idx = _find_tail_inject_point(thread)
-                        thread.insert(insert_idx, Message(role="system", content=signal_summary))
-
-                memory_text = await memory_text_coro
+                memory_text = await _load_memory()
 
             if memory_text:
                 _insert_before_last_user(

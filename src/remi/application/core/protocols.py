@@ -2,7 +2,7 @@
 
 ``PropertyStore`` is the single storage port for all domain entities.
 
-Infrastructure ports (KnowledgeWriter, etc.) decouple
+Infrastructure ports (TextIndexer, VectorSearch) decouple
 ``application/services/`` from ``agent/`` primitives.  Implementations
 live in ``application/infra/``.
 """
@@ -284,64 +284,6 @@ class PropertyStore(abc.ABC):
 # ---------------------------------------------------------------------------
 # Infrastructure ports — decouple services from agent/ primitives
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class KBEntity:
-    """Application-level representation of a knowledge-graph entity."""
-
-    entity_id: str
-    entity_type: str
-    namespace: str
-    properties: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class KBRelationship:
-    """Application-level representation of a knowledge-graph relationship."""
-
-    source_id: str
-    target_id: str
-    relation_type: str
-    namespace: str
-
-
-class KnowledgeWriter(abc.ABC):
-    """Port for writing entities and relationships to the knowledge graph.
-
-    Hides agent.graph.KnowledgeStore from application services that only
-    need to persist extracted knowledge (ingestion, apply, etc.).
-    """
-
-    @abc.abstractmethod
-    async def put_entity(self, entity: KBEntity) -> None: ...
-
-    @abc.abstractmethod
-    async def get_entity(self, namespace: str, entity_id: str) -> KBEntity | None: ...
-
-    @abc.abstractmethod
-    async def put_relationship(self, rel: KBRelationship) -> None: ...
-
-
-class KnowledgeReader(abc.ABC):
-    """Port for reading knowledge-graph data from application services.
-
-    Provides the narrow query surface that dashboard, auto-assign, and
-    search need — without exposing the full KnowledgeStore API.
-    """
-
-    @abc.abstractmethod
-    async def find_entities(
-        self,
-        namespace: str,
-        entity_type: str | None = None,
-        *,
-        limit: int = 20,
-    ) -> list[KBEntity]: ...
-
-    @abc.abstractmethod
-    async def list_namespaces(self) -> list[str]: ...
 
 
 @dataclass

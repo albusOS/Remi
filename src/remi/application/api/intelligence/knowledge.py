@@ -1,11 +1,11 @@
-"""Knowledge graph assertion endpoints — assert, correct, contextualize.
+"""Knowledge assertion endpoints — assert, correct, contextualize.
 
-REST surface for user writes to the knowledge graph. Same operations
+REST surface for user writes to domain knowledge. Same operations
 available as agent tools in ``application/tools/assertions.py``.
 
 All mutation endpoints produce ``ChangeSet`` events through the
 ``EventStore`` so corrections flow through the same event pipeline
-as adapter imports, keeping DB and ontology in sync.
+as adapter imports.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from remi.application.tools.assertions import _add_context, _assert_fact, _correct_entity
+from remi.application.tools.assertions import _add_context, _assert_fact
 from remi.shell.api.dependencies import Ctr
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -27,12 +27,6 @@ class AssertFactRequest(BaseModel):
     relation_type: str | None = None
 
 
-class CorrectEntityRequest(BaseModel):
-    entity_type: str
-    entity_id: str
-    corrections: dict[str, str]
-
-
 class AddContextRequest(BaseModel):
     entity_type: str
     entity_id: str
@@ -44,30 +38,15 @@ async def assert_fact(
     body: AssertFactRequest,
     c: Ctr,
 ) -> dict[str, str]:
-    """Assert a new fact into the knowledge graph with user provenance."""
+    """Assert a new fact into the knowledge base with user provenance."""
     return await _assert_fact(
-        c.knowledge_graph,
+        c.property_store,
         c.event_store,
         entity_type=body.entity_type,
         entity_id=body.entity_id,
         properties=body.properties,
         related_to=body.related_to,
         relation_type=body.relation_type,
-    )
-
-
-@router.post("/correct")
-async def correct_entity(
-    body: CorrectEntityRequest,
-    c: Ctr,
-) -> dict[str, str]:
-    """Correct field values on an existing entity."""
-    return await _correct_entity(
-        c.knowledge_graph,
-        c.event_store,
-        entity_type=body.entity_type,
-        entity_id=body.entity_id,
-        corrections=body.corrections,
     )
 
 
@@ -78,7 +57,7 @@ async def add_context(
 ) -> dict[str, str]:
     """Attach user context/annotation to an entity."""
     return await _add_context(
-        c.knowledge_graph,
+        c.property_store,
         entity_type=body.entity_type,
         entity_id=body.entity_id,
         context=body.context,

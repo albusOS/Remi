@@ -14,7 +14,6 @@ from __future__ import annotations
 from remi.application.tools.actions import ActionToolProvider
 from remi.application.tools.assertions import AssertionToolProvider
 from remi.application.tools.documents import DocumentToolProvider
-from remi.application.tools.ontology import KnowledgeGraphToolProvider
 from remi.application.tools.search import SearchToolProvider
 from remi.application.tools.workflows import SubAgentInvoker, WorkflowToolProvider
 
@@ -22,7 +21,6 @@ __all__ = [
     "ActionToolProvider",
     "AssertionToolProvider",
     "DocumentToolProvider",
-    "KnowledgeGraphToolProvider",
     "SearchToolProvider",
     "SubAgentInvoker",
     "WorkflowToolProvider",

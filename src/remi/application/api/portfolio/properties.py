@@ -150,35 +150,18 @@ async def property_context(
         raise NotFoundError("Property", property_id)
 
     rr_task = c.rent_roll_resolver.build_rent_roll(property_id)
-    sig_task = c.signal_store.list_signals(scope={"property_id": property_id})
     ev_task = c.event_store.list_by_entity(property_id, limit=20)
     maint_task = c.maintenance_resolver.maintenance_summary(property_id=property_id)
 
-    rr, sigs, changesets, maint = await asyncio.gather(
+    rr, changesets, maint = await asyncio.gather(
         rr_task,
-        sig_task,
         ev_task,
         maint_task,
     )
 
-    from remi.application.api.intelligence.signal_schemas import SignalSummary
-
     return {
         "property": detail.model_dump(mode="json"),
         "rent_roll": rr.model_dump(mode="json") if rr else None,
-        "signals": [
-            SignalSummary(
-                signal_id=s.signal_id,
-                signal_type=s.signal_type,
-                severity=s.severity.value,
-                entity_type=s.entity_type,
-                entity_id=s.entity_id,
-                entity_name=s.entity_name,
-                description=s.description,
-                detected_at=s.detected_at.isoformat(),
-            ).model_dump(mode="json")
-            for s in sigs
-        ],
         "recent_events": len(changesets),
         "maintenance": maint.model_dump(mode="json"),
     }

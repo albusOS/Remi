@@ -1,8 +1,8 @@
-"""Graph-aware entity retrieval — fuses vector similarity with graph traversal.
+"""Graph-aware entity retrieval — fuses vector similarity with link expansion.
 
 Given a user question, resolves relevant entities via vector search
 (with a keyword fallback for named-entity lookups), then expands
-through the knowledge graph to pull in related context.
+through the WorldModel to pull in related context.
 """
 
 from __future__ import annotations
@@ -13,10 +13,9 @@ from typing import Any
 
 import structlog
 
-from remi.agent.graph.stores import KnowledgeGraph
-from remi.agent.graph.types import GraphLink, KnowledgeLink
+from remi.agent.graph.stores import WorldModel
+from remi.agent.graph.types import KnowledgeLink
 from remi.agent.observe.events import Event
-from remi.agent.signals import Signal, SignalStore
 from remi.agent.vectors.types import Embedder, SearchResult, VectorStore
 
 _DEFAULT_NAME_FIELDS: tuple[str, ...] = ("name",)
@@ -39,25 +38,22 @@ class RetrievalResult:
     """Output of graph-aware retrieval."""
 
     entities: list[ResolvedEntity] = field(default_factory=list)
-    signals: list[Signal] = field(default_factory=list)
     neighborhood: dict[str, list[KnowledgeLink]] = field(default_factory=dict)
 
 
 class GraphRetriever:
-    """Resolves entities relevant to a question via vector + graph traversal."""
+    """Resolves entities relevant to a question via vector + WorldModel link expansion."""
 
     def __init__(
         self,
-        knowledge_graph: KnowledgeGraph,
+        world_model: WorldModel | None = None,
         vector_store: VectorStore | None = None,
         embedder: Embedder | None = None,
-        signal_store: SignalStore | None = None,
         name_fields: tuple[str, ...] | None = None,
     ) -> None:
-        self._kg = knowledge_graph
+        self._world = world_model
         self._vs = vector_store
         self._embedder = embedder
-        self._ss = signal_store
         self._name_fields = name_fields or _DEFAULT_NAME_FIELDS
 
     async def retrieve(
@@ -69,10 +65,9 @@ class GraphRetriever:
         link_type_filter: set[str] | None = None,
         entity_type_filter: set[str] | None = None,
     ) -> RetrievalResult:
-        """Resolve entities from the question and expand through the graph.
+        """Resolve entities from the question and expand through WorldModel links.
 
-        ``expand_depth``: how many hops to expand (1 = direct neighbors,
-        2 = neighbors of neighbors, etc.).
+        ``expand_depth``: how many hops to expand (1 = direct neighbors).
         ``link_type_filter``: only follow these link types during expansion.
         ``entity_type_filter``: only include neighbors of these entity types.
         """
@@ -81,82 +76,36 @@ class GraphRetriever:
         resolved = await self._resolve_entities(question, max_entities=max_entities)
         result.entities = resolved
 
+        if self._world is None or expand_depth < 1:
+            return result
+
         for entity in resolved:
-            if expand_depth > 0:
-                try:
-                    neighborhood = await self._expand_neighborhood(
-                        entity.entity_id,
-                        depth=expand_depth,
-                        link_type_filter=link_type_filter,
-                        entity_type_filter=entity_type_filter,
-                    )
-                    result.neighborhood[entity.entity_id] = neighborhood
-                except Exception:
-                    _log.warning(
-                        Event.GRAPH_EXPAND_FAILED,
-                        entity_id=entity.entity_id,
-                        exc_info=True,
-                    )
-
-        if self._ss is not None:
-            entity_ids = {e.entity_id for e in resolved}
-            for links in result.neighborhood.values():
-                for link in links:
-                    entity_ids.add(link.source_id)
-                    entity_ids.add(link.target_id)
             try:
-                all_signals = await self._ss.list_signals()
-                result.signals = [s for s in all_signals if s.entity_id in entity_ids]
-            except Exception:
-                _log.warning(Event.SIGNAL_RETRIEVAL_FAILED, exc_info=True)
-
-        return result
-
-    async def _expand_neighborhood(
-        self,
-        entity_id: str,
-        *,
-        depth: int,
-        link_type_filter: set[str] | None,
-        entity_type_filter: set[str] | None,
-    ) -> list[KnowledgeLink]:
-        """Multi-hop BFS expansion from a single entity."""
-        visited_ids: set[str] = {entity_id}
-        frontier: set[str] = {entity_id}
-        all_links: list[KnowledgeLink] = []
-
-        for _hop in range(depth):
-            next_frontier: set[str] = set()
-            for fid in frontier:
-                graph_links: list[GraphLink] = await self._kg.get_links(fid, direction="both")
-                for gl in graph_links:
+                links = await self._world.get_links(entity.entity_id)
+                filtered: list[KnowledgeLink] = []
+                for gl in links:
                     if link_type_filter and gl.link_type not in link_type_filter:
                         continue
-
-                    neighbor_id = gl.target_id if gl.source_id == fid else gl.source_id
-
-                    if entity_type_filter:
-                        neighbor_type = gl.properties.get("target_type", "")
-                        if neighbor_type and neighbor_type not in entity_type_filter:
-                            continue
-
-                    kl = KnowledgeLink(
-                        source_id=gl.source_id,
-                        link_type=gl.link_type,
-                        target_id=gl.target_id,
-                        properties=gl.properties,
+                    target_type = gl.properties.get("target_type", "")
+                    if entity_type_filter and target_type and target_type not in entity_type_filter:
+                        continue
+                    filtered.append(
+                        KnowledgeLink(
+                            source_id=gl.source_id,
+                            link_type=gl.link_type,
+                            target_id=gl.target_id,
+                            properties=gl.properties,
+                        )
                     )
-                    all_links.append(kl)
+                result.neighborhood[entity.entity_id] = filtered
+            except Exception:
+                _log.warning(
+                    Event.GRAPH_EXPAND_FAILED,
+                    entity_id=entity.entity_id,
+                    exc_info=True,
+                )
 
-                    if neighbor_id not in visited_ids:
-                        visited_ids.add(neighbor_id)
-                        next_frontier.add(neighbor_id)
-
-            frontier = next_frontier
-            if not frontier:
-                break
-
-        return all_links
+        return result
 
     async def _resolve_entities(
         self,

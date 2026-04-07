@@ -1,4 +1,9 @@
-"""Knowledge graph store ABCs — Ontology, KnowledgeGraph, MemoryStore, KnowledgeStore.
+"""Graph store ABCs — MemoryStore and WorldModel.
+
+``WorldModel`` is the agent's read-only view of whatever domain world
+it's operating in. The kernel never knows what entity types exist — it
+discovers structure through ``schema()`` and traverses through
+``get_links()``. The application layer provides the implementation.
 
 DTOs (Entity, Relationship, etc.) live in ``remi.agent.graph.types``.
 """
@@ -6,152 +11,62 @@ DTOs (Entity, Relationship, etc.) live in ``remi.agent.graph.types``.
 from __future__ import annotations
 
 import abc
-from typing import Any
 
 from remi.agent.graph.types import (
-    AggregateResult,
-    Entity,
     GraphLink,
     GraphObject,
-    KnowledgeProvenance,
-    LinkTypeDef,
+    KnowledgeLink,
     MemoryEntry,
     ObjectTypeDef,
-    Relationship,
-    TimelineEvent,
 )
 
-# ---------------------------------------------------------------------------
-# Ontology — the schema layer (TBox: what types exist)
-# ---------------------------------------------------------------------------
 
+class WorldModel(abc.ABC):
+    """Read-only world model — the agent's perception of its domain.
 
-class Ontology(abc.ABC):
-    """The domain vocabulary: object types, link types, constraints.
-
-    This is the structural TBox — what kinds of things exist and how
-    they can relate. Small, stable, loaded at boot, extended by learning.
+    The agent kernel depends on this interface. The application layer
+    implements it by wrapping its own stores (PropertyStore, etc.) and
+    deriving links from FK fields. The kernel never imports domain types.
     """
-
-    @abc.abstractmethod
-    async def list_object_types(self) -> list[ObjectTypeDef]: ...
-
-    @abc.abstractmethod
-    async def get_object_type(self, name: str) -> ObjectTypeDef | None: ...
-
-    @abc.abstractmethod
-    async def define_object_type(self, type_def: ObjectTypeDef) -> None: ...
-
-    @abc.abstractmethod
-    async def list_link_types(self) -> list[LinkTypeDef]: ...
-
-    @abc.abstractmethod
-    async def define_link_type(self, link_def: LinkTypeDef) -> None: ...
-
-
-# ---------------------------------------------------------------------------
-# KnowledgeGraph — instance store with links, traversal, codification
-# ---------------------------------------------------------------------------
-
-
-class KnowledgeGraph(Ontology):
-    """Entity and relationship store with traversal and codification.
-
-    Extends Ontology with instance CRUD, link management, graph traversal,
-    aggregation, timeline, and knowledge codification. This is the ABox
-    layer — the actual facts and relationships.
-    """
-
-    @abc.abstractmethod
-    async def get_object(self, type_name: str, object_id: str) -> GraphObject | None: ...
 
     @abc.abstractmethod
     async def search_objects(
         self,
-        type_name: str,
+        query: str,
         *,
-        filters: dict[str, Any] | None = None,
-        order_by: str | None = None,
-        limit: int = 50,
-    ) -> list[GraphObject]: ...
+        object_type: str | None = None,
+        limit: int = 20,
+    ) -> list[GraphObject]:
+        """Full-text / fuzzy search over world entities."""
+        ...
 
     @abc.abstractmethod
-    async def put_object(
-        self, type_name: str, object_id: str, properties: dict[str, Any]
-    ) -> None: ...
+    async def get_object(self, object_id: str) -> GraphObject | None:
+        """Look up a single entity by ID."""
+        ...
 
     @abc.abstractmethod
     async def get_links(
         self,
         object_id: str,
         *,
-        link_type: str | None = None,
         direction: str = "both",
-    ) -> list[GraphLink]: ...
+        link_type: str | None = None,
+    ) -> list[GraphLink]:
+        """Return edges connected to *object_id*.
+
+        ``direction`` is ``"outgoing"``, ``"incoming"``, or ``"both"``.
+        """
+        ...
 
     @abc.abstractmethod
-    async def put_link(
-        self,
-        source_id: str,
-        link_type: str,
-        target_id: str,
-        *,
-        properties: dict[str, Any] | None = None,
-    ) -> None: ...
-
-    @abc.abstractmethod
-    async def traverse(
-        self,
-        start_id: str,
-        link_types: list[str] | None = None,
-        *,
-        max_depth: int = 3,
-    ) -> list[GraphObject]: ...
-
-    @abc.abstractmethod
-    async def aggregate(
-        self,
-        type_name: str,
-        metric: str,
-        field: str | None = None,
-        *,
-        filters: dict[str, Any] | None = None,
-        group_by: str | None = None,
-    ) -> AggregateResult: ...
-
-    @abc.abstractmethod
-    async def get_timeline(
-        self,
-        object_type: str,
-        object_id: str,
-        *,
-        event_types: list[str] | None = None,
-        limit: int = 50,
-    ) -> list[TimelineEvent]: ...
-
-    @abc.abstractmethod
-    async def codify(
-        self,
-        knowledge_type: str,
-        data: dict[str, Any],
-        *,
-        provenance: KnowledgeProvenance = KnowledgeProvenance.INFERRED,
-    ) -> str:
-        """Store a piece of operational knowledge. Returns the entity ID."""
+    async def schema(self) -> list[ObjectTypeDef]:
+        """Return the type definitions known to this world."""
         ...
 
 
-# ---------------------------------------------------------------------------
-# MemoryStore — key-value episodic memory (separate concern from graph)
-# ---------------------------------------------------------------------------
-
-
 class MemoryStore(abc.ABC):
-    """Key-value memory store for agent episodic memory.
-
-    Intentionally separate from KnowledgeStore — these map to different
-    backends (e.g. Postgres JSONB vs Neo4j).
-    """
+    """Key-value memory store for agent episodic memory."""
 
     @abc.abstractmethod
     async def store(
@@ -166,62 +81,3 @@ class MemoryStore(abc.ABC):
 
     @abc.abstractmethod
     async def list_keys(self, namespace: str) -> list[str]: ...
-
-
-# ---------------------------------------------------------------------------
-# KnowledgeStore — low-level entity/relationship persistence
-# ---------------------------------------------------------------------------
-
-
-class KnowledgeStore(abc.ABC):
-    """Low-level entity and relationship graph persistence.
-
-    This is the storage backend for the knowledge graph — entities,
-    relationships, traversal, namespaces. Does not inherit MemoryStore;
-    the two concerns target different backends.
-    """
-
-    @abc.abstractmethod
-    async def put_entity(self, entity: Entity) -> None: ...
-
-    @abc.abstractmethod
-    async def get_entity(self, namespace: str, entity_id: str) -> Entity | None: ...
-
-    @abc.abstractmethod
-    async def find_entities(
-        self,
-        namespace: str,
-        entity_type: str | None = None,
-        query: str | None = None,
-        *,
-        limit: int = 20,
-    ) -> list[Entity]: ...
-
-    @abc.abstractmethod
-    async def put_relationship(self, rel: Relationship) -> None: ...
-
-    @abc.abstractmethod
-    async def get_relationships(
-        self,
-        namespace: str,
-        entity_id: str,
-        *,
-        relation_type: str | None = None,
-        direction: str = "outgoing",
-    ) -> list[Relationship]: ...
-
-    @abc.abstractmethod
-    async def traverse(
-        self,
-        namespace: str,
-        start_id: str,
-        relation_types: list[str] | None = None,
-        *,
-        max_depth: int = 3,
-    ) -> list[Entity]: ...
-
-    @abc.abstractmethod
-    async def list_namespaces(self) -> list[str]: ...
-
-    @abc.abstractmethod
-    async def delete_entity(self, namespace: str, entity_id: str) -> bool: ...

@@ -34,12 +34,12 @@ from remi.agent.runtime.deps import RunDeps, RunParams, RuntimeContext, ScopeCon
 from remi.agent.runtime.node import AgentNode
 from remi.agent.runtime.retry import RetryPolicy
 from remi.agent.sandbox.types import Sandbox
-from remi.agent.signals import DomainTBox, SignalStore
+from remi.agent.signals import DomainTBox
 from remi.agent.types import ChatSession, ChatSessionStore, ToolRegistry
 from remi.agent.types import Message as ChatMessage
+from remi.agent.workflow.loader import get_agents_dir
 from remi.types.errors import SessionNotFoundError
 from remi.types.ids import new_run_id
-from remi.types.paths import AGENTS_DIR
 
 logger = structlog.get_logger("remi.runner")
 
@@ -61,7 +61,6 @@ class ChatAgentService:
         tool_registry: ToolRegistry,
         sandbox: Sandbox,
         domain_tbox: DomainTBox,
-        signal_store: SignalStore,
         memory_store: MemoryStore,
         tracer: Tracer,
         chat_session_store: ChatSessionStore,
@@ -75,7 +74,6 @@ class ChatAgentService:
         self._tool_registry = tool_registry
         self._sandbox = sandbox
         self._domain_tbox = domain_tbox
-        self._signal_store = signal_store
         self._memory_store = memory_store
         self._tracer = tracer
         self._chat_session_store = chat_session_store
@@ -87,7 +85,7 @@ class ChatAgentService:
 
     def _load_app_yaml(self, agent_name: str) -> dict[str, Any]:
         """Load and return the raw app.yaml for an agent."""
-        app_path = AGENTS_DIR / agent_name / "app.yaml"
+        app_path = get_agents_dir() / agent_name / "app.yaml"
         if not app_path.exists():
             raise ValueError(f"Unknown agent: {agent_name!r} (looked in {app_path})")
         with open(app_path) as f:
@@ -221,7 +219,6 @@ class ChatAgentService:
             tracer=self._tracer,
             usage_ledger=self._usage_ledger,
             memory_store=self._memory_store,
-            signal_store=self._signal_store,
             domain_tbox=self._domain_tbox,
             context_builder=self._context_builder,
             default_provider=self._default_provider,

@@ -17,11 +17,39 @@ from typing import Any
 import structlog
 
 from remi.agent.graph import ObjectTypeDef
+from remi.agent.graph.retrieval.introspect import pydantic_to_type_defs, schemas_for_prompt
+from remi.application.core.models import (
+    BalanceObservation,
+    Lease,
+    MaintenanceRequest,
+    Owner,
+    Property,
+    PropertyManager,
+    Tenant,
+    Unit,
+    Vendor,
+)
 from remi.application.core.models.enums import ReportType
-from remi.application.infra.graph.schema import _ALL_TYPE_DEFS
 from remi.application.services.ingestion.resolver import PERSISTABLE_TYPES
 
+_ALL_TYPE_DEFS: list[ObjectTypeDef] = pydantic_to_type_defs([
+    (PropertyManager, "Person or company managing one or more properties"),
+    (Property, "A real-estate asset"),
+    (Unit, "A rentable unit within a property"),
+    (Lease, "A rental agreement"),
+    (Tenant, "An individual or entity renting a unit"),
+    (MaintenanceRequest, "A work order"),
+    (BalanceObservation, "A point-in-time balance snapshot"),
+    (Vendor, "A service provider"),
+    (Owner, "A property owner"),
+])
+
 _log = structlog.get_logger(__name__)
+
+
+def entity_schemas_for_prompt() -> str:
+    """Render core RE entity schemas as structured text for LLM prompts."""
+    return schemas_for_prompt(_ALL_TYPE_DEFS)
 
 # ---------------------------------------------------------------------------
 # Token normalization
@@ -111,6 +139,17 @@ _EXACT_OVERRIDES: dict[str, str] = {
     "invoice amount": "cost",
 }
 
+# Cross-entity overrides — columns that carry context across entity boundaries
+# (e.g. a rent roll row describes a Unit but also names the manager). These are
+# always mapped regardless of the winning entity type's field list.
+_CROSS_ENTITY_OVERRIDES: dict[str, str] = {
+    "site manager name": "site_manager_name",
+    "site manager": "site_manager_name",
+    "property manager": "site_manager_name",
+    "manager name": "site_manager_name",
+    "managed by": "site_manager_name",
+}
+
 
 def _expand_synonyms(tokens: list[str]) -> set[str]:
     """Expand tokens using the synonym table."""
@@ -180,9 +219,19 @@ def _score_entity_type(
     matched_fields: set[str] = set()
     unmatched: list[str] = []
 
+    # Pass 0: cross-entity overrides — always applied regardless of entity fields
+    pre_remaining: list[str] = []
+    for col in columns:
+        col_lower = col.lower().strip()
+        cross = _CROSS_ENTITY_OVERRIDES.get(col_lower)
+        if cross:
+            column_map[col] = cross
+        else:
+            pre_remaining.append(col)
+
     # Pass 1: exact overrides — highest confidence
     remaining_cols: list[str] = []
-    for col in columns:
+    for col in pre_remaining:
         col_lower = col.lower().strip()
         override = _EXACT_OVERRIDES.get(col_lower)
         if override and override in field_names and override not in matched_fields:

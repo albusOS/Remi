@@ -17,7 +17,7 @@ import structlog
 from remi.agent.documents.types import DocumentContent
 from remi.agent.workflow import WorkflowRunner
 from remi.application.core.models.enums import ReportType
-from remi.application.core.protocols import KnowledgeWriter, PropertyStore
+from remi.application.core.protocols import PropertyStore
 from remi.application.services.ingestion.base import IngestionResult
 from remi.application.services.ingestion.context import IngestionCtx
 from remi.application.services.ingestion.managers import ManagerResolver
@@ -30,18 +30,16 @@ _log = structlog.get_logger(__name__)
 class IngestionService:
     """Persists mapped rows via ROW_PERSISTERS, accumulating results.
 
-    Holds references to KnowledgeWriter and PropertyStore for building
-    the IngestionCtx. The workflow_runner is used by the orchestrator
-    (pipeline.py) for LLM extraction.
+    Holds references to PropertyStore for building the IngestionCtx.
+    The workflow_runner is used by the orchestrator (pipeline.py)
+    for LLM extraction.
     """
 
     def __init__(
         self,
-        knowledge_writer: KnowledgeWriter,
         property_store: PropertyStore,
         workflow_runner: WorkflowRunner,
     ) -> None:
-        self._kb = knowledge_writer
         self._ps = property_store
         self._workflow_runner = workflow_runner
 
@@ -69,7 +67,6 @@ class IngestionService:
             report_type=report_type,
             doc_id=content.id,
             namespace="ingestion",
-            kb=self._kb,
             ps=self._ps,
             manager_resolver=resolver,
             result=result,
@@ -117,7 +114,6 @@ class IngestionService:
             doc_id=content.id,
             report_type=report_type.value,
             entities_created=result.entities_created,
-            relationships_created=result.relationships_created,
             rows_accepted=result.rows_accepted,
             rows_rejected=result.rows_rejected,
             rows_skipped=result.rows_skipped,

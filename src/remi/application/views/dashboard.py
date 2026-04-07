@@ -15,7 +15,7 @@ from remi.application.core.models import (
     BalanceObservation,
     LeaseStatus,
 )
-from remi.application.core.protocols import KnowledgeReader, PropertyStore
+from remi.application.core.protocols import PropertyStore
 from remi.application.core.rules import (
     active_lease,
     derive_occupancy_status,
@@ -103,10 +103,8 @@ class DashboardResolver:
     def __init__(
         self,
         property_store: PropertyStore,
-        knowledge_reader: KnowledgeReader | None = None,
     ) -> None:
         self._ps = property_store
-        self._kr = knowledge_reader
 
     async def _resolve_property_ids(
         self,
@@ -333,11 +331,9 @@ class DashboardResolver:
         tenants_list = await asyncio.gather(*[self._ps.get_tenant(tid) for tid in tenant_ids])
         tenant_map = {tid: t for tid, t in zip(tenant_ids, tenants_list, strict=True) if t}
 
-        delinquency_notes: dict[str, str] = {}
-        if self._kr is not None:
-            delinquency_notes = await self._load_delinquency_notes(
-                [obs.tenant_id for obs in delinquent]
-            )
+        delinquency_notes = await self._load_delinquency_notes(
+            [obs.tenant_id for obs in delinquent]
+        )
 
         result_items: list[DelinquentTenant] = []
         for obs in delinquent:
@@ -371,23 +367,13 @@ class DashboardResolver:
         )
 
     async def _load_delinquency_notes(self, tenant_ids: list[str]) -> dict[str, str]:
-        assert self._kr is not None
         result: dict[str, str] = {}
-        lookup = set(tenant_ids)
-        namespaces = await self._kr.list_namespaces()
-        for ns_key in namespaces:
-            if not ns_key.startswith("doc:"):
-                continue
-            entities = await self._kr.find_entities(
-                ns_key,
-                entity_type="appfolio_delinquent_tenant",
-                limit=500,
-            )
-            for entity in entities:
-                if entity.entity_id in lookup:
-                    notes = entity.properties.get("delinquency_notes")
-                    if notes:
-                        result[entity.entity_id] = notes
+        for tid in tenant_ids:
+            notes = await self._ps.list_notes(entity_type="Tenant", entity_id=tid)
+            for note in notes:
+                if "delinquency" in (note.content or "").lower():
+                    result[tid] = note.content
+                    break
         return result
 
     async def lease_expiration_calendar(

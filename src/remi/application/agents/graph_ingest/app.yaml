@@ -1,23 +1,22 @@
 apiVersion: remi/v1
-kind: Pipeline
+kind: Workflow
 
 metadata:
   name: graph-ingest
-  version: "1.0.0"
+  version: "2.0.0"
   description: >
-    Graph-reasoning ingestion pipeline. Instead of mapping column headers to
-    a fixed schema, the LLM reasons about the document as a whole against the
-    current knowledge graph — producing graph operations (upsert, link, extend)
-    that Python executes atomically.
+    Graph-reasoning ingestion pipeline. The LLM reasons about the document
+    against the current knowledge graph, producing graph operations (upsert,
+    link, extend, review) that Python executes atomically.
 
-    This handles everything the column-map pipeline cannot:
-      - Entity identity resolution ("Ryan Steen Mgmt" = existing "Ryan Steen")
+    Handles everything the column-map pipeline cannot:
+      - Entity identity resolution
       - Cross-document relationship inference
       - Novel concept detection and schema extension proposals
       - Documents that mix multiple entity types
 
-    Use this pipeline when the algorithmic matcher confidence is low (< 0.5)
-    or when observations_likely was flagged by the extract step.
+    Use when algorithmic matcher confidence is low or when
+    observations_likely was flagged by the extract step.
 
   tags: [ingestion, graph, reasoning, internal]
   domain: real-estate
@@ -27,18 +26,19 @@ metadata:
 steps:
   # ---------------------------------------------------------------------------
   # Step 1 — Reason
-  #
-  # The LLM sees: domain ontology + existing graph context + document content.
-  # It produces graph operations, not a column map.
-  # One call per document. Uses a capable model because it's reasoning, not
-  # just pattern-matching.
   # ---------------------------------------------------------------------------
   - id: reason
+    kind: llm
     provider: anthropic
     model: claude-haiku-4-5-20251001
     temperature: 0.0
     max_tokens: 8192
     response_format: json
+    output_schema: GraphReasonResult
+    retry:
+      max_attempts: 2
+      backoff: exponential
+      base_delay: 2.0
     system_prompt: |
       You are a real estate knowledge graph reasoning agent.
 
@@ -61,19 +61,11 @@ steps:
       REASONING APPROACH:
 
       1. IDENTIFY what real-world concepts this document contains.
-         Think in domain terms: "this is a rent roll — it describes which
-         units are occupied, by whom, at what rent, under what lease terms."
-         NOT: "column X maps to field Y."
 
       2. RESOLVE identities against the existing graph.
-         - If a property address in the document matches (or nearly matches)
-           an existing Property node, USE that node's id — don't create a duplicate.
-         - If a manager name is similar to an existing manager, USE the existing
-           id and note the alias in the operation.
-         - Identity resolution rules:
-           * Exact match after normalization → always merge
-           * Clearly the same address/name with minor variation → merge, note it
-           * Ambiguous → create with a confidence field and flag for review
+         - Exact match after normalization → always merge
+         - Clearly the same with minor variation → merge, note it
+         - Ambiguous → create with confidence field and flag for review
 
       3. PRODUCE graph operations. Each operation is one of:
            upsert:   create or update an entity
@@ -81,21 +73,18 @@ steps:
            extend:   propose a new entity type not in the ontology
            review:   flag something that needs human confirmation
 
-      4. For KNOWN entity types (Unit, Tenant, Lease, BalanceObservation,
-         MaintenanceRequest, Property, PropertyManager, etc.) — map all
-         meaningful fields using the ontology field names exactly.
+      4. For KNOWN entity types — map all meaningful fields using the
+         ontology field names exactly.
 
       5. For UNKNOWN concepts — use "extend" to propose a new type.
-         Include: type name (PascalCase), description, field list, sample values.
-         The system will add this to the review queue for promotion.
 
-      6. RELATIONSHIPS — infer them from context:
+      6. RELATIONSHIPS — infer from context:
            - A lease links a Unit to a Tenant → LEASED_BY
            - A maintenance request is at a unit → AT_UNIT, AT_PROPERTY
            - A balance observation is for a tenant → OWES, FOR_LEASE
            - A property is managed by a manager → MANAGED_BY
 
-      ENTITY ID CONVENTION: use the existing graph IDs for known entities,
+      ENTITY ID CONVENTION: use existing graph IDs for known entities,
       generate slug IDs for new ones: "<type_lower>:<normalized_key_fields>".
 
       RESPOND ONLY WITH VALID JSON:
@@ -116,20 +105,6 @@ steps:
             "identity_note": null
           },
           {
-            "op": "upsert",
-            "type": "Unit",
-            "id": "unit:property:123-main-st-pittsburgh-pa:apt-2",
-            "properties": {
-              "property_id": "property:123-main-st-pittsburgh-pa",
-              "unit_number": "Apt 2",
-              "bedrooms": 2,
-              "bathrooms": 1,
-              "sqft": 850,
-              "market_rent": 1200.00
-            },
-            "identity_note": null
-          },
-          {
             "op": "link",
             "source_id": "property:123-main-st-pittsburgh-pa",
             "target_id": "manager:ryan-steen",
@@ -140,12 +115,12 @@ steps:
             "op": "extend",
             "proposed_type": "RecurringServiceContract",
             "description": "A recurring vendor service agreement at a property",
-            "fields": ["vendor", "service_type", "frequency", "monthly_cost", "property_id"],
-            "sample": {"vendor": "Ehrlich", "service_type": "pest_control", "frequency": "monthly"}
+            "fields": ["vendor", "service_type", "frequency", "monthly_cost"],
+            "sample": {"vendor": "Ehrlich", "service_type": "pest_control"}
           },
           {
             "op": "review",
-            "reason": "Manager 'R. Steen Mgmt' may be the same as existing 'Ryan Steen' (score 0.81)",
+            "reason": "Manager name may match existing entity (score 0.81)",
             "input_value": "R. Steen Mgmt",
             "candidate_id": "manager:ryan-steen",
             "confidence": 0.81
@@ -154,23 +129,36 @@ steps:
       }
 
     input_template: |
-      metadata: {input.metadata}
-      column_names: {input.column_names}
-      sample_rows: {input.sample_rows}
-      total_rows: {input.total_rows}
+      {input}
 
   # ---------------------------------------------------------------------------
-  # Step 2 — Extend (conditional — only when extend operations exist)
-  #
-  # For each proposed new type, reason about how it fits into the existing
-  # ontology and generate a full schema proposal for human review.
+  # Step 2 — Execute graph operations
   # ---------------------------------------------------------------------------
+  - id: execute_ops
+    kind: for_each
+    tool: apply_graph_operation
+    items_from: steps.reason.operations
+    concurrency: 1
+    on_error: collect
+    depends_on: [reason]
+
+  # ---------------------------------------------------------------------------
+  # Step 3 — Extend (conditional — only when extend operations exist)
+  # ---------------------------------------------------------------------------
+  - id: has_extensions
+    kind: gate
+    condition: steps.reason.operations
+    depends_on: [reason]
+
   - id: extend
+    kind: llm
     provider: anthropic
     model: claude-haiku-4-5-20251001
     temperature: 0.1
     max_tokens: 4096
     response_format: json
+    output_schema: GraphExtendResult
+    depends_on: [has_extensions]
     system_prompt: |
       You are a real estate ontology design agent.
 
@@ -185,10 +173,6 @@ steps:
       1. type_name: PascalCase, descriptive
       2. description: one sentence, domain-specific
       3. fields: list of {name, type, required, description}
-         - Use the same type conventions as the ontology (str, Decimal, date, etc.)
-         - Include an "id" field (str, required)
-         - Include "property_id" if the entity is scoped to a property
-         - Include "source_document_id" for provenance
       4. relationships: list of {relation, target_type, direction, description}
       5. reasoning: why this is a genuinely new type vs. an existing one
 
@@ -197,21 +181,16 @@ steps:
         "proposed_types": [
           {
             "type_name": "RecurringServiceContract",
-            "description": "A standing vendor agreement for recurring services at a property",
+            "description": "A standing vendor agreement for recurring services",
             "fields": [
               {"name": "id", "type": "str", "required": true, "description": "Stable slug ID"},
               {"name": "property_id", "type": "str", "required": true, "description": "FK to Property"},
-              {"name": "vendor", "type": "str", "required": true, "description": "Vendor name"},
-              {"name": "service_type", "type": "str", "required": true, "description": "e.g. pest_control"},
-              {"name": "frequency", "type": "str", "required": false, "description": "monthly, quarterly, etc."},
-              {"name": "monthly_cost", "type": "Decimal", "required": false},
-              {"name": "source_document_id", "type": "str", "required": false}
+              {"name": "vendor", "type": "str", "required": true, "description": "Vendor name"}
             ],
             "relationships": [
-              {"relation": "AT_PROPERTY", "target_type": "Property", "direction": "outbound"},
-              {"relation": "SERVICED_BY", "target_type": "Vendor", "direction": "outbound"}
+              {"relation": "AT_PROPERTY", "target_type": "Property", "direction": "outbound"}
             ],
-            "reasoning": "Not a MaintenanceRequest (those are one-time work orders). Not a Vendor (those are the provider, not the contract). RecurringServiceContract is the agreement itself."
+            "reasoning": "Not a MaintenanceRequest or Vendor — this is the agreement itself."
           }
         ]
       }
@@ -219,6 +198,3 @@ steps:
     input_template: |
       Reasoning result:
       {steps.reason}
-
-      Proposed types to fully specify:
-      {input}

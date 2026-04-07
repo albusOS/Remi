@@ -38,13 +38,3 @@ class RuleCondition(StrEnum):
 class Deontic(StrEnum):
     MUST = "MUST"
     SHOULD = "SHOULD"
-
-
-class SignalOutcome(StrEnum):
-    """What happened after a signal was surfaced."""
-
-    ACKNOWLEDGED = "acknowledged"
-    DISMISSED = "dismissed"
-    ACTED_ON = "acted_on"
-    ESCALATED = "escalated"
-    FALSE_POSITIVE = "false_positive"

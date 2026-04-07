@@ -88,20 +88,8 @@ class VectorStoreSettings(BaseModel):
     backend: str = "memory"
 
 
-class KnowledgeStoreSettings(BaseModel):
-    """Knowledge graph persistence — ``memory``, ``postgres``, or ``neo4j``."""
-
-    backend: str = "memory"
-
-
 class MemoryStoreSettings(BaseModel):
     """Episodic memory backend — ``memory`` or ``postgres``."""
-
-    backend: str = "memory"
-
-
-class SignalStoreSettings(BaseModel):
-    """Signal and feedback persistence — ``memory`` or ``postgres``."""
 
     backend: str = "memory"
 
@@ -129,8 +117,6 @@ class RemiSettings(BaseModel):
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings)
     vectors: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
-    knowledge: KnowledgeStoreSettings = Field(default_factory=KnowledgeStoreSettings)
     memory: MemoryStoreSettings = Field(default_factory=MemoryStoreSettings)
-    signals: SignalStoreSettings = Field(default_factory=SignalStoreSettings)
     tracing: TraceStoreSettings = Field(default_factory=TraceStoreSettings)
     sessions: SessionStoreSettings = Field(default_factory=SessionStoreSettings)

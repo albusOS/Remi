@@ -1,9 +1,8 @@
 """Derive ObjectTypeDef schemas from Pydantic BaseModel subclasses.
 
 Domain-agnostic: any product can pass its Pydantic entity models and get
-back ``ObjectTypeDef`` instances suitable for KG type registration and
-LLM prompt serialization.  REMI passes PropertyManager, Unit, Lease, etc.;
-a different product would pass its own models.
+back ``ObjectTypeDef`` instances suitable for type registration and LLM
+prompt serialization.
 
 The introspector walks ``model_fields``, maps Python/Pydantic types to
 the ``PropertyDef`` vocabulary (string, number, decimal, date, enum, object,
@@ -233,3 +232,5 @@ def _links_for_type(type_name: str, link_defs: list[LinkTypeDef]) -> list[str]:
         elif link.target_type == type_name and link.source_type != "*":
             results.append(f"{link.source_type} -[{link.name}]-> {type_name}")
     return results
+
+

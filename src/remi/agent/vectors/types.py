@@ -21,8 +21,8 @@ class EmbeddingRecord(BaseModel, frozen=True):
     """A single embedded text chunk linked back to its source entity.
 
     The vector store holds these. Each record represents one
-    semantically searchable surface for an entity — a tenant's notes,
-    a maintenance description, a property address, etc.
+    semantically searchable surface for an entity — a name, description,
+    address, or any other text field worth searching.
     """
 
     id: str

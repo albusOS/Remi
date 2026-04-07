@@ -131,6 +131,15 @@ async def _reconcile_lease(
 
 async def persist_unit(row: dict[str, Any], ctx: IngestionCtx) -> None:
     """Persist physical unit facts from a rent roll or similar report."""
+    mgr_tag = str(
+        row.get("site_manager_name") or row.get("manager_name") or ""
+    ).strip()
+    if mgr_tag:
+        raw_addr = str(row.get("property_address", "")).strip()
+        pid = _property_id(property_name(raw_addr) or raw_addr)
+        ctx.prop_manager_tags[pid] = mgr_tag
+        ctx.real_manager_tags.add(mgr_tag)
+
     prop_id = await ensure_property(row, ctx)
     unum = str(row.get("unit_number") or "main").strip()
     uid = _unit_id(prop_id, unum)
