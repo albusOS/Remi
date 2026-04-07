@@ -30,9 +30,7 @@ class RequestIDMiddleware:
             return
 
         headers = dict(scope.get("headers", []))
-        request_id = (
-            headers.get(b"x-request-id", b"").decode() or uuid.uuid4().hex[:16]
-        )
+        request_id = headers.get(b"x-request-id", b"").decode() or uuid.uuid4().hex[:16]
 
         structlog.contextvars.bind_contextvars(request_id=request_id)
         t0 = time.monotonic()
@@ -42,12 +40,8 @@ class RequestIDMiddleware:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = message.get("status", 0)
-                raw_headers: list[tuple[bytes, bytes]] = list(
-                    message.get("headers", [])
-                )
-                raw_headers.append(
-                    (b"x-request-id", request_id.encode())
-                )
+                raw_headers: list[tuple[bytes, bytes]] = list(message.get("headers", []))
+                raw_headers.append((b"x-request-id", request_id.encode()))
                 message = {**message, "headers": raw_headers}
             await send(message)
 

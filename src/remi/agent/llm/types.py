@@ -83,6 +83,7 @@ class Message(BaseModel, frozen=True):
     tool_calls: list[ToolCallRequest] | None = None
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
+
 __all__ = [
     "ToolCallRequest",
     "ToolArg",

@@ -80,9 +80,13 @@ def _field_required(info: FieldInfo) -> bool:
     return not has_default and not has_factory
 
 
-_SKIP_FIELDS: frozenset[str] = frozenset({
-    "created_at", "updated_at", "source_document_id",
-})
+_SKIP_FIELDS: frozenset[str] = frozenset(
+    {
+        "created_at",
+        "updated_at",
+        "source_document_id",
+    }
+)
 
 
 def pydantic_to_type_def(
@@ -121,12 +125,14 @@ def pydantic_to_type_def(
         else:
             data_type, enum_values = _map_data_type(annotation)
 
-        props.append(PropertyDef(
-            name=name,
-            data_type=data_type,
-            required=_field_required(info),
-            enum_values=enum_values,
-        ))
+        props.append(
+            PropertyDef(
+                name=name,
+                data_type=data_type,
+                required=_field_required(info),
+                enum_values=enum_values,
+            )
+        )
 
     desc = description or (model.__doc__ or "").strip()
 
@@ -155,10 +161,14 @@ def pydantic_to_type_defs(
         else:
             model, desc = entry  # type: ignore[misc]
             plural = None
-        result.append(pydantic_to_type_def(
-            model, description=desc, plural_name=plural,  # type: ignore[arg-type]
-            skip_fields=skip_fields,
-        ))
+        result.append(
+            pydantic_to_type_def(
+                model,
+                description=desc,
+                plural_name=plural,  # type: ignore[arg-type]
+                skip_fields=skip_fields,
+            )
+        )
     return result
 
 

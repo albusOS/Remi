@@ -70,9 +70,7 @@ class HttpToolProvider(ToolProvider):
                             try:
                                 body = json.loads(body)
                             except json.JSONDecodeError:
-                                logger.warning(
-                                    "http_body_not_valid_json", body_preview=body[:200]
-                                )
+                                logger.warning("http_body_not_valid_json", body_preview=body[:200])
                         kwargs["json"] = body
                         kwargs["headers"]["Content-Type"] = "application/json"
 

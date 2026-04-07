@@ -1,77 +1,52 @@
-"""HTTP boundary types for all portfolio entity routes.
+"""HTTP boundary types — request bodies and envelope wrappers.
 
-Read-model types are owned by ``application.portfolio`` and re-exported here
-where routers need them. Only request types and envelope wrappers are
-defined in this file.
+Read-model types are owned by ``application.views``. Only the types used
+as field types in envelope classes here are imported; routes import
+read-models directly from ``views`` when needed as response_model.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel
 
-from remi.application.core.models.enums import AssetClass
-from remi.application.portfolio import (
-    ExpiringLeaseItem,
-    ExpiringLeasesResult,
-    LeaseListItem,
-    LeaseListResult,
-    MaintenanceItem,
-    MaintenanceListResult,
-    MaintenanceSummaryResult,
+from remi.application.views import (
     ManagerRanking,
     ManagerSummary,
-    PortfolioListItem,
-    PortfolioSummaryResult,
     PropertyDetail,
     PropertyDetailUnit,
     PropertyListItem,
-    PropertySummary,
-    RentRollResult,
-    RentRollRow,
-    UnitIssue,
-    UnitListItem,
-    UnitListResult,
 )
 
 __all__ = [
-    "AssetClass",
     "AssignPropertiesRequest",
     "AssignPropertiesResponse",
+    "CreateLeaseRequest",
+    "CreateLeaseResponse",
+    "CreateMaintenanceRequest",
+    "CreateMaintenanceResponse",
     "CreateManagerRequest",
     "CreateManagerResponse",
-    "CreatePortfolioRequest",
-    "CreatePortfolioResponse",
-    "ExpiringLeaseItem",
-    "ExpiringLeasesResult",
-    "LeaseListItem",
-    "LeaseListResult",
-    "MaintenanceItem",
-    "MaintenanceListResult",
-    "MaintenanceSummaryResult",
+    "CreatePropertyRequest",
+    "CreatePropertyResponse",
+    "CreateTenantRequest",
+    "CreateTenantResponse",
+    "CreateUnitRequest",
+    "CreateUnitResponse",
     "ManagerListResponse",
-    "ManagerRanking",
     "ManagerRankingsResponse",
-    "ManagerSummary",
     "MergeManagersRequest",
     "MergeManagersResponse",
-    "PortfolioDetail",
-    "PortfolioListItem",
-    "PortfolioListResponse",
-    "PortfolioSummaryResult",
     "PropertyDetail",
     "PropertyDetailUnit",
     "PropertyListItem",
     "PropertyListResponse",
-    "PropertySummary",
-    "RentRollResult",
-    "RentRollRow",
-    "UnitIssue",
-    "UnitListItem",
     "UnitListResponse",
-    "UnitListResult",
+    "UpdateLeaseRequest",
+    "UpdateMaintenanceRequest",
     "UpdateManagerRequest",
-    "UpdatePortfolioRequest",
     "UpdatePropertyRequest",
+    "UpdateTenantRequest",
+    "UpdateUnitRequest",
 ]
 
 
@@ -97,7 +72,6 @@ class CreateManagerRequest(BaseModel):
 
 class CreateManagerResponse(BaseModel):
     manager_id: str
-    portfolio_id: str
     name: str
 
 
@@ -130,51 +104,6 @@ class AssignPropertiesResponse(BaseModel):
     not_found: list[str]
 
 
-# -- Portfolio schemas -------------------------------------------------------
-
-
-class PortfolioListResponse(BaseModel):
-    portfolios: list[PortfolioListItem]
-
-
-class PortfolioDetail(BaseModel):
-    id: str
-    manager_id: str
-    name: str
-    description: str
-    asset_class: AssetClass | None
-    strategy: str | None
-    target_occupancy: float | None
-    market: str | None
-    property_ids: list[str]
-    created_at: str
-
-
-class CreatePortfolioRequest(BaseModel):
-    manager_id: str
-    name: str
-    description: str = ""
-    asset_class: AssetClass | None = None
-    strategy: str | None = None
-    target_occupancy: float | None = None
-    market: str | None = None
-
-
-class CreatePortfolioResponse(BaseModel):
-    portfolio_id: str
-    manager_id: str
-    name: str
-
-
-class UpdatePortfolioRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    asset_class: AssetClass | None = None
-    strategy: str | None = None
-    target_occupancy: float | None = None
-    market: str | None = None
-
-
 # -- Property schemas -------------------------------------------------------
 
 
@@ -188,10 +117,134 @@ class UnitListResponse(BaseModel):
     units: list[PropertyDetailUnit]
 
 
+class CreatePropertyRequest(BaseModel):
+    name: str
+    manager_id: str | None = None
+    street: str
+    city: str
+    state: str
+    zip_code: str
+    property_type: str = "multi_family"
+    year_built: int | None = None
+
+
+class CreatePropertyResponse(BaseModel):
+    property_id: str
+    name: str
+
+
 class UpdatePropertyRequest(BaseModel):
     name: str | None = None
     street: str | None = None
     city: str | None = None
     state: str | None = None
     zip_code: str | None = None
-    portfolio_id: str | None = None
+    manager_id: str | None = None
+
+
+# -- Unit schemas -----------------------------------------------------------
+
+
+class CreateUnitRequest(BaseModel):
+    property_id: str
+    unit_number: str
+    bedrooms: int | None = None
+    bathrooms: float | None = None
+    sqft: int | None = None
+    market_rent: float = 0
+    floor: int | None = None
+
+
+class CreateUnitResponse(BaseModel):
+    unit_id: str
+    property_id: str
+    unit_number: str
+
+
+class UpdateUnitRequest(BaseModel):
+    unit_number: str | None = None
+    bedrooms: int | None = None
+    bathrooms: float | None = None
+    sqft: int | None = None
+    market_rent: float | None = None
+    floor: int | None = None
+
+
+# -- Lease schemas ----------------------------------------------------------
+
+
+class CreateLeaseRequest(BaseModel):
+    unit_id: str
+    tenant_id: str
+    property_id: str
+    start_date: str
+    end_date: str
+    monthly_rent: float
+    deposit: float = 0
+    status: str = "active"
+
+
+class CreateLeaseResponse(BaseModel):
+    lease_id: str
+    unit_id: str
+    tenant_id: str
+    property_id: str
+
+
+class UpdateLeaseRequest(BaseModel):
+    monthly_rent: float | None = None
+    status: str | None = None
+    end_date: str | None = None
+    renewal_status: str | None = None
+    is_month_to_month: bool | None = None
+
+
+# -- Tenant schemas ---------------------------------------------------------
+
+
+class CreateTenantRequest(BaseModel):
+    name: str
+    property_id: str
+    email: str = ""
+    phone: str | None = None
+
+
+class CreateTenantResponse(BaseModel):
+    tenant_id: str
+    name: str
+
+
+class UpdateTenantRequest(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    status: str | None = None  # TenantStatus — eviction tracking only
+
+
+# -- Maintenance schemas ----------------------------------------------------
+
+
+class CreateMaintenanceRequest(BaseModel):
+    unit_id: str
+    property_id: str
+    title: str
+    description: str = ""
+    category: str = "general"
+    priority: str = "medium"
+
+
+class CreateMaintenanceResponse(BaseModel):
+    request_id: str
+    title: str
+    property_id: str
+    unit_id: str
+
+
+class UpdateMaintenanceRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    category: str | None = None
+    vendor: str | None = None
+    cost: float | None = None

@@ -204,7 +204,6 @@ class SpanContext:
             _current_span_id.reset(token)
 
 
-
 class Tracer:
     """Entry point for creating traces and spans."""
 
@@ -258,7 +257,7 @@ class Tracer:
         """Create a span within the current trace context.
 
         If no trace is active, creates an orphan span (useful for
-        standalone operations like entailment runs triggered by CLI).
+        standalone operations triggered by CLI).
         """
         tid = trace_id or get_current_trace_id() or new_trace_id()
         parent = get_current_span_id()

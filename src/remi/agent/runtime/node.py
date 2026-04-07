@@ -142,8 +142,12 @@ class AgentNode(BaseModule):
             if intent_name == "conversation":
                 tool_defs, tool_execute = [], None
                 max_tool_rounds = 0
-            elif intent_cfg.max_tool_rounds is not None:
-                max_tool_rounds = intent_cfg.max_tool_rounds
+            else:
+                if intent_cfg.tools:
+                    allowed = set(intent_cfg.tools)
+                    tool_defs = [td for td in tool_defs if td.name in allowed]
+                if intent_cfg.max_tool_rounds is not None:
+                    max_tool_rounds = intent_cfg.max_tool_rounds
 
             if intent_cfg.max_iterations is not None:
                 cfg = cfg.model_copy(update={"max_iterations": intent_cfg.max_iterations})
@@ -175,9 +179,7 @@ class AgentNode(BaseModule):
 
         scope: ScopeContext = context.scope
         if scope.scope_message:
-            _insert_before_last_user(
-                thread, Message(role="system", content=scope.scope_message)
-            )
+            _insert_before_last_user(thread, Message(role="system", content=scope.scope_message))
 
         sandbox_sid = context.params.sandbox_session_id
         sandbox = context.extras.get("sandbox")

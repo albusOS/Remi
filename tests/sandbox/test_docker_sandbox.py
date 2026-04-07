@@ -6,7 +6,6 @@ All tests are marked ``docker`` so they can be skipped in CI without Docker.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -32,7 +31,10 @@ def _docker_available() -> bool:
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(not _docker_available(), reason="Docker not available or sandbox image not built"),
+    pytest.mark.skipif(
+        not _docker_available(),
+        reason="Docker not available or sandbox image not built",
+    ),
 ]
 
 

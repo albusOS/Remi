@@ -76,6 +76,7 @@ const NAV_PAGES = [
   { label: "Ask REMI", href: "/ask", keywords: "ask ai chat question" },
 ];
 
+
 export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const router = useRouter();
   const [query, setQuery] = useState("");

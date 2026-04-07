@@ -103,7 +103,7 @@ class LLMUsageLedger:
         with self._lock:
             self._records.append(entry)
             if len(self._records) > self._max_records:
-                self._records = self._records[-self._max_records:]
+                self._records = self._records[-self._max_records :]
 
     @property
     def records(self) -> list[UsageRecord]:

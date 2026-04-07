@@ -152,9 +152,6 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
         )
         await self._ks.put_entity(entity)
 
-    async def delete_object(self, type_name: str, object_id: str) -> bool:
-        return await self._ks.delete_entity(_NS, object_id)
-
     # -- Links ----------------------------------------------------------------
 
     async def get_links(
@@ -235,9 +232,7 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
         return AggregateResult(value=self._compute(metric, items, field))
 
     @staticmethod
-    def _compute(
-        metric: str, items: list[GraphObject], field: str | None
-    ) -> float | int | None:
+    def _compute(metric: str, items: list[GraphObject], field: str | None) -> float | int | None:
         if metric == "count":
             return len(items)
         if not field:
@@ -267,28 +262,6 @@ class BridgedKnowledgeGraph(KnowledgeGraph):
         return None
 
     # -- Timeline -------------------------------------------------------------
-
-    async def record_event(
-        self,
-        object_type: str,
-        object_id: str,
-        event_type: str,
-        data: dict[str, Any],
-    ) -> None:
-        event_id = f"event:{uuid.uuid4().hex[:12]}"
-        entity = Entity(
-            entity_id=event_id,
-            entity_type="event",
-            namespace=_NS,
-            properties={
-                "object_type": object_type,
-                "object_id": object_id,
-                "event_type": event_type,
-                "data": data,
-                "timestamp": datetime.now(UTC).isoformat(),
-            },
-        )
-        await self._ks.put_entity(entity)
 
     async def get_timeline(
         self,

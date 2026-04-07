@@ -73,8 +73,6 @@ class GeminiProvider(LLMProvider):
         self._config = config
         self._configured = False
 
-    # -- wire-format translation (REMI → Gemini) -----------------------------
-
     @staticmethod
     def _as_str(content: Any) -> str:
         return content if isinstance(content, str) else json.dumps(content, default=str)
@@ -167,8 +165,6 @@ class GeminiProvider(LLMProvider):
             self._configured = True
         return genai
 
-    # -- LLMProvider interface ------------------------------------------------
-
     async def complete(
         self,
         *,
@@ -235,11 +231,7 @@ class GeminiProvider(LLMProvider):
         model: str,
         tools: list[ToolDefinition] | None = None,
     ) -> int:
-        """Approximate token count using character heuristic.
-
-        Gemini's count_tokens API is async and requires the SDK. For
-        synchronous budget checks we use a 4-chars-per-token estimate.
-        """
+        """Approximate token count using character heuristic."""
         total_chars = 0
         for msg in messages:
             text = (

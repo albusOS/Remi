@@ -14,7 +14,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from remi.agent.observe import Event
-from remi.agent.types import Message
 from remi.shell.api.dependencies import Ctr
 from remi.types.paths import AGENTS_DIR
 
@@ -113,6 +112,7 @@ class AskRequest(BaseModel):
     question: str
     session_id: str | None = None
     mode: str = "agent"
+    manager_id: str | None = None
 
 
 @router.post("/{agent_name}/ask")
@@ -133,34 +133,23 @@ async def ask_agent(
         line = json.dumps({"event": event_type, "data": data}, default=str)
         await queue.put(line)
 
+    question = body.question
+    if body.manager_id:
+        question = f"[Context: manager_id={body.manager_id}]\n\n{question}"
+
     async def _run() -> None:
         try:
             if body.session_id:
-                session = await c.chat_session_store.get(body.session_id)
-                if session is None:
-                    await queue.put(
-                        json.dumps({"event": "error", "data": {"message": "session not found"}})
-                    )
-                    return
-
-                user_msg = Message(role="user", content=body.question)
-                await c.chat_session_store.append_message(body.session_id, user_msg)
-                refreshed = await c.chat_session_store.get(body.session_id)
-                thread = list(refreshed.thread) if refreshed else [user_msg]
-
-                answer = await c.chat_agent.run_chat_agent(
-                    session.agent,
-                    thread,
-                    on_event=_on_event,
-                    sandbox_session_id=session.sandbox_session_id,
+                await c.chat_agent.chat(
+                    body.session_id,
+                    question,
                     mode=body.mode,  # type: ignore[arg-type]
+                    on_event=_on_event,
                 )
-                assistant_msg = Message(role="assistant", content=answer)
-                await c.chat_session_store.append_message(body.session_id, assistant_msg)
             else:
                 await c.chat_agent.ask(
                     agent_name,
-                    body.question,
+                    question,
                     mode=body.mode,  # type: ignore[arg-type]
                     on_event=_on_event,
                 )
@@ -203,7 +192,7 @@ async def create_session(
     body: CreateSessionRequest,
     c: Ctr,
 ) -> dict[str, Any]:
-    session = await c.chat_session_store.create(
+    session = await c.chat_agent.create_session(
         body.agent,
         provider=body.provider,
         model=body.model,
@@ -213,7 +202,7 @@ async def create_session(
 
 @router.get("/sessions")
 async def list_sessions(c: Ctr) -> dict[str, Any]:
-    all_sessions = await c.chat_session_store.list_sessions()
+    all_sessions = await c.chat_agent.list_sessions()
     return {
         "count": len(all_sessions),
         "sessions": [_session_summary(s) for s in all_sessions],
@@ -227,7 +216,7 @@ async def get_session(
 ) -> dict[str, Any]:
     from remi.types.errors import NotFoundError
 
-    session = await c.chat_session_store.get(session_id)
+    session = await c.chat_agent.get_session(session_id)
     if session is None:
         raise NotFoundError("Session", session_id)
     return _session_dict(session)
@@ -238,7 +227,7 @@ async def delete_session(
     session_id: str,
     c: Ctr,
 ) -> dict[str, Any]:
-    deleted = await c.chat_session_store.delete(session_id)
+    deleted = await c.chat_agent.delete_session(session_id)
     return {"deleted": deleted, "session_id": session_id}
 
 

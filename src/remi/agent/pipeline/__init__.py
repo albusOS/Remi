@@ -1,8 +1,8 @@
-"""agent/pipeline — generic YAML-driven LLM pipeline executor.
+"""agent/pipeline — backward-compatible wrapper over agent/workflow.
 
-Runs multi-step LLM pipelines (classify → extract → enrich) defined in
-``app.yaml`` manifests with ``kind: Pipeline``.  No chat runtime, no
-domain knowledge — just sequential LLM calls with template resolution.
+This package is deprecated. Use ``agent/workflow`` directly for new code.
+``IngestionPipelineRunner`` is a thin adapter that delegates to
+``WorkflowRunner``.
 
 Public API::
 

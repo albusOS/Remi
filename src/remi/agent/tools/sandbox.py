@@ -166,9 +166,7 @@ class SandboxToolProvider(ToolProvider):
                 name="sandbox_read_file",
                 description="Read a file from the sandbox working directory.",
                 args=[
-                    ToolArg(
-                        name="filename", description="Name of the file to read", required=True
-                    ),
+                    ToolArg(name="filename", description="Name of the file to read", required=True),
                 ],
             ),
         )

@@ -1,8 +1,7 @@
 """Pydantic schemas for the ontology REST API.
 
 Typed request/response models for every ontology endpoint. These are the
-wire format — the API router serializes domain types into these, and the
-RemoteKnowledgeGraph deserializes them back.
+wire format — the API router serializes domain types into these.
 """
 
 from __future__ import annotations
@@ -115,3 +114,68 @@ class CodifyResponse(BaseModel):
 class DefineTypeResponse(BaseModel):
     ok: bool = True
     type: dict[str, Any]
+
+
+# -- Graph visualization -----------------------------------------------------
+
+
+class GraphNode(BaseModel):
+    """Lightweight node for graph visualization."""
+
+    id: str
+    type_name: str
+    label: str = ""
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphEdge(BaseModel):
+    """Edge for graph visualization."""
+
+    source_id: str
+    target_id: str
+    link_type: str
+
+
+class SnapshotResponse(BaseModel):
+    """Full graph state for the live visualization."""
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    counts: dict[str, int] = Field(default_factory=dict)
+    edge_counts: dict[str, int] = Field(default_factory=dict)
+    total_nodes: int = 0
+    total_edges: int = 0
+
+
+class SubgraphResponse(BaseModel):
+    """Ego-graph around a single entity."""
+
+    center_id: str
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+class OperationalNode(BaseModel):
+    """Node in the operational intelligence graph."""
+
+    id: str
+    kind: str  # "step" | "cause" | "effect" | "policy" | "signal" | "workflow"
+    label: str
+    process: str  # business process: collections, leasing, maintenance, etc.
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperationalEdge(BaseModel):
+    """Edge in the operational intelligence graph."""
+
+    source_id: str
+    target_id: str
+    link_type: str  # FOLLOWS | CAUSES | TRIGGERS | MITIGATED_BY
+
+
+class OperationalGraphResponse(BaseModel):
+    """Operational knowledge from domain.yaml — workflows, causal chains, policies."""
+
+    nodes: list[OperationalNode]
+    edges: list[OperationalEdge]
+    processes: list[str]

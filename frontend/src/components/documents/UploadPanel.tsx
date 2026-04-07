@@ -290,14 +290,23 @@ function ReviewSection({
   );
 }
 
+function DuplicateIcon() {
+  return (
+    <svg className="w-4 h-4 text-warn" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+    </svg>
+  );
+}
+
 function FileRow({ entry }: { entry: FileEntry }) {
   const reviewItems = entry.result?.knowledge?.review_items ?? [];
+  const isDuplicate = !!entry.result?.duplicate;
 
   return (
     <div className="py-2">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 shrink-0">
-          <StatusIcon status={entry.status} />
+          {isDuplicate ? <DuplicateIcon /> : <StatusIcon status={entry.status} />}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-fg truncate">{entry.file.name}</p>
@@ -308,12 +317,12 @@ function FileRow({ entry }: { entry: FileEntry }) {
             <p className="text-[10px] text-accent mt-0.5">Processing...</p>
           )}
           {entry.status === "done" && entry.summary && (
-            <p className="text-[10px] text-ok mt-0.5">{entry.summary}</p>
+            <p className={`text-[10px] mt-0.5 ${isDuplicate ? "text-warn" : "text-ok"}`}>{entry.summary}</p>
           )}
           {entry.status === "done" && entry.warnings.length > 0 && (
             <div className="mt-1 space-y-0.5">
               {entry.warnings.map((w, i) => (
-                <p key={i} className="text-[10px] text-warning">{w}</p>
+                <p key={i} className={`text-[10px] ${isDuplicate ? "text-warn" : "text-warning"}`}>{w}</p>
               ))}
             </div>
           )}
@@ -322,8 +331,8 @@ function FileRow({ entry }: { entry: FileEntry }) {
           )}
         </div>
         {entry.result && (
-          <Badge variant="blue" className="shrink-0 mt-0.5">
-            {entry.result.report_type.replace(/_/g, " ")}
+          <Badge variant={isDuplicate ? "amber" : "blue"} className="shrink-0 mt-0.5">
+            {isDuplicate ? "duplicate" : entry.result.report_type.replace(/_/g, " ")}
           </Badge>
         )}
       </div>

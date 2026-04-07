@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from remi.agent.vectors.types import EmbeddingRecord
 from remi.agent.vectors.store import InMemoryVectorStore
+from remi.agent.vectors.types import EmbeddingRecord
 
 
 @pytest.fixture

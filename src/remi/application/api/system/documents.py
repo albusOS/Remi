@@ -15,6 +15,7 @@ from remi.application.api.system.document_schemas import (
     DocumentListItem,
     DocumentListResponse,
     DocumentRowsResponse,
+    DuplicateInfo,
     KnowledgeInfo,
     ReviewItemSchema,
     ReviewOptionSchema,
@@ -57,7 +58,7 @@ def _review_items_to_schemas(
     ]
 
 
-def _list_item(doc: Document, content: DocumentContent | None = None) -> DocumentListItem:  # noqa: F821
+def _list_item(doc: Document) -> DocumentListItem:
     return DocumentListItem(
         id=doc.id,
         filename=doc.filename,
@@ -113,6 +114,22 @@ async def upload_document(
 
     doc = result.doc
     review_schemas = _review_items_to_schemas(result.review_items)
+
+    dup_info: DuplicateInfo | None = None
+    if result.duplicate_of is not None:
+        dup_info = DuplicateInfo(
+            existing_id=result.duplicate_of.id,
+            existing_filename=result.duplicate_of.filename,
+            uploaded_at=result.duplicate_of.uploaded_at.isoformat(),
+        )
+
+    warning_strs = [
+        f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
+        if hasattr(w, "row_index")
+        else str(w)
+        for w in result.validation_warnings
+    ]
+
     response = UploadResponse(
         id=doc.id,
         filename=doc.filename,
@@ -132,23 +149,33 @@ async def upload_document(
             rows_accepted=result.rows_accepted,
             rows_rejected=result.rows_rejected,
             rows_skipped=result.rows_skipped,
-            validation_warnings=result.validation_warnings,
+            observations_captured=result.observations_captured,
+            validation_warnings=warning_strs,
             review_items=review_schemas,
         ),
+        duplicate=dup_info,
     )
 
-    try:
-        await ws_manager.broadcast("ingestion_complete", {
-            "document_id": doc.id,
-            "filename": doc.filename,
-            "kind": doc.kind,
-            "report_type": result.report_type,
-            "entities_extracted": result.entities_extracted,
-            "chunk_count": doc.chunk_count,
-            "tags": doc.tags,
-        })
-    except Exception:
-        _log.warning("broadcast_ingestion_failed", exc_info=True)
+    if result.duplicate_of is None:
+        try:
+            await ws_manager.broadcast(
+                "ingestion_complete",
+                {
+                    "document_id": doc.id,
+                    "filename": doc.filename,
+                    "kind": doc.kind,
+                    "report_type": result.report_type,
+                    "entities_extracted": result.entities_extracted,
+                    "relationships_extracted": result.relationships_extracted,
+                    "chunk_count": doc.chunk_count,
+                    "tags": doc.tags,
+                    "graph_changed": (
+                        result.entities_extracted > 0 or result.relationships_extracted > 0
+                    ),
+                },
+            )
+        except Exception:
+            _log.warning("broadcast_ingestion_failed", exc_info=True)
 
     return response
 
@@ -165,23 +192,36 @@ async def list_documents(
     sort: str = Query(default="newest", description="Sort: newest, oldest, name"),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> DocumentListResponse:
-    docs = await c.document_resolver.list_documents(
+    docs = await c.property_store.list_documents(
         unit_id=unit_id,
         property_id=property_id,
         manager_id=manager_id,
-        kind=kind,
-        tags=tags,
-        q=q,
-        sort=sort,
-        limit=limit,
     )
-    return DocumentListResponse(documents=[_list_item(d) for d in docs])
+    if kind:
+        docs = [d for d in docs if d.kind == kind]
+    if tags:
+        tag_set = {t.strip() for t in tags.split(",") if t.strip()}
+        docs = [d for d in docs if tag_set & set(d.tags)]
+    if q:
+        ql = q.lower()
+        docs = [d for d in docs if ql in d.filename.lower()]
+    if sort == "oldest":
+        docs.sort(key=lambda d: d.uploaded_at)
+    elif sort == "name":
+        docs.sort(key=lambda d: d.filename.lower())
+    else:
+        docs.sort(key=lambda d: d.uploaded_at, reverse=True)
+    return DocumentListResponse(documents=[_list_item(d) for d in docs[:limit]])
 
 
 @router.get("/tags", response_model=TagsResponse)
 async def list_tags(c: Ctr) -> TagsResponse:
     """List all tags in use across documents."""
-    return TagsResponse(tags=await c.document_resolver.list_tags())
+    docs = await c.property_store.list_documents()
+    all_tags: set[str] = set()
+    for d in docs:
+        all_tags.update(d.tags)
+    return TagsResponse(tags=sorted(all_tags))
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
@@ -275,10 +315,15 @@ async def correct_row(
     if content is None:
         raise NotFoundError("Document content", document_id)
 
-    report_type = body.report_type or doc.report_type or "unknown"
-
+    from remi.application.core.models.enums import ReportType
     from remi.application.services.ingestion.base import IngestionResult
     from remi.application.services.ingestion.validation import validate_rows
+
+    _rt_raw = body.report_type or doc.report_type.value
+    try:
+        report_type = ReportType(_rt_raw)
+    except ValueError:
+        report_type = ReportType.UNKNOWN
 
     result = IngestionResult(document_id=document_id)
     result.report_type = report_type
@@ -299,8 +344,7 @@ async def correct_row(
         )
 
     warnings = [
-        f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
-        for w in result.validation_warnings
+        f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}" for w in result.validation_warnings
     ]
     return CorrectRowResponse(
         accepted=False,

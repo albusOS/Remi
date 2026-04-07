@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from remi.application.infra.ontology.schema import load_domain_yaml
-from remi.application.core.models.enums import EntityType
 from remi.agent.signals import (
     CausalChain,
     Deontic,
@@ -15,6 +13,8 @@ from remi.agent.signals import (
     Severity,
     SignalDefinition,
 )
+from remi.application.core.models.enums import EntityType
+from remi.application.infra.graph.schema import load_domain_yaml
 
 EXPECTED_SIGNAL_NAMES = {
     "OccupancyDrift",

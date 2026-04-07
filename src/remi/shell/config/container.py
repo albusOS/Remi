@@ -23,7 +23,6 @@ from remi.agent.graph import (
 )
 from remi.agent.llm import LLMProviderFactory, build_provider_factory
 from remi.agent.observe import LLMUsageLedger, Tracer, TraceStore, build_trace_store
-from remi.agent.pipeline import IngestionPipelineRunner
 from remi.agent.profile import DomainProfile
 from remi.agent.runtime import ChatAgentService, RetryPolicy
 from remi.agent.sandbox import Sandbox, build_sandbox
@@ -48,44 +47,29 @@ from remi.agent.tools import (
 )
 from remi.agent.types import ChatSessionStore, ToolArg, ToolProvider, ToolRegistry
 from remi.agent.vectors import Embedder, VectorStore, build_embedder, build_vector_store
+from remi.agent.workflow import WorkflowRunner
 from remi.application.core import EventStore, PropertyStore
-from remi.application.infra.ontology import (
+from remi.application.infra.graph import (
     build_knowledge_graph,
     load_domain_yaml,
     seed_knowledge_graph,
 )
 from remi.application.infra.ports import (
-    AgentTextIndexer,
     AgentVectorSearch,
     KnowledgeStoreReader,
     KnowledgeStoreWriter,
 )
 from remi.application.infra.stores import (
     InMemoryEventStore,
-    ProjectingPropertyStore,
     StoreSuite,
     build_store_suite,
-)
-from remi.application.portfolio import (
-    AutoAssignService,
-    DashboardQueryService,
-    DocumentResolver,
-    LeaseResolver,
-    MaintenanceResolver,
-    ManagerReviewService,
-    PortfolioResolver,
-    PropertyResolver,
-    RentRollService,
-    SignalResolver,
-    TenantResolver,
-    UnitResolver,
+    wrap_property_store_with_projection,
 )
 from remi.application.profile import build_re_profile
-from remi.application.services.embedding.pipeline import EmbeddingPipeline
+from remi.application.services.auto_assign import AutoAssignService
 from remi.application.services.ingestion.pipeline import DocumentIngestService
 from remi.application.services.ingestion.service import IngestionService
 from remi.application.services.search import SearchService
-from remi.application.services.seeding import PortfolioLoader
 from remi.application.tools import (
     ActionToolProvider,
     AssertionToolProvider,
@@ -94,6 +78,15 @@ from remi.application.tools import (
     SearchToolProvider,
     SubAgentInvoker,
     WorkflowToolProvider,
+)
+from remi.application.views import (
+    DashboardResolver,
+    LeaseResolver,
+    MaintenanceResolver,
+    ManagerResolver,
+    PropertyResolver,
+    RentRollResolver,
+    SignalResolver,
 )
 from remi.shell.config.settings import RemiSettings
 
@@ -114,18 +107,18 @@ class Container:
         self.settings = settings or RemiSettings()
 
         # -- Domain profile (operational config for agent layer) ---------------
-        self.profile: DomainProfile = build_re_profile()
+        profile: DomainProfile = build_re_profile()
 
         # -- Core infrastructure (all via factories) ---------------------------
         memory_store: MemoryStore = build_memory_store(self.settings)
-        self.knowledge_store: KnowledgeStore = build_knowledge_store(self.settings)
+        knowledge_store: KnowledgeStore = build_knowledge_store(self.settings)
         self.tool_registry: ToolRegistry = InMemoryToolRegistry()
         self.provider_factory: LLMProviderFactory = build_provider_factory(
             self.settings.secrets,
         )
 
         # -- Application stores (via StoreSuite) -------------------------------
-        self.chat_session_store: ChatSessionStore = build_chat_session_store(self.settings)
+        self._chat_session_store: ChatSessionStore = build_chat_session_store(self.settings)
         self._store_suite: StoreSuite = build_store_suite(self.settings)
         self.property_store: PropertyStore = self._store_suite.property_store
         self.content_store: ContentStore = self._store_suite.content_store
@@ -135,10 +128,10 @@ class Container:
         self.graph_projector: GraphProjector
         self.knowledge_graph, self.graph_projector = build_knowledge_graph(
             self.property_store,
-            self.knowledge_store,
+            knowledge_store,
         )
 
-        self.property_store = ProjectingPropertyStore(
+        self.property_store = wrap_property_store_with_projection(
             self.property_store, self.graph_projector
         )
         self._bootstrap_pending = True
@@ -166,50 +159,37 @@ class Container:
         )
 
         # -- Application-layer ports (bridge agent → application) ---------------
-        self.knowledge_writer = KnowledgeStoreWriter(self.knowledge_store)
-        self.knowledge_reader = KnowledgeStoreReader(self.knowledge_store)
+        knowledge_writer = KnowledgeStoreWriter(knowledge_store)
+        knowledge_reader = KnowledgeStoreReader(knowledge_store)
 
         # -- Event store -------------------------------------------------------
         self.event_store: EventStore = InMemoryEventStore()
 
         # -- Services ----------------------------------------------------------
-        pipeline_runner = IngestionPipelineRunner(
+        self.workflow_runner = WorkflowRunner(
             provider_factory=self.provider_factory,
             default_provider=self.settings.llm.default_provider,
             default_model=self.settings.llm.default_model,
             usage_ledger=self.usage_ledger,
         )
         ingestion_service = IngestionService(
-            knowledge_writer=self.knowledge_writer,
+            knowledge_writer=knowledge_writer,
             property_store=self.property_store,
-            pipeline_runner=pipeline_runner,
+            workflow_runner=self.workflow_runner,
         )
         self.property_resolver = PropertyResolver(property_store=self.property_store)
-        self.portfolio_resolver = PortfolioResolver(property_store=self.property_store)
         self.lease_resolver = LeaseResolver(property_store=self.property_store)
         self.maintenance_resolver = MaintenanceResolver(property_store=self.property_store)
-        self.unit_resolver = UnitResolver(property_store=self.property_store)
-        self.tenant_resolver = TenantResolver(property_store=self.property_store)
         self.signal_resolver = SignalResolver(signal_store=self.signal_store)
-        self.document_resolver = DocumentResolver(property_store=self.property_store)
-        self.manager_review = ManagerReviewService(property_store=self.property_store)
-        self.rent_roll_service = RentRollService(property_store=self.property_store)
-        self.dashboard_service = DashboardQueryService(
+        self.manager_resolver = ManagerResolver(property_store=self.property_store)
+        self.rent_roll_resolver = RentRollResolver(property_store=self.property_store)
+        self.dashboard_resolver = DashboardResolver(
             property_store=self.property_store,
-            knowledge_reader=self.knowledge_reader,
+            knowledge_reader=knowledge_reader,
         )
         self.auto_assign_service = AutoAssignService(
             property_store=self.property_store,
-            knowledge_reader=self.knowledge_reader,
-        )
-
-        # -- Embedding pipeline ------------------------------------------------
-        text_indexer = AgentTextIndexer(self.embedder, self.vector_store)
-        self.embedding_pipeline = EmbeddingPipeline(
-            property_store=self.property_store,
-            text_indexer=text_indexer,
-            content_store=self.content_store,
-            signal_store=self.signal_store,
+            knowledge_reader=knowledge_reader,
         )
 
         # -- Search service ----------------------------------------------------
@@ -220,13 +200,12 @@ class Container:
         self.document_ingest = DocumentIngestService(
             content_store=self.content_store,
             ingestion_service=ingestion_service,
-            embedding_pipeline=self.embedding_pipeline,
-            metadata_skip_patterns=self.profile.metadata_skip_patterns,
+            metadata_skip_patterns=profile.metadata_skip_patterns,
         )
 
         # -- Tool providers (phase 1 — before chat_agent exists) ---------------
         _api_base = f"http://127.0.0.1:{self.settings.api.port}"
-        p = self.profile
+        p = profile
         scope_args = _build_scope_filter_args(p) if p.scope_entity_type else []
 
         phase1_providers: list[ToolProvider] = [
@@ -254,14 +233,6 @@ class Container:
         for provider in phase1_providers:
             provider.register(self.tool_registry)
 
-        # -- Portfolio loader --------------------------------------------------
-        self.portfolio_loader = PortfolioLoader(
-            document_ingest=self.document_ingest,
-            embedding_pipeline=self.embedding_pipeline,
-            auto_assign=self.auto_assign_service,
-            metadata_skip_patterns=self.profile.metadata_skip_patterns,
-        )
-
         # -- Chat agent --------------------------------------------------------
         context_builder = build_context_builder(
             domain=mutable_tbox,
@@ -269,8 +240,8 @@ class Container:
             knowledge_graph=self.knowledge_graph,
             vector_store=self.vector_store,
             embedder=self.embedder,
-            name_fields=self.profile.name_fields,
-            empty_state_label=self.profile.empty_state_label,
+            name_fields=profile.name_fields,
+            empty_state_label=profile.empty_state_label,
         )
         self.chat_agent = ChatAgentService(
             provider_factory=self.provider_factory,
@@ -280,7 +251,7 @@ class Container:
             signal_store=self.signal_store,
             memory_store=memory_store,
             tracer=tracer,
-            chat_session_store=self.chat_session_store,
+            chat_session_store=self._chat_session_store,
             retry_policy=RetryPolicy(
                 max_retries=self.settings.execution.max_retries,
                 delay_seconds=self.settings.execution.retry_delay_seconds,
@@ -296,13 +267,13 @@ class Container:
             WorkflowToolProvider(
                 self.property_store,
                 self.knowledge_graph,
-                self.manager_review,
-                self.dashboard_service,
+                self.manager_resolver,
+                self.dashboard_resolver,
                 sub_agent=cast(SubAgentInvoker, self.chat_agent),
             ),
             DelegationToolProvider(
                 cast(AgentInvoker, self.chat_agent),
-                self.profile.available_agents or {},
+                profile.available_agents or {},
             ),
             AssertionToolProvider(self.knowledge_graph, event_store=self.event_store),
         ]

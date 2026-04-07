@@ -1,0 +1,15 @@
+Maintenance Work Order History
+Property: 412 Maple Ave,Pittsburgh,PA 15232,Unit 3B
+Date Range: 01/01/2024 - 12/31/2024
+Exported On: 02/07/2025
+,,,,,,,,,,
+
+Work Order #,Property,Unit #,Issue Category,Description,Requested By,Date Opened,Scheduled For,Completed On,Assigned To,Total Invoice,Status
+WO-10041,412 Maple Ave,3B,Plumbing,Leaking kitchen faucet - dripping from base,Sarah Chen,01/08/2024,01/10/2024,01/11/2024,Mike's Plumbing LLC,185.00,Completed
+WO-10088,412 Maple Ave,3B,HVAC,Heating unit not reaching set temp - stays at 62F even on 72 setting,Sarah Chen,02/14/2024,02/15/2024,02/19/2024,Comfort Systems Inc,320.00,Completed
+WO-10124,412 Maple Ave,3B,General,Cabinet door hinge broken - bathroom vanity,Sarah Chen,03/22/2024,03/28/2024,03/28/2024,Riva Ridge Maintenance,45.00,Completed
+WO-10201,412 Maple Ave,3B,Appliance,Dishwasher not draining - standing water after cycle,Sarah Chen,05/03/2024,05/06/2024,05/07/2024,Mike's Plumbing LLC,210.00,Completed
+WO-10287,412 Maple Ave,3B,Electrical,GFI outlet tripping in bathroom repeatedly,Sarah Chen,07/18/2024,07/20/2024,07/22/2024,Allegheny Electric,95.00,Completed
+WO-10341,412 Maple Ave,3B,Plumbing,Low water pressure throughout unit,Sarah Chen,09/04/2024,09/06/2024,09/09/2024,Mike's Plumbing LLC,140.00,Completed
+WO-10389,412 Maple Ave,3B,HVAC,AC unit not cooling - refrigerant recharge needed,Sarah Chen,09/30/2024,10/01/2024,10/03/2024,Comfort Systems Inc,275.00,Completed
+WO-10412,412 Maple Ave,3B,General,Window seal broken in bedroom - drafts,Sarah Chen,11/12/2024,11/15/2024,11/18/2024,Riva Ridge Maintenance,320.00,Completed

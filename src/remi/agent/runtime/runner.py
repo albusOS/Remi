@@ -35,7 +35,9 @@ from remi.agent.runtime.node import AgentNode
 from remi.agent.runtime.retry import RetryPolicy
 from remi.agent.sandbox.types import Sandbox
 from remi.agent.signals import DomainTBox, SignalStore
-from remi.agent.types import ChatSessionStore, ToolRegistry
+from remi.agent.types import ChatSession, ChatSessionStore, ToolRegistry
+from remi.agent.types import Message as ChatMessage
+from remi.types.errors import SessionNotFoundError
 from remi.types.ids import new_run_id
 from remi.types.paths import AGENTS_DIR
 
@@ -117,9 +119,7 @@ class ChatAgentService:
             adjacency[src].append(dst)
             in_degree[dst] = in_degree.get(dst, 0) + 1
 
-        queue: deque[str] = deque(
-            mid for mid, deg in in_degree.items() if deg == 0
-        )
+        queue: deque[str] = deque(mid for mid, deg in in_degree.items() if deg == 0)
         order: list[str] = []
         while queue:
             node_id = queue.popleft()
@@ -146,9 +146,7 @@ class ChatAgentService:
         predecessors merged into its ``inputs`` dict under the key ``input``.
         The last module's ``ModuleOutput`` is returned.
         """
-        modules_by_id: dict[str, dict[str, Any]] = {
-            m["id"]: m for m in data.get("modules", [])
-        }
+        modules_by_id: dict[str, dict[str, Any]] = {m["id"]: m for m in data.get("modules", [])}
         edges: list[dict[str, Any]] = data.get("edges", [])
         order = self._topo_order(list(modules_by_id.values()), edges)
 
@@ -189,9 +187,7 @@ class ChatAgentService:
                 last_output = await module.run(node_inputs, context)
             elif kind == "agent":
                 module_node = AgentNode(config=cfg)
-                last_output = await self._retry.execute(
-                    module_node.run, node_inputs, context
-                )
+                last_output = await self._retry.execute(module_node.run, node_inputs, context)
             else:
                 logger.warning(
                     "unknown_module_kind",
@@ -360,6 +356,76 @@ class ChatAgentService:
             cost=output.metadata.get("cost"),
         )
         return answer
+
+    async def chat(
+        self,
+        session_id: str,
+        question: str,
+        *,
+        mode: Literal["ask", "agent"] = "agent",
+        on_event: EventCallback | None = None,
+    ) -> str:
+        """Session-aware multi-turn chat.
+
+        Loads the session from the store, appends the user message, runs
+        the agent over the full thread, appends the assistant reply, and
+        returns the answer.  Raises ``SessionNotFoundError`` if the
+        session has been evicted or never existed.
+        """
+        session = await self._chat_session_store.get(session_id)
+        if session is None:
+            raise SessionNotFoundError(session_id)
+
+        await self._chat_session_store.append_message(
+            session_id,
+            ChatMessage(role="user", content=question),
+        )
+        refreshed = await self._chat_session_store.get(session_id)
+        thread = list(refreshed.thread) if refreshed else []
+
+        answer = await self.run_chat_agent(
+            session.agent,
+            thread,
+            on_event,
+            sandbox_session_id=session.sandbox_session_id,
+            mode=mode,
+            provider=session.provider,
+            model=session.model,
+        )
+
+        await self._chat_session_store.append_message(
+            session_id,
+            ChatMessage(role="assistant", content=answer),
+        )
+        return answer
+
+    # -- Session CRUD (delegates to the store) --------------------------------
+
+    async def create_session(
+        self,
+        agent: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> ChatSession:
+        """Create a new chat session for the given agent."""
+        return await self._chat_session_store.create(
+            agent,
+            provider=provider,
+            model=model,
+        )
+
+    async def get_session(self, session_id: str) -> ChatSession | None:
+        """Return a session by id, or None if expired / missing."""
+        return await self._chat_session_store.get(session_id)
+
+    async def list_sessions(self) -> list[ChatSession]:
+        """Return all live sessions, sorted by most-recently-updated."""
+        return await self._chat_session_store.list_sessions()
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session. Returns True if it existed."""
+        return await self._chat_session_store.delete(session_id)
 
 
 def _extract_answer(output: Any) -> str | None:

@@ -81,9 +81,6 @@ class KnowledgeGraph(Ontology):
     ) -> None: ...
 
     @abc.abstractmethod
-    async def delete_object(self, type_name: str, object_id: str) -> bool: ...
-
-    @abc.abstractmethod
     async def get_links(
         self,
         object_id: str,
@@ -123,15 +120,6 @@ class KnowledgeGraph(Ontology):
     ) -> AggregateResult: ...
 
     @abc.abstractmethod
-    async def record_event(
-        self,
-        object_type: str,
-        object_id: str,
-        event_type: str,
-        data: dict[str, Any],
-    ) -> None: ...
-
-    @abc.abstractmethod
     async def get_timeline(
         self,
         object_type: str,
@@ -151,8 +139,6 @@ class KnowledgeGraph(Ontology):
     ) -> str:
         """Store a piece of operational knowledge. Returns the entity ID."""
         ...
-
-
 
 
 # ---------------------------------------------------------------------------

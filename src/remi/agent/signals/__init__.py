@@ -1,8 +1,7 @@
-"""signals — signal system: types, persistence, producers.
+"""signals — signal system: types, persistence, TBox.
 
 Subpackages:
   persistence/ — SignalStore, FeedbackStore ABCs + in-memory adapters
-  producers/   — CompositeProducer, CompositionProducer, StatisticalProducer
 
 Core modules (types layer):
   enums      — Severity, RuleCondition, Horizon, Deontic, SignalOutcome

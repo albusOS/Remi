@@ -3,96 +3,101 @@
 ``ls models/`` reveals the ontology:
 
     enums.py        — shared vocabulary (statuses, categories, types)
-    oversight.py    — who's responsible (Owner, PropertyManager, Portfolio)
-    assets.py       — the physical book (Address, Property, Unit)
-    leasing.py      — who's in them, on what terms (Tenant, Lease)
-    operations.py   — the work (Vendor, MaintenanceRequest)
-    tracking.py     — director follow-up (ActionItem, Note)
-    documents.py    — uploaded files scoped to domain entities (Document)
+    address.py      — Address
+    date_range.py   — DateRange
+    property.py     — Property
+    unit.py         — Unit
+    tenant.py       — Tenant
+    lease.py        — Lease
+    owner.py        — Owner
+    manager.py      — PropertyManager
+    vendor.py       — Vendor
+    maintenance.py  — MaintenanceRequest
+    financials.py   — BalanceObservation
+    tracking.py     — ActionItem, Note, MeetingBrief
+    documents.py    — Document
 
-Every public name is re-exported here so existing imports continue to
-work: ``from remi.application.core.models import Lease`` resolves
-identically whether the caller knows about the submodules or not.
+Every public name is re-exported here so callers use:
+``from remi.application.core.models import Lease``
 
 Repository protocols live in ``application.core.protocols``.
 """
 
-from remi.application.core.models.assets import (
-    Address,
-    Property,
-    Unit,
-)
+from remi.application.core.models.address import Address
+from remi.application.core.models.date_range import DateRange
 from remi.application.core.models.documents import Document
 from remi.application.core.models.enums import (
-    ActionItemPriority,
     ActionItemStatus,
     AssetClass,
     DocumentType,
     EntityType,
+    ImportStatus,
     LeaseStatus,
     LeaseType,
-    MaintenanceCategory,
     MaintenanceSource,
     MaintenanceStatus,
     NoteProvenance,
     OccupancyStatus,
+    Platform,
     Priority,
     PropertyType,
     RenewalStatus,
+    ReportScope,
+    ReportType,
     TenantStatus,
-    UnitStatus,
+    TradeCategory,
     UnitType,
-    VendorCategory,
 )
-from remi.application.core.models.leasing import (
-    Lease,
-    Tenant,
-)
-from remi.application.core.models.operations import (
-    MaintenanceRequest,
-    Vendor,
-)
-from remi.application.core.models.oversight import (
-    Owner,
-    Portfolio,
-    PropertyManager,
-)
+from remi.application.core.models.financials import BalanceObservation
+from remi.application.core.models.lease import Lease
+from remi.application.core.models.maintenance import MaintenanceRequest
+from remi.application.core.models.manager import PropertyManager
+from remi.application.core.models.owner import Owner
+from remi.application.core.models.property import Property
+from remi.application.core.models.tenant import Tenant
 from remi.application.core.models.tracking import (
     ActionItem,
+    MeetingBrief,
     Note,
 )
+from remi.application.core.models.unit import Unit
+from remi.application.core.models.vendor import Vendor
 
 __all__ = [
     # Enums
-    "ActionItemPriority",
     "ActionItemStatus",
     "AssetClass",
     "DocumentType",
     "EntityType",
+    "ImportStatus",
     "LeaseStatus",
     "LeaseType",
-    "MaintenanceCategory",
     "MaintenanceSource",
     "MaintenanceStatus",
+    "NoteProvenance",
     "OccupancyStatus",
+    "Platform",
     "Priority",
     "PropertyType",
     "RenewalStatus",
+    "ReportScope",
+    "ReportType",
     "TenantStatus",
-    "UnitStatus",
+    "TradeCategory",
     "UnitType",
-    "VendorCategory",
-    # Oversight
-    "Owner",
-    "Portfolio",
-    "PropertyManager",
-    # Assets
+    # Physical
     "Address",
+    "DateRange",
     "Property",
     "Unit",
-    # Leasing
-    "Lease",
+    # People
     "Tenant",
+    "Owner",
+    "PropertyManager",
+    # Contracts
+    "Lease",
+    # Financials
+    "BalanceObservation",
     # Operations
     "MaintenanceRequest",
     "Vendor",
@@ -100,6 +105,6 @@ __all__ = [
     "Document",
     # Tracking
     "ActionItem",
+    "MeetingBrief",
     "Note",
-    "NoteProvenance",
 ]

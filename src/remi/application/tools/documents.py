@@ -110,7 +110,7 @@ class DocumentToolProvider(ToolProvider):
                         row["_filename"] = content.filename
                     all_rows.extend(rows)
                 elif content.kind.value == "text":
-                    for chunk in content.chunks[:limit * 2]:
+                    for chunk in content.chunks[: limit * 2]:
                         entry: dict[str, Any] = {
                             "_document_id": content.id,
                             "_filename": content.filename,
@@ -123,14 +123,9 @@ class DocumentToolProvider(ToolProvider):
             if query:
                 q_lower = query.lower()
                 all_rows = [
-                    r
-                    for r in all_rows
-                    if any(q_lower in str(v).lower() for v in r.values())
+                    r for r in all_rows if any(q_lower in str(v).lower() for v in r.values())
                 ]
-                all_chunks = [
-                    c for c in all_chunks
-                    if q_lower in c.get("text", "").lower()
-                ]
+                all_chunks = [c for c in all_chunks if q_lower in c.get("text", "").lower()]
 
             return {
                 "rows": all_rows[:limit],
@@ -159,7 +154,8 @@ class DocumentToolProvider(ToolProvider):
                         type="object",
                     ),
                     ToolArg(
-                        name="limit", description="Max results to return (default: 50)",
+                        name="limit",
+                        description="Max results to return (default: 50)",
                         type="integer",
                     ),
                 ],
@@ -273,8 +269,7 @@ class DocumentToolProvider(ToolProvider):
                     ".xls": "application/vnd.ms-excel",
                     ".pdf": "application/pdf",
                     ".docx": (
-                        "application/vnd.openxmlformats-officedocument"
-                        ".wordprocessingml.document"
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     ),
                     ".txt": "text/plain",
                     ".md": "text/markdown",
@@ -288,7 +283,9 @@ class DocumentToolProvider(ToolProvider):
                 filename = _Path(file_path).name
 
                 result = await ingest.ingest_upload(
-                    filename, content, content_type,
+                    filename,
+                    content,
+                    content_type,
                     manager=manager,
                     unit_id=unit_id,
                     property_id=property_id,

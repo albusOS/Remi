@@ -1,78 +1,87 @@
-"""ingestion/pipeline.py — full document ingestion pipeline.
+"""Document ingestion orchestrator — LLM-first upload via workflow engine.
 
-Orchestrates the complete inbound data flow:
-  upload → parse → extract → persist → embed
+Every tabular upload goes through the document_ingestion workflow YAML.
+The LLM sees metadata, column headers, and sample rows — then returns a
+column_map, entity type, and report type. Python applies that map
+deterministically to every row, then persists.
 
-For non-tabular documents (PDF, DOCX, TXT, images), the pipeline skips
-entity extraction and only runs save + embedding.
+Phases:
+  1. Parse     — file bytes to ``DocumentContent``
+  2. Dedup     — content-hash duplicate check
+  3. Manager   — ensure PropertyManager exists from upload param or LLM
+  4. Extract   — workflow engine runs document_ingestion extract step
+  5. Map       — apply_column_map to all rows
+  6. Validate  — check rows have enough data for persisters
+  7. Persist   — row-level persistence via IngestionService
+  8. Store     — save to ContentStore + PropertyStore
 """
 
 from __future__ import annotations
 
-import re
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
-from remi.agent.documents import ContentStore, DocumentContent, parse_document
-from remi.application.core.models import Document
-from remi.application.services.embedding.pipeline import EmbeddingPipeline
-from remi.application.services.ingestion.base import ReviewItem
-from remi.application.services.ingestion.rules import extract_rows
+from remi.agent.documents import ContentStore
+from remi.agent.documents.parsers import parse_document
+from remi.agent.documents.types import DocumentKind
+from remi.agent.workflow import load_workflow
+from remi.application.core.models import (
+    Document,
+    DocumentType,
+    PropertyManager,
+    ReportType,
+)
+from remi.application.infra.graph.schema import entity_schemas_for_prompt
+from remi.application.services.ingestion.base import (
+    IngestionResult,
+    ReviewItem,
+    RowWarning,
+)
+from remi.application.services.ingestion.mapper import apply_column_map
 from remi.application.services.ingestion.service import IngestionService
+from remi.application.services.ingestion.validation import validate_rows
+from remi.types.identity import manager_id as _manager_id
 
 _log = structlog.get_logger(__name__)
 
-_PROPERTY_GROUPS_RE = re.compile(
-    r"^(.+?)(?:\s+(?:Mgmt|Management|Properties|Portfolio))?$", re.I,
-)
-
-
-def _manager_from_metadata(meta: dict[str, Any]) -> str | None:
-    """Extract a manager name from parsed report metadata.
-
-    AppFolio reports include a ``Property Groups:`` header line like
-    ``Property Groups: Ryan Steen Mgmt``.  The parser stores this as
-    ``meta["property_groups"]``.
-    """
-    raw = meta.get("property_groups") or ""
-    if not raw:
-        return None
-    m = _PROPERTY_GROUPS_RE.match(raw.strip())
-    return m.group(1).strip() if m else raw.strip()
-
 
 @dataclass
-class IngestResult:
+class UploadResult:
+    """Result of the full upload pipeline, consumed by the API and tool layers."""
+
     doc: Document
-    content: DocumentContent
-    report_type: str
-    entities_extracted: int
-    relationships_extracted: int
-    ambiguous_rows: int
+    report_type: str = "unknown"
+    entities_extracted: int = 0
+    relationships_extracted: int = 0
+    ambiguous_rows: int = 0
     rows_accepted: int = 0
     rows_rejected: int = 0
     rows_skipped: int = 0
-    validation_warnings: list[str] = field(default_factory=list)
-    entities_embedded: int = 0
-    pipeline_warnings: list[str] = field(default_factory=list)
+    observations_captured: int = 0
+    validation_warnings: list[RowWarning] = field(default_factory=list)
     review_items: list[ReviewItem] = field(default_factory=list)
+    pipeline_warnings: list[str] = field(default_factory=list)
+    duplicate_of: Document | None = None
 
 
 class DocumentIngestService:
-    """Orchestrates document upload → parse → ingest → enrich → reason."""
+    """Top-level orchestrator for document uploads.
+
+    ``_ingestion`` is exposed for the ``correct_row`` API endpoint.
+    """
 
     def __init__(
         self,
         content_store: ContentStore,
         ingestion_service: IngestionService,
-        embedding_pipeline: EmbeddingPipeline,
         metadata_skip_patterns: tuple[str, ...] = (),
     ) -> None:
         self._content_store = content_store
         self._ingestion = ingestion_service
-        self._embedding_pipeline = embedding_pipeline
         self._skip_patterns = metadata_skip_patterns
 
     async def ingest_upload(
@@ -86,238 +95,268 @@ class DocumentIngestService:
         property_id: str | None = None,
         lease_id: str | None = None,
         document_type: str | None = None,
-        run_pipelines: bool = True,
-    ) -> IngestResult:
-        parsed = parse_document(
-            filename, content, content_type,
+    ) -> UploadResult:
+        """Run the full ingestion workflow."""
+
+        # -- Phase 1: Parse -------------------------------------------------------
+        doc_content = parse_document(
+            filename,
+            content,
+            content_type,
             extra_skip_patterns=self._skip_patterns,
         )
+        doc_content.size_bytes = len(content)
 
-        await self._content_store.save(parsed)
+        # -- Phase 2: Dedup -------------------------------------------------------
+        content_hash = _content_hash(content)
 
-        if parsed.kind.value != "tabular":
-            return await self._reference_path(
-                parsed,
-                manager_id=manager,
+        existing_doc = await self._ingestion._ps.find_by_content_hash(content_hash)
+        if existing_doc is not None:
+            doc_model = _build_document_model(
+                doc_content,
+                content_hash=content_hash,
+                document_type=document_type,
                 unit_id=unit_id,
                 property_id=property_id,
                 lease_id=lease_id,
-                document_type=document_type,
-                run_pipelines=run_pipelines,
+            )
+            return UploadResult(
+                doc=doc_model,
+                duplicate_of=existing_doc,
+                report_type=existing_doc.report_type.value,
             )
 
-        result = await self._rules_path(parsed, manager=manager)
-        if result is None:
-            result = await self._llm_path(parsed, manager=manager)
+        # -- Non-tabular: store and return -----------------------------------------
+        if doc_content.kind != DocumentKind.tabular:
+            await self._content_store.save(doc_content)
+            doc_model = _build_document_model(
+                doc_content,
+                content_hash=content_hash,
+                document_type=document_type,
+                unit_id=unit_id,
+                property_id=property_id,
+                lease_id=lease_id,
+            )
+            await self._ingestion._ps.upsert_document(doc_model)
+            return UploadResult(doc=doc_model, report_type="unknown")
 
-        doc_entity = await self._build_document_entity(
-            parsed, result.report_type,
-            manager_id=manager,
-            unit_id=unit_id,
-            property_id=property_id,
-            lease_id=lease_id,
-            document_type=document_type,
-        )
-        result.doc = doc_entity
+        # -- Phase 3: LLM Extract -------------------------------------------------
+        columns = doc_content.column_names
+        rows = doc_content.rows
+        warnings: list[str] = []
 
-        if run_pipelines:
-            await self._run_downstream_pipelines(result)
+        if not columns or not rows:
+            warnings.append("No columns or rows found in document")
+            await self._content_store.save(doc_content)
+            doc_model = _build_document_model(
+                doc_content,
+                content_hash=content_hash,
+                document_type=document_type,
+                unit_id=unit_id,
+                property_id=property_id,
+                lease_id=lease_id,
+            )
+            await self._ingestion._ps.upsert_document(doc_model)
+            return UploadResult(doc=doc_model, pipeline_warnings=warnings)
 
-        return result
+        extract = await self._llm_extract(doc_content)
 
-    async def _reference_path(
-        self,
-        content: DocumentContent,
-        *,
-        manager_id: str | None = None,
-        unit_id: str | None = None,
-        property_id: str | None = None,
-        lease_id: str | None = None,
-        document_type: str | None = None,
-        run_pipelines: bool = True,
-    ) -> IngestResult:
-        """Handle text/image documents — skip entity extraction, embed only."""
-        doc_entity = await self._build_document_entity(
-            content, content.kind.value,
-            manager_id=manager_id,
-            unit_id=unit_id,
-            property_id=property_id,
-            lease_id=lease_id,
-            document_type=document_type,
-        )
-        result = IngestResult(
-            doc=doc_entity,
-            content=content,
-            report_type=content.kind.value,
-            entities_extracted=0,
-            relationships_extracted=0,
-            ambiguous_rows=0,
-        )
+        column_map: dict[str, str] = extract.get("column_map", {})
+        entity_type: str = extract.get("primary_entity_type", "")
+        report_type_str: str = extract.get("report_type", "unknown")
+        section_header: str | None = extract.get("section_header_column")
+        llm_manager: str | None = extract.get("manager")
 
-        if run_pipelines:
-            try:
-                embed_result = await self._embedding_pipeline.run_for_document(content.id)
-                result.entities_embedded = embed_result.embedded
-                _log.info(
-                    "reference_doc_embedded",
-                    filename=content.filename,
-                    kind=content.kind.value,
-                    embedded=embed_result.embedded,
-                )
-            except Exception as exc:
-                result.pipeline_warnings.append(f"embedding_pipeline: {exc}")
-                _log.warning("reference_doc_embed_failed", exc_info=True)
+        if not column_map or not entity_type:
+            _log.warning(
+                "llm_extract_empty",
+                column_map_keys=list(column_map.keys()),
+                entity_type=entity_type,
+            )
+            warnings.append("LLM returned empty column_map or entity_type")
 
-        return result
+        effective_manager = manager or llm_manager
 
-    async def _rules_path(
-        self,
-        content: DocumentContent,
-        *,
-        manager: str | None = None,
-    ) -> IngestResult | None:
-        """Try deterministic column-mapping extraction — zero LLM calls."""
-        match = extract_rows(content.column_names, content.rows)
-        if match is None:
-            return None
-
-        report_type, mapped_rows = match
-
-        if not manager:
-            manager = _manager_from_metadata(content.metadata)
+        # -- Phase 3b: Ensure manager entity exists --------------------------------
+        effective_manager_id: str | None = None
+        if effective_manager:
+            effective_manager_id = await self._ensure_manager(effective_manager)
 
         _log.info(
-            "rules_path_matched",
-            filename=content.filename,
-            report_type=report_type,
-            rows=len(mapped_rows),
-            manager_from_metadata=manager,
+            "llm_extract_done",
+            report_type=report_type_str,
+            entity_type=entity_type,
+            manager=effective_manager,
+            manager_id=effective_manager_id,
+            mapped_columns=len(column_map),
+            total_rows=len(rows),
         )
 
-        ingestion_result = await self._ingestion.ingest_mapped_rows(
-            content,
-            report_type=report_type,
-            rows=mapped_rows,
-            manager=manager,
+        # -- Phase 4: Map ---------------------------------------------------------
+        mapped_rows = (
+            apply_column_map(
+                rows,
+                column_map,
+                entity_type,
+                section_header_column=section_header,
+            )
+            if column_map and entity_type
+            else []
         )
 
-        validation_warnings = [
-            f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
-            for w in ingestion_result.validation_warnings
-        ] + [
-            f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
-            for w in ingestion_result.persist_errors
-        ]
+        rt = _resolve_report_type(report_type_str)
 
-        # Placeholder doc — will be replaced by the caller with the real entity
-        placeholder = Document(
-            id=content.id,
-            filename=content.filename,
-            content_type=content.content_type,
-            report_type=report_type,
+        # -- Phase 5: Validate ----------------------------------------------------
+        pre_result = IngestionResult(document_id=doc_content.id, report_type=rt)
+        validated_rows = validate_rows(mapped_rows, pre_result)
+
+        # -- Phase 6: Persist ------------------------------------------------------
+        persist_result = await self._ingestion.ingest_mapped_rows(
+            doc_content,
+            report_type=rt,
+            rows=validated_rows,
+            manager=effective_manager,
         )
 
-        return IngestResult(
-            doc=placeholder,
-            content=content,
-            report_type=report_type,
-            entities_extracted=ingestion_result.entities_created,
-            relationships_extracted=ingestion_result.relationships_created,
-            ambiguous_rows=len(ingestion_result.ambiguous_rows),
-            rows_accepted=ingestion_result.rows_accepted,
-            rows_rejected=ingestion_result.rows_rejected,
-            rows_skipped=ingestion_result.rows_skipped,
-            validation_warnings=validation_warnings,
-            review_items=list(ingestion_result.review_items),
-        )
+        persist_result.rows_rejected += pre_result.rows_rejected
+        persist_result.rows_skipped += pre_result.rows_skipped
+        persist_result.validation_warnings.extend(pre_result.validation_warnings)
+        persist_result.observation_rows.extend(pre_result.observation_rows)
 
-    async def _llm_path(
-        self,
-        content: DocumentContent,
-        *,
-        manager: str | None = None,
-    ) -> IngestResult:
-        """Run the LLM extraction pipeline."""
-        ingestion_result = await self._ingestion.ingest(content, manager=manager)
-
-        validation_warnings = [
-            f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
-            for w in ingestion_result.validation_warnings
-        ] + [
-            f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}"
-            for w in ingestion_result.persist_errors
-        ]
-
-        placeholder = Document(
-            id=content.id,
-            filename=content.filename,
-            content_type=content.content_type,
-            report_type=ingestion_result.report_type,
-        )
-
-        return IngestResult(
-            doc=placeholder,
-            content=content,
-            report_type=ingestion_result.report_type,
-            entities_extracted=ingestion_result.entities_created,
-            relationships_extracted=ingestion_result.relationships_created,
-            ambiguous_rows=len(ingestion_result.ambiguous_rows),
-            rows_accepted=ingestion_result.rows_accepted,
-            rows_rejected=ingestion_result.rows_rejected,
-            rows_skipped=ingestion_result.rows_skipped,
-            validation_warnings=validation_warnings,
-            review_items=list(ingestion_result.review_items),
-        )
-
-    async def _build_document_entity(
-        self,
-        content: DocumentContent,
-        report_type: str,
-        *,
-        manager_id: str | None = None,
-        unit_id: str | None = None,
-        property_id: str | None = None,
-        lease_id: str | None = None,
-        document_type: str | None = None,
-    ) -> Document:
-        """Create and persist the promoted Document domain model."""
-        from remi.application.core.models import DocumentType
-
-        try:
-            doc_type = DocumentType(document_type) if document_type else DocumentType.OTHER
-        except ValueError:
-            doc_type = DocumentType.OTHER
-
-        doc = Document(
-            id=content.id,
-            filename=content.filename,
-            content_type=content.content_type,
-            document_type=doc_type,
-            kind=content.kind.value,
-            row_count=content.row_count,
-            chunk_count=len(content.chunks),
-            page_count=content.page_count,
-            size_bytes=content.size_bytes,
-            tags=list(content.tags),
-            report_type=report_type,
-            manager_id=manager_id,
+        # -- Phase 7: Store --------------------------------------------------------
+        await self._content_store.save(doc_content)
+        doc_model = _build_document_model(
+            doc_content,
+            content_hash=content_hash,
+            report_type=rt,
+            document_type=document_type,
             unit_id=unit_id,
             property_id=property_id,
             lease_id=lease_id,
+            manager_id=effective_manager_id,
         )
-        await self._ingestion._ps.upsert_document(doc)
-        return doc
+        await self._ingestion._ps.upsert_document(doc_model)
 
-    async def _run_downstream_pipelines(self, result: IngestResult) -> None:
+        return UploadResult(
+            doc=doc_model,
+            report_type=rt.value,
+            entities_extracted=persist_result.entities_created,
+            relationships_extracted=persist_result.relationships_created,
+            ambiguous_rows=len(persist_result.ambiguous_rows),
+            rows_accepted=persist_result.rows_accepted,
+            rows_rejected=persist_result.rows_rejected,
+            rows_skipped=persist_result.rows_skipped,
+            observations_captured=persist_result.observations_captured,
+            validation_warnings=persist_result.validation_warnings,
+            review_items=persist_result.review_items,
+            pipeline_warnings=warnings,
+        )
+
+    async def _ensure_manager(self, manager_name: str) -> str:
+        """Create the PropertyManager entity if it doesn't already exist.
+
+        Returns the manager_id.
+        """
+        from remi.application.core.rules import manager_name_from_tag
+
+        display_name = manager_name_from_tag(manager_name)
+        mid = _manager_id(display_name)
+
+        existing = await self._ingestion._ps.get_manager(mid)
+        if existing is None:
+            mgr = PropertyManager(id=mid, name=display_name)
+            await self._ingestion._ps.upsert_manager(mgr)
+            _log.info("manager_auto_created", manager_id=mid, name=display_name)
+
+        return mid
+
+    async def _llm_extract(self, content: Any) -> dict[str, Any]:
+        """Run the document_ingestion workflow extract step.
+
+        Sends metadata + column headers + sample rows to the LLM.
+        Returns the parsed JSON response dict.
+        """
+        metadata = content.metadata or {}
+        sample_rows = content.rows[:5]
+
+        workflow_input = json.dumps(
+            {
+                "metadata": metadata,
+                "column_names": content.column_names,
+                "sample_rows": sample_rows,
+            },
+            default=str,
+        )
+
+        context = {"entity_schemas": entity_schemas_for_prompt()}
+
         try:
-            embed_result = await self._embedding_pipeline.run_for_document(result.content.id)
-            result.entities_embedded = embed_result.embedded
-            _log.info(
-                "embedding_pipeline_complete",
-                document_id=result.content.id,
-                embedded=embed_result.embedded,
-                by_type=embed_result.by_type,
+            workflow_def = load_workflow("document_ingestion")
+            result = await self._ingestion._workflow_runner.run(
+                workflow_def,
+                workflow_input,
+                context=context,
+                skip_steps={"capture"},
             )
-        except Exception as exc:
-            result.pipeline_warnings.append(f"embedding_pipeline: {exc}")
-            _log.warning("embedding_pipeline_failed", exc_info=True)
+        except Exception:
+            _log.warning("llm_workflow_failed", exc_info=True)
+            return {}
+
+        extract_value = result.step("extract")
+        if isinstance(extract_value, dict):
+            return extract_value
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _content_hash(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _resolve_report_type(raw: str) -> ReportType:
+    try:
+        return ReportType(raw)
+    except ValueError:
+        return ReportType.UNKNOWN
+
+
+def _build_document_model(
+    content: Any,
+    *,
+    content_hash: str,
+    report_type: ReportType = ReportType.UNKNOWN,
+    document_type: str | None = None,
+    unit_id: str | None = None,
+    property_id: str | None = None,
+    lease_id: str | None = None,
+    manager_id: str | None = None,
+) -> Document:
+    dt = DocumentType.REPORT
+    if document_type:
+        try:
+            dt = DocumentType(document_type)
+        except ValueError:
+            dt = DocumentType.OTHER
+
+    return Document(
+        id=content.id,
+        filename=content.filename,
+        content_type=content.content_type,
+        content_hash=content_hash,
+        document_type=dt,
+        kind=content.kind.value if hasattr(content.kind, "value") else str(content.kind),
+        page_count=content.page_count,
+        chunk_count=len(content.chunks),
+        row_count=content.row_count,
+        size_bytes=content.size_bytes,
+        tags=content.tags,
+        report_type=report_type,
+        unit_id=unit_id,
+        property_id=property_id,
+        lease_id=lease_id,
+        manager_id=manager_id,
+    )

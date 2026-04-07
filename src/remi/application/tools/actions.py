@@ -16,8 +16,8 @@ from remi.agent.graph import KnowledgeGraph
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.models import (
     ActionItem,
-    ActionItemPriority,
     ActionItemStatus,
+    Priority,
 )
 from remi.application.core.protocols import PropertyStore
 
@@ -44,7 +44,7 @@ class ActionToolProvider(ToolProvider):
                 id=item_id,
                 title=args["title"],
                 description=args.get("description", ""),
-                priority=ActionItemPriority(args.get("priority", "medium")),
+                priority=Priority(args.get("priority", "medium")),
                 manager_id=args.get("manager_id"),
                 property_id=args.get("property_id"),
                 tenant_id=args.get("tenant_id"),
@@ -77,7 +77,9 @@ class ActionToolProvider(ToolProvider):
                     ToolArg(name="description", description="Detailed description"),
                     ToolArg(
                         name="priority",
-                        description="Priority: low, medium, high, urgent (default: medium)",
+                        description=(
+                            "Priority: low, medium, high, urgent, emergency (default: medium)"
+                        ),
                     ),
                     ToolArg(name="manager_id", description="Manager this relates to"),
                     ToolArg(name="property_id", description="Property this relates to"),
@@ -96,7 +98,7 @@ class ActionToolProvider(ToolProvider):
             if "status" in args:
                 updates["status"] = ActionItemStatus(args["status"])
             if "priority" in args:
-                updates["priority"] = ActionItemPriority(args["priority"])
+                updates["priority"] = Priority(args["priority"])
             if "title" in args:
                 updates["title"] = args["title"]
             if "description" in args:

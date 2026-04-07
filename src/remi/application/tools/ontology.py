@@ -62,7 +62,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ToolDefinition(
                     name="onto_signals",
                     description=(
-                        "List active entailed signals across the portfolio. Signals are "
+                        "List active entailed signals across all properties. Signals are "
                         "pre-computed domain states (e.g. LeaseExpirationCliff, "
                         "DelinquencyConcentration, VacancyDuration). Start here to "
                         "understand what needs attention before querying raw data."
@@ -134,7 +134,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 limit=int(args.get("limit", 50)),
             )
             return [r.model_dump(mode="json") for r in results]
-    
+
         registry.register(
             "onto_search",
             onto_search,
@@ -142,7 +142,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 name="onto_search",
                 description=(
                     "Search objects of any type in the ontology with field filters. "
-                    "Types: Property, Unit, Lease, Tenant, Portfolio, PropertyManager, "
+                    "Types: Property, Unit, Lease, Tenant, PropertyManager, "
                     "MaintenanceRequest, or any discovered type."
                 ),
                 args=[
@@ -157,15 +157,15 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_get --------------------------------------------------------------
-    
+
         async def onto_get(args: dict[str, Any]) -> Any:
             result = await store.get_object(args["type_name"], args["object_id"])
             if result is None:
                 return {"error": "Not found"}
             return result.model_dump(mode="json")
-    
+
         registry.register(
             "onto_get",
             onto_get,
@@ -178,15 +178,15 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_related ----------------------------------------------------------
-    
+
         async def onto_related(args: dict[str, Any]) -> Any:
             object_id = args["object_id"]
             link_type = args.get("link_type")
             direction = args.get("direction", "both")
             max_depth = int(args.get("max_depth", 1))
-    
+
             if max_depth <= 1:
                 links = await store.get_links(
                     object_id,
@@ -197,7 +197,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
             link_types = [link_type] if link_type else None
             nodes = await store.traverse(object_id, link_types, max_depth=max_depth)
             return [n.model_dump(mode="json") for n in nodes]
-    
+
         registry.register(
             "onto_related",
             onto_related,
@@ -222,9 +222,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_aggregate --------------------------------------------------------
-    
+
         async def onto_aggregate(args: dict[str, Any]) -> Any:
             result = await store.aggregate(
                 args["type_name"],
@@ -234,7 +234,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 group_by=args.get("group_by"),
             )
             return result.model_dump(mode="json")
-    
+
         registry.register(
             "onto_aggregate",
             onto_aggregate,
@@ -264,9 +264,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_timeline ---------------------------------------------------------
-    
+
         async def onto_timeline(args: dict[str, Any]) -> Any:
             event_types = args.get("event_types")
             if isinstance(event_types, str):
@@ -278,7 +278,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 limit=int(args.get("limit", 50)),
             )
             return [ev.model_dump(mode="json") for ev in events]
-    
+
         registry.register(
             "onto_timeline",
             onto_timeline,
@@ -293,9 +293,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_schema -----------------------------------------------------------
-    
+
         async def onto_schema(args: dict[str, Any]) -> Any:
             type_name = args.get("type_name")
             if type_name:
@@ -313,7 +313,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 }
             types = await store.list_object_types()
             return {"types": [t.model_dump(mode="json") for t in types]}
-    
+
         registry.register(
             "onto_schema",
             onto_schema,
@@ -328,9 +328,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_codify_observation -----------------------------------------------
-    
+
         async def onto_codify_observation(args: dict[str, Any]) -> Any:
             data: dict[str, Any] = {"description": args["description"]}
             if evidence := args.get("evidence"):
@@ -343,7 +343,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 provenance=KnowledgeProvenance.INFERRED,
             )
             return {"id": entity_id, "stored": True}
-    
+
         registry.register(
             "onto_codify_observation",
             onto_codify_observation,
@@ -366,9 +366,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_codify_policy ----------------------------------------------------
-    
+
         async def onto_codify_policy(args: dict[str, Any]) -> Any:
             data: dict[str, Any] = {"description": args["description"]}
             if trigger := args.get("trigger"):
@@ -381,7 +381,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 provenance=KnowledgeProvenance.USER_STATED,
             )
             return {"id": entity_id, "stored": True}
-    
+
         registry.register(
             "onto_codify_policy",
             onto_codify_policy,
@@ -395,9 +395,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_codify_causal_link -----------------------------------------------
-    
+
         async def onto_codify_causal_link(args: dict[str, Any]) -> Any:
             source_id = args["source_id"]
             target_id = args["target_id"]
@@ -408,7 +408,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 props["confidence"] = float(conf)
             await store.put_link(source_id, "CAUSES", target_id, properties=props)
             return {"stored": True, "source_id": source_id, "target_id": target_id}
-    
+
         registry.register(
             "onto_codify_causal_link",
             onto_codify_causal_link,
@@ -427,9 +427,9 @@ class KnowledgeGraphToolProvider(ToolProvider):
                 ],
             ),
         )
-    
+
         # -- onto_define_type ------------------------------------------------------
-    
+
         async def onto_define_type(args: dict[str, Any]) -> Any:
             name = args["name"]
             prop_defs: list[PropertyDef] = []
@@ -446,7 +446,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
                     elif isinstance(p, str) and ":" in p:
                         pname, ptype = p.split(":", 1)
                         prop_defs.append(PropertyDef(name=pname, data_type=ptype))
-    
+
             type_def = ObjectTypeDef(
                 name=name,
                 description=args.get("description", ""),
@@ -455,7 +455,7 @@ class KnowledgeGraphToolProvider(ToolProvider):
             )
             await store.define_object_type(type_def)
             return {"defined": True, "type": name, "property_count": len(prop_defs)}
-    
+
         registry.register(
             "onto_define_type",
             onto_define_type,

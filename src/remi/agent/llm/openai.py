@@ -74,11 +74,9 @@ _DEFAULT_CAPABILITIES = ModelCapabilities(
     max_output_tokens=4_096,
 )
 
-def _wrap_openai_error(exc: Exception) -> None:
-    """Re-raise OpenAI SDK errors as provider-agnostic core types.
 
-    Called in except blocks; always raises — never returns.
-    """
+def _wrap_openai_error(exc: Exception) -> None:
+    """Re-raise OpenAI SDK errors as provider-agnostic core types."""
     import openai
 
     if isinstance(exc, openai.APIConnectionError):
@@ -98,8 +96,6 @@ class OpenAIProvider(LLMProvider):
         self._config = config
         self._client: Any = None
         self._encoding: Any = None
-
-    # -- wire-format translation (REMI → OpenAI) ----------------------------
 
     @staticmethod
     def _message_to_openai(msg: Message) -> dict[str, Any]:
@@ -161,8 +157,6 @@ class OpenAIProvider(LLMProvider):
                 ) from exc
             self._encoding = tiktoken.get_encoding(_TIKTOKEN_ENCODING)
         return self._encoding
-
-    # -- LLMProvider interface ------------------------------------------------
 
     async def complete(
         self,
@@ -302,7 +296,6 @@ class OpenAIProvider(LLMProvider):
         tools: list[ToolDefinition] | None = None,
     ) -> int:
         enc = self._get_encoding()
-        # Per OpenAI's token counting guide: each message has overhead tokens.
         tokens_per_message = 3
         total = 0
         for msg in messages:
@@ -317,14 +310,14 @@ class OpenAIProvider(LLMProvider):
                 total += len(enc.encode(msg.role))
             if msg.name:
                 total += len(enc.encode(msg.name)) + 1
-        total += 3  # reply priming
+        total += 3
         if tools:
             for tool in tools:
                 schema_text = json.dumps(tool.to_json_schema(), separators=(",", ":"))
                 total += len(enc.encode(tool.name))
                 total += len(enc.encode(tool.description))
                 total += len(enc.encode(schema_text))
-                total += 5  # per-tool overhead
+                total += 5
         return total
 
     def model_capabilities(self, model: str) -> ModelCapabilities:

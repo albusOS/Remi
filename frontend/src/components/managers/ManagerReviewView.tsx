@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { fmt$, fmtDate, pct } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { MaintenanceTab } from "./MaintenanceTab";
@@ -29,7 +30,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "leases", label: "Leases" },
   { key: "vacancies", label: "Vacancies" },
   { key: "maintenance", label: "Maintenance" },
-  { key: "review", label: "Review Prep" },
+  { key: "review", label: "Meeting Prep" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -81,7 +82,8 @@ function PropertyRow({ p }: { p: ManagerPropertySummary }) {
 
 function OverviewTab({ review }: { review: ManagerReview }) {
   const [propSearch, setPropSearch] = useState("");
-  const totalIssues = review.vacant + review.open_maintenance + review.expiring_leases_90d + review.expired_leases + review.below_market_units;
+  const { metrics } = review;
+  const totalIssues = metrics.vacant + metrics.open_maintenance + metrics.expiring_leases_90d + review.expired_leases + review.below_market_units;
 
   const filteredProps = propSearch
     ? review.properties.filter((p) => p.property_name.toLowerCase().includes(propSearch.toLowerCase()))
@@ -90,14 +92,14 @@ function OverviewTab({ review }: { review: ManagerReview }) {
   return (
     <div className="space-y-6">
       <MetricStrip>
-        <MetricCard label="Units" value={review.total_units} sub={`${review.occupied} occupied`} />
-        <MetricCard label="Occupancy" value={pct(review.occupancy_rate)} trend={review.occupancy_rate >= 0.9 ? "up" : "down"} />
-        <MetricCard label="Revenue" value={fmt$(review.total_actual_rent)} />
-        <MetricCard label="Market Rent" value={fmt$(review.total_market_rent)} />
-        <MetricCard label="Loss to Lease" value={fmt$(review.total_loss_to_lease)} alert={review.total_loss_to_lease > 0} />
-        <MetricCard label="Vacancy Loss" value={fmt$(review.total_vacancy_loss)} alert={review.total_vacancy_loss > 0} />
+        <MetricCard label="Units" value={metrics.total_units} sub={`${metrics.occupied} occupied`} />
+        <MetricCard label="Occupancy" value={pct(metrics.occupancy_rate)} trend={metrics.occupancy_rate >= 0.9 ? "up" : "down"} />
+        <MetricCard label="Revenue" value={fmt$(metrics.total_actual_rent)} />
+        <MetricCard label="Market Rent" value={fmt$(metrics.total_market_rent)} />
+        <MetricCard label="Loss to Lease" value={fmt$(metrics.loss_to_lease)} alert={metrics.loss_to_lease > 0} />
+        <MetricCard label="Vacancy Loss" value={fmt$(metrics.vacancy_loss)} alert={metrics.vacancy_loss > 0} />
         <MetricCard label="Delinquent" value={review.delinquent_count} sub={review.total_delinquent_balance > 0 ? fmt$(review.total_delinquent_balance) + " owed" : undefined} alert={review.delinquent_count > 0} />
-        <MetricCard label="Expiring (90d)" value={review.expiring_leases_90d} alert={review.expiring_leases_90d > 0} />
+        <MetricCard label="Expiring (90d)" value={metrics.expiring_leases_90d} alert={metrics.expiring_leases_90d > 0} />
         <MetricCard label="Issues" value={totalIssues} alert={totalIssues > 0} />
       </MetricStrip>
 
@@ -313,7 +315,6 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
                 <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Status</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Days Vacant</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Market Rent</th>
-                <th className="text-center px-4 py-2.5 text-[10px] font-semibold text-fg-muted uppercase">Listed</th>
               </tr>
             </thead>
             <tbody>
@@ -336,13 +337,6 @@ function VacanciesTab({ data }: { data: VacancyTracker | null }) {
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right text-fg-secondary font-mono">{u.market_rent > 0 ? fmt$(u.market_rent) : "—"}</td>
-                  <td className="px-4 py-2 text-center">
-                    {u.listed_on_website || u.listed_on_internet ? (
-                      <span className="text-ok">Yes</span>
-                    ) : (
-                      <span className="text-fg-faint">No</span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -368,14 +362,14 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const [editSaving, setEditSaving] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data, loading, refetch } = useApiQuery(async () => {
-    const [review, delinquency, leases, vacancies, actionItems] = await Promise.all([
+    const [review, delinquency, leases, vacancies] = await Promise.all([
       api.getManagerReview(managerId).catch(() => null),
-      api.delinquencyBoard(managerId).catch(() => null),
-      api.leasesExpiring(90, managerId).catch(() => null),
-      api.vacancyTracker(managerId).catch(() => null),
-      api.listActionItems({ manager_id: managerId }).catch(() => ({ total: 0, items: [] })),
+      api.delinquencyBoard({ manager_id: managerId }).catch(() => null),
+      api.leasesExpiring(90, { manager_id: managerId }).catch(() => null),
+      api.vacancyTracker({ manager_id: managerId }).catch(() => null),
     ]);
 
     return {
@@ -383,7 +377,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
       delinquency: delinquency as DelinquencyBoard | null,
       leases: leases as LeaseCalendar | null,
       vacancies: vacancies as VacancyTracker | null,
-      actionCount: actionItems.total,
     };
   }, [managerId]);
 
@@ -391,7 +384,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const delinquency = data?.delinquency ?? null;
   const leases = data?.leases ?? null;
   const vacancies = data?.vacancies ?? null;
-  const actionCount = data?.actionCount ?? 0;
 
   function startEdit() {
     if (!review) return;
@@ -419,7 +411,6 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   }
 
   async function handleDelete() {
-    if (!confirm("Delete this manager? This action cannot be undone.")) return;
     setDeleting(true);
     try {
       await api.deleteManager(managerId);
@@ -450,7 +441,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
   const delCount = delinquency?.total_delinquent ?? 0;
   const leaseCount = leases?.total_expiring ?? 0;
   const vacCount = (vacancies?.total_vacant ?? 0) + (vacancies?.total_notice ?? 0);
-  const maintCount = review.open_maintenance;
+  const maintCount = review.metrics.open_maintenance;
 
   return (
     <PageContainer wide>
@@ -509,9 +500,9 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
                 Edit
               </button>
               <button
-                onClick={handleDelete}
+                onClick={() => setShowDeleteConfirm(true)}
                 disabled={deleting}
-                className="rounded-md border border-border px-2 py-1 text-[10px] font-medium text-fg-muted hover:text-error hover:border-error transition-colors disabled:opacity-50"
+                className="rounded-xl border border-error/20 px-2.5 py-1 text-[10px] font-medium text-error hover:bg-error-soft transition-all btn-glow btn-glow-danger disabled:opacity-50"
               >
                 {deleting ? "Deleting..." : "Delete"}
               </button>
@@ -520,14 +511,14 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
 
           <div className="flex items-center gap-3 mt-1">
             {review.company && <span className="text-xs text-fg-muted">{review.company}</span>}
-            <span className="text-xs text-fg-faint">{review.property_count} properties · {review.total_units} units</span>
+            <span className="text-xs text-fg-faint">{review.property_count} properties · {review.metrics.total_units} units</span>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-border overflow-x-auto scrollbar-none">
           {TABS.map(({ key, label }) => {
-            const count = key === "delinquency" ? delCount : key === "leases" ? leaseCount : key === "vacancies" ? vacCount : key === "maintenance" ? maintCount : key === "review" ? actionCount : 0;
+            const count = key === "delinquency" ? delCount : key === "leases" ? leaseCount : key === "vacancies" ? vacCount : key === "maintenance" ? maintCount : 0;
             return (
               <button
                 key={key}
@@ -541,7 +532,7 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
                 {label}
                 {count > 0 && key !== "overview" && (
                   <span className={`ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full ${
-                    key === "delinquency" || key === "vacancies" ? "bg-error-soft text-error" : key === "leases" ? "bg-warn-soft text-warn" : key === "maintenance" ? "bg-sky-500/20 text-sky-400" : key === "review" ? "bg-accent/20 text-accent" : "bg-surface-sunken text-fg-faint"
+                    key === "delinquency" || key === "vacancies" ? "bg-error-soft text-error" : key === "leases" ? "bg-warn-soft text-warn" : key === "maintenance" ? "bg-sky-500/20 text-sky-400" : "bg-surface-sunken text-fg-faint"
                   }`}>
                     {count}
                   </span>
@@ -558,6 +549,16 @@ export function ManagerReviewView({ managerId }: { managerId: string }) {
         {tab === "vacancies" && <VacanciesTab data={vacancies} />}
         {tab === "maintenance" && <MaintenanceTab properties={review.properties} />}
         {tab === "review" && <ReviewPrepTab managerId={managerId} />}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Manager"
+        description="Delete this manager? All property associations will be unlinked. This action cannot be undone."
+        confirmLabel="Delete Manager"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </PageContainer>
   );
 }

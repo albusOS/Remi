@@ -1,4 +1,4 @@
-"""Tests for workflow tools — portfolio_review, delinquency_review, lease_risk_review."""
+"""Tests for workflow tools — manager_review, delinquency_review, lease_risk_review."""
 
 from __future__ import annotations
 
@@ -12,21 +12,20 @@ from remi.agent.graph.adapters.mem import InMemoryKnowledgeStore
 from remi.agent.tools.registry import InMemoryToolRegistry
 from remi.application.core.models import (
     ActionItem,
-    ActionItemPriority,
     Address,
+    BalanceObservation,
     Lease,
     LeaseStatus,
-    Portfolio,
+    Priority,
     Property,
     PropertyManager,
     Tenant,
     TenantStatus,
     Unit,
-    UnitStatus,
 )
 from remi.application.infra.stores.mem import InMemoryPropertyStore
-from remi.application.portfolio import DashboardQueryService, ManagerReviewService
 from remi.application.tools.workflows import WorkflowToolProvider
+from remi.application.views import DashboardResolver, ManagerResolver
 
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 TODAY = date.today()
@@ -41,7 +40,6 @@ def setup():
         ks,
         core_types={
             "PropertyManager": (ps.get_manager, ps.list_managers),
-            "Portfolio": (ps.get_portfolio, ps.list_portfolios),
             "Property": (ps.get_property, ps.list_properties),
             "Unit": (ps.get_unit, ps.list_units),
             "Lease": (ps.get_lease, ps.list_leases),
@@ -50,10 +48,10 @@ def setup():
         },
     )
 
-    mr = ManagerReviewService(property_store=ps)
+    mr = ManagerResolver(property_store=ps)
     from remi.application.infra.ports import KnowledgeStoreReader
 
-    ds = DashboardQueryService(property_store=ps, knowledge_reader=KnowledgeStoreReader(ks))
+    ds = DashboardResolver(property_store=ps, knowledge_reader=KnowledgeStoreReader(ks))
 
     registry = InMemoryToolRegistry()
     WorkflowToolProvider(ps, kg, mr, ds).register(registry)
@@ -61,22 +59,24 @@ def setup():
     return registry, ps, kg
 
 
-async def _seed_portfolio(ps: InMemoryPropertyStore) -> None:
-    """Seed manager -> portfolio -> property -> units -> leases -> tenants."""
+async def _seed_data(ps: InMemoryPropertyStore) -> None:
+    """Seed manager -> property -> units -> leases -> tenants."""
     await ps.upsert_manager(
         PropertyManager(id="mgr-1", name="Jake Kraus", email="jake@rivaridge.com")
     )
-    await ps.upsert_portfolio(Portfolio(id="pf-1", manager_id="mgr-1", name="Kraus Portfolio"))
     await ps.upsert_property(
-        Property(id="prop-1", portfolio_id="pf-1", name="100 Smithfield St", address=_ADDR)
+        Property(
+            id="prop-1",
+            manager_id="mgr-1",
+            name="100 Smithfield St",
+            address=_ADDR,
+        )
     )
     await ps.upsert_unit(
         Unit(
             id="u-1",
             property_id="prop-1",
             unit_number="101",
-            status=UnitStatus.OCCUPIED,
-            current_rent=Decimal("1200"),
             market_rent=Decimal("1300"),
         )
     )
@@ -85,8 +85,6 @@ async def _seed_portfolio(ps: InMemoryPropertyStore) -> None:
             id="u-2",
             property_id="prop-1",
             unit_number="102",
-            status=UnitStatus.VACANT,
-            current_rent=Decimal("0"),
             market_rent=Decimal("1400"),
         )
     )
@@ -95,7 +93,17 @@ async def _seed_portfolio(ps: InMemoryPropertyStore) -> None:
             id="t-1",
             name="Carlos Rivera",
             status=TenantStatus.CURRENT,
-            balance_owed=Decimal("500"),
+        )
+    )
+    from datetime import UTC, datetime
+
+    await ps.insert_balance_observation(
+        BalanceObservation(
+            id="obs-t1",
+            tenant_id="t-1",
+            property_id="prop-1",
+            observed_at=datetime(2025, 1, 1, tzinfo=UTC),
+            balance_total=Decimal("500"),
             balance_0_30=Decimal("500"),
         )
     )
@@ -115,25 +123,25 @@ async def _seed_portfolio(ps: InMemoryPropertyStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_returns_summary(setup):
+async def test_manager_review_returns_summary(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "mgr-1"})
 
     assert "summary" in result
     assert result["summary"]["manager_id"] == "mgr-1"
-    assert result["summary"]["total_units"] == 2
-    assert result["summary"]["vacant"] == 1
+    assert result["summary"]["metrics"]["total_units"] == 2
+    assert result["summary"]["metrics"]["vacant"] == 1
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_includes_delinquency_when_present(setup):
+async def test_manager_review_includes_delinquency_when_present(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "mgr-1"})
 
     assert "delinquency" in result
@@ -141,11 +149,11 @@ async def test_portfolio_review_includes_delinquency_when_present(setup):
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_includes_vacancies(setup):
+async def test_manager_review_includes_vacancies(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "mgr-1"})
 
     assert "vacancies" in result
@@ -153,11 +161,11 @@ async def test_portfolio_review_includes_vacancies(setup):
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_includes_lease_expirations(setup):
+async def test_manager_review_includes_lease_expirations(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "mgr-1"})
 
     assert "lease_expirations" in result
@@ -165,29 +173,29 @@ async def test_portfolio_review_includes_lease_expirations(setup):
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_unknown_manager(setup):
+async def test_manager_review_unknown_manager(setup):
     registry, ps, kg = setup
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "nonexistent"})
 
     assert "error" in result
 
 
 @pytest.mark.asyncio
-async def test_portfolio_review_includes_action_items(setup):
+async def test_manager_review_includes_action_items(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
     item = ActionItem(
         id="ai-test",
         title="Follow up on rent",
         manager_id="mgr-1",
-        priority=ActionItemPriority.HIGH,
+        priority=Priority.HIGH,
     )
     await ps.upsert_action_item(item)
 
-    fn, _ = registry.get("portfolio_review")
+    fn, _ = registry.get("manager_review")
     result = await fn({"manager_id": "mgr-1"})
 
     assert "action_items" in result
@@ -198,7 +206,7 @@ async def test_portfolio_review_includes_action_items(setup):
 @pytest.mark.asyncio
 async def test_delinquency_review_returns_tenants(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
     fn, _ = registry.get("delinquency_review")
     result = await fn({})
@@ -211,7 +219,7 @@ async def test_delinquency_review_returns_tenants(setup):
 @pytest.mark.asyncio
 async def test_delinquency_review_scoped_to_manager(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
     fn, _ = registry.get("delinquency_review")
     result = await fn({"manager_id": "mgr-1"})
@@ -222,7 +230,7 @@ async def test_delinquency_review_scoped_to_manager(setup):
 @pytest.mark.asyncio
 async def test_lease_risk_review_returns_data(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
     fn, _ = registry.get("lease_risk_review")
     result = await fn({"manager_id": "mgr-1"})
@@ -236,7 +244,7 @@ async def test_lease_risk_review_returns_data(setup):
 @pytest.mark.asyncio
 async def test_approve_action_plan_creates_items(setup):
     registry, ps, kg = setup
-    await _seed_portfolio(ps)
+    await _seed_data(ps)
 
     fn, _ = registry.get("approve_action_plan")
     result = await fn(
@@ -270,7 +278,7 @@ async def test_workflow_tools_all_registered(setup):
     registry, ps, kg = setup
 
     expected = (
-        "portfolio_review",
+        "manager_review",
         "delinquency_review",
         "lease_risk_review",
         "approve_action_plan",

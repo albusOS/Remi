@@ -78,16 +78,21 @@ class DockerSandbox(Sandbox):
 
         # Build docker create command
         cmd: list[str] = [
-            "docker", "create",
-            "--name", f"remi-sandbox-{sid}",
+            "docker",
+            "create",
+            "--name",
+            f"remi-sandbox-{sid}",
             f"--network={self._network}",
             f"--memory={self._memory_limit}",
             f"--cpus={self._cpu_limit}",
             "--pids-limit=100",
             "--read-only",
-            "--tmpfs", "/tmp:size=64m",
-            "-v", f"{work_dir}:/work",
-            "-w", "/work",
+            "--tmpfs",
+            "/tmp:size=64m",
+            "-v",
+            f"{work_dir}:/work",
+            "-w",
+            "/work",
         ]
         for key, value in merged_env.items():
             cmd.extend(["-e", f"{key}={value}"])

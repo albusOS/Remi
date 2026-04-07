@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { fmt$, fmtDate } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
@@ -10,6 +11,8 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { SlidePanel } from "@/components/ui/SlidePanel";
+import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type {
   PropertyDetail,
   RentRollResponse,
@@ -460,7 +463,7 @@ function LeaseRow({ lease, propertyId }: { lease: LeaseListItem; propertyId: str
 
 function MaintenanceTab({ propertyId }: { propertyId: string }) {
   const { data: list, loading: listLoading } = useApiQuery(() => api.listMaintenance({ property_id: propertyId }), [propertyId]);
-  const { data: summary, loading: sumLoading } = useApiQuery(() => api.maintenanceSummary(propertyId), [propertyId]);
+  const { data: summary, loading: sumLoading } = useApiQuery(() => api.maintenanceSummary({ property_id: propertyId }), [propertyId]);
   if (listLoading || sumLoading) return <div className="py-12 text-center text-sm text-fg-faint animate-pulse">Loading maintenance...</div>;
 
   const openCount = (summary?.by_status["open"] ?? 0) + (summary?.by_status["in_progress"] ?? 0);
@@ -516,7 +519,7 @@ function ActivityTab({ propertyId }: { propertyId: string }) {
       </div>
       <div className="divide-y divide-border-subtle">
         {data.changesets.map((cs) => (
-          <div key={cs.changeset_id} className="px-5 py-3.5 flex items-start gap-4 group hover:bg-surface-raised/50 transition-colors">
+          <div key={cs.id} className="px-5 py-3.5 flex items-start gap-4 group hover:bg-surface-raised/50 transition-colors">
             <div className="shrink-0 w-2 h-2 rounded-full bg-accent mt-1.5 group-hover:scale-150 transition-transform" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
@@ -525,9 +528,9 @@ function ActivityTab({ propertyId }: { propertyId: string }) {
                 <span className="text-xs text-fg-faint ml-auto shrink-0">{fmtDate(cs.timestamp)}</span>
               </div>
               <div className="flex gap-3 mt-1 text-xs text-fg-muted">
-                {cs.created > 0 && <span className="text-ok">+{cs.created} created</span>}
-                {cs.updated > 0 && <span className="text-warn">{cs.updated} updated</span>}
-                {cs.removed > 0 && <span className="text-error">{cs.removed} removed</span>}
+                {cs.summary.created > 0 && <span className="text-ok">+{cs.summary.created} created</span>}
+                {cs.summary.updated > 0 && <span className="text-warn">{cs.summary.updated} updated</span>}
+                {cs.summary.removed > 0 && <span className="text-error">{cs.summary.removed} removed</span>}
               </div>
             </div>
           </div>
@@ -587,10 +590,29 @@ function NotesTab({ entityType, entityId }: { entityType: string; entityId: stri
 
 /* ---- Main PropertyDetailView ---- */
 
-export function PropertyDetailView({ propertyId }: { propertyId: string }) {
-  const [activeTab, setActiveTab] = useState<Tab>("rent_roll");
+const MAINT_FIELDS: FieldDef[] = [
+  { name: "title", label: "Title", required: true, placeholder: "Leaky faucet in kitchen" },
+  { name: "description", label: "Description", type: "textarea", placeholder: "Details..." },
+  { name: "category", label: "Category", type: "select", defaultValue: "general", options: [
+    { value: "plumbing", label: "Plumbing" }, { value: "electrical", label: "Electrical" },
+    { value: "hvac", label: "HVAC" }, { value: "appliance", label: "Appliance" },
+    { value: "structural", label: "Structural" }, { value: "general", label: "General" },
+    { value: "other", label: "Other" },
+  ]},
+  { name: "priority", label: "Priority", type: "select", defaultValue: "medium", options: [
+    { value: "low", label: "Low" }, { value: "medium", label: "Medium" },
+    { value: "high", label: "High" }, { value: "emergency", label: "Emergency" },
+  ]},
+];
 
-  const { data, loading } = useApiQuery<{ property: PropertyDetail; rentRoll: RentRollResponse }>(async () => {
+export function PropertyDetailView({ propertyId }: { propertyId: string }) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<Tab>("rent_roll");
+  const [showEditProperty, setShowEditProperty] = useState(false);
+  const [showAddMaint, setShowAddMaint] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const { data, loading, refetch } = useApiQuery<{ property: PropertyDetail; rentRoll: RentRollResponse }>(async () => {
     const [property, rentRoll] = await Promise.all([api.getProperty(propertyId), api.getRentRoll(propertyId)]);
     return { property, rentRoll };
   }, [propertyId]);
@@ -627,14 +649,32 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
             </>
           )}
         </div>
-        <h1 className="text-2xl font-bold text-fg mt-3">{property.name}</h1>
+        <div className="flex items-start justify-between">
+          <h1 className="text-2xl font-bold text-fg mt-3">{property.name}</h1>
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={() => setShowEditProperty(true)}
+              className="h-8 px-3.5 rounded-xl border border-border text-xs font-medium text-fg-muted hover:text-accent hover:border-accent/40 transition-all btn-glow flex items-center gap-1.5"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+              </svg>
+              Edit
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="h-8 px-3 rounded-xl border border-error/20 text-xs font-medium text-error hover:bg-error-soft transition-all btn-glow btn-glow-danger"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-3 mt-1.5">
           <Badge variant={property.property_type === "commercial" ? "cyan" : "blue"}>{property.property_type}</Badge>
           {property.address && (
             <span className="text-sm text-fg-muted">{property.address.street}, {property.address.city}{property.address.state ? `, ${property.address.state}` : ""}</span>
           )}
           {property.year_built > 0 && <span className="text-xs text-fg-ghost">Built {property.year_built}</span>}
-          {property.portfolio_name && <span className="text-xs text-fg-ghost">{property.portfolio_name}</span>}
         </div>
       </div>
 
@@ -670,11 +710,73 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
         ))}
       </div>
 
+      {/* Quick-add bar */}
+      <div className="flex gap-2.5 flex-wrap">
+        <button onClick={() => setShowAddMaint(true)} className="h-9 flex items-center gap-2 px-4 rounded-xl border border-dashed border-border bg-surface hover:border-accent/40 hover:text-accent hover:shadow-md hover:shadow-accent/5 text-xs font-medium text-fg-muted transition-all btn-glow">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          Add Maintenance
+        </button>
+      </div>
+
       {activeTab === "rent_roll" && <RentRollTab rentRoll={rentRoll} propertyId={propertyId} />}
       {activeTab === "leases" && <LeasesTab propertyId={propertyId} />}
       {activeTab === "maintenance" && <MaintenanceTab propertyId={propertyId} />}
       {activeTab === "activity" && <ActivityTab propertyId={propertyId} />}
       {activeTab === "notes" && <NotesTab entityType="Property" entityId={propertyId} />}
+
+      <EntityFormPanel
+        open={showEditProperty}
+        onClose={() => setShowEditProperty(false)}
+        title="Edit Property"
+        fields={[
+          { name: "name", label: "Name", placeholder: property.name },
+          { name: "street", label: "Street", placeholder: property.address?.street },
+          { name: "city", label: "City", placeholder: property.address?.city },
+          { name: "state", label: "State", placeholder: property.address?.state },
+          { name: "zip_code", label: "ZIP Code", placeholder: property.address?.zip_code },
+        ]}
+        initialValues={{
+          name: property.name,
+          street: property.address?.street,
+          city: property.address?.city,
+          state: property.address?.state,
+          zip_code: property.address?.zip_code,
+        }}
+        submitLabel="Update Property"
+        onSubmit={async (values) => {
+          await api.updateProperty(propertyId, values as Record<string, string>);
+          refetch();
+        }}
+      />
+
+
+      <EntityFormPanel
+        open={showAddMaint}
+        onClose={() => setShowAddMaint(false)}
+        title="Add Maintenance Request"
+        fields={[
+          { name: "unit_id", label: "Unit", type: "select", required: true, options: (rentRoll?.rows ?? []).map((r) => ({ value: r.unit_id, label: `${r.unit_number}${r.tenant ? ` — ${r.tenant.name}` : ""}` })) },
+          ...MAINT_FIELDS,
+        ]}
+        submitLabel="Create Request"
+        onSubmit={async (values) => {
+          await api.createMaintenance({ property_id: propertyId, ...values } as Parameters<typeof api.createMaintenance>[0]);
+          refetch();
+        }}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Property"
+        description={`Delete "${property.name}"? This will also remove all associated units and leases. This action cannot be undone.`}
+        confirmLabel="Delete Property"
+        variant="danger"
+        onConfirm={async () => {
+          await api.deleteProperty(propertyId);
+          router.push("/");
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </PageContainer>
   );
 }

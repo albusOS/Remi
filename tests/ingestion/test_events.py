@@ -26,11 +26,13 @@ def _balance_event(entity_id: str = "tenant-carlos") -> ChangeEvent:
 
 def test_changeset_summary() -> None:
     cs = ChangeSet()
-    cs.created.append(ChangeEvent(
-        entity_type="Unit",
-        entity_id="unit-new",
-        change_type=ChangeType.CREATED,
-    ))
+    cs.created.append(
+        ChangeEvent(
+            entity_type="Unit",
+            entity_id="unit-new",
+            change_type=ChangeType.CREATED,
+        )
+    )
     cs.updated.append(_balance_event())
     cs.unchanged_ids.append("unit-existing")
 
@@ -54,11 +56,15 @@ def test_empty_changeset() -> None:
 def test_events_aggregates_all_changes() -> None:
     cs = ChangeSet()
     created = ChangeEvent(
-        entity_type="Unit", entity_id="u1", change_type=ChangeType.CREATED,
+        entity_type="Unit",
+        entity_id="u1",
+        change_type=ChangeType.CREATED,
     )
     updated = _balance_event()
     removed = ChangeEvent(
-        entity_type="Lease", entity_id="l1", change_type=ChangeType.REMOVED,
+        entity_type="Lease",
+        entity_id="l1",
+        change_type=ChangeType.REMOVED,
     )
     cs.created.append(created)
     cs.updated.append(updated)
@@ -71,9 +77,13 @@ def test_events_aggregates_all_changes() -> None:
 async def test_event_store_append_and_get() -> None:
     store = InMemoryEventStore()
     cs = ChangeSet(id="cs-test")
-    cs.created.append(ChangeEvent(
-        entity_type="Unit", entity_id="u1", change_type=ChangeType.CREATED,
-    ))
+    cs.created.append(
+        ChangeEvent(
+            entity_type="Unit",
+            entity_id="u1",
+            change_type=ChangeType.CREATED,
+        )
+    )
     await store.append(cs)
 
     retrieved = await store.get("cs-test")
@@ -89,9 +99,13 @@ async def test_event_store_list_by_entity() -> None:
     await store.append(cs1)
 
     cs2 = ChangeSet(id="cs-2")
-    cs2.created.append(ChangeEvent(
-        entity_type="Unit", entity_id="unit-other", change_type=ChangeType.CREATED,
-    ))
+    cs2.created.append(
+        ChangeEvent(
+            entity_type="Unit",
+            entity_id="unit-other",
+            change_type=ChangeType.CREATED,
+        )
+    )
     await store.append(cs2)
 
     carlos_history = await store.list_by_entity("tenant-carlos")

@@ -62,9 +62,8 @@ class ToolExecutor:
         else:
             result = await self._run(tc)
 
-        has_error = (
-            (isinstance(result, ToolResult) and not result.ok)
-            or (isinstance(result, dict) and bool(result.get("error")))
+        has_error = (isinstance(result, ToolResult) and not result.ok) or (
+            isinstance(result, dict) and bool(result.get("error"))
         )
         self._log.info(
             "tool_call_done",

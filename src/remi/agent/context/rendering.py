@@ -61,7 +61,7 @@ def render_domain_context(domain: Any, *, compact: bool = False) -> str:
                 signal_lines.append(
                     f"- **{defn.name}** [{defn.severity.value}] ({defn.entity}): {desc}"
                 )
-        parts.append("**Signal definitions (what the entailment engine detects):**")
+        parts.append("**Signal definitions (what the agent detects):**")
         parts.append("\n".join(signal_lines))
 
     if not compact:

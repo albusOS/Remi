@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from remi.application.infra.ontology.schema import load_domain_yaml
+from remi.agent.signals import DomainTBox
+from remi.agent.signals.persistence.mem import InMemorySignalStore
 from remi.application.core.models import (
     Address,
-    Portfolio,
     Property,
     PropertyManager,
 )
-from remi.agent.signals import DomainTBox
+from remi.application.infra.graph.schema import load_domain_yaml
 from remi.application.infra.stores.mem import InMemoryPropertyStore
-from remi.agent.signals.persistence.mem import InMemorySignalStore
 
 
 @pytest.fixture
@@ -39,18 +38,15 @@ def property_store() -> InMemoryPropertyStore:
 _ADDR = Address(street="100 Smithfield St", city="Pittsburgh", state="PA", zip_code="15222")
 
 
-async def seed_basic_portfolio(ps: InMemoryPropertyStore) -> dict[str, str]:
-    """Seed one manager -> one portfolio -> one property.
+async def seed_basic_data(ps: InMemoryPropertyStore) -> dict[str, str]:
+    """Seed one manager -> one property.
 
     Returns a dict of entity IDs for convenience.
     """
     mgr = PropertyManager(id="mgr-1", name="Jake Kraus", email="jake@rivaridge.com")
     await ps.upsert_manager(mgr)
 
-    pf = Portfolio(id="pf-1", manager_id="mgr-1", name="Kraus Portfolio")
-    await ps.upsert_portfolio(pf)
-
-    prop = Property(id="prop-1", portfolio_id="pf-1", name="100 Smithfield St", address=_ADDR)
+    prop = Property(id="prop-1", manager_id="mgr-1", name="100 Smithfield St", address=_ADDR)
     await ps.upsert_property(prop)
 
-    return {"manager_id": "mgr-1", "portfolio_id": "pf-1", "property_id": "prop-1"}
+    return {"manager_id": "mgr-1", "property_id": "prop-1"}

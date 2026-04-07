@@ -67,9 +67,9 @@ def _maybe_df(data, as_df):
 # Properties
 # ---------------------------------------------------------------------------
 
-def properties(portfolio_id=None, as_df=False):
+def properties(manager_id=None, owner_id=None, as_df=False):
     """List all properties. Returns list of dicts."""
-    data = _get(f"/properties{_qs(portfolio_id=portfolio_id)}")
+    data = _get(f"/properties{_qs(manager_id=manager_id, owner_id=owner_id)}")
     result = data.get("properties", data)
     return _maybe_df(result, as_df)
 
@@ -120,16 +120,40 @@ def leases_expiring(days=60, as_df=False):
 # Maintenance
 # ---------------------------------------------------------------------------
 
-def maintenance(property_id=None, status=None, as_df=False):
-    """List maintenance requests with optional filters."""
-    data = _get(f"/maintenance{_qs(property_id=property_id, status=status)}")
+def maintenance(property_id=None, unit_id=None, manager_id=None, status=None, as_df=False):
+    """List maintenance requests with optional filters.
+
+    Parameters
+    ----------
+    property_id : str, optional
+        Scope to a single property.
+    unit_id : str, optional
+        Scope to a single unit.
+    manager_id : str, optional
+        Scope to all properties managed by this manager — the most
+        common filter for portfolio-level analytics.
+    status : str, optional
+        Filter by status: open, in_progress, completed, cancelled.
+    as_df : bool
+        Return a pandas DataFrame instead of a list of dicts.
+
+    Notes
+    -----
+    Each record includes: id, property_id, unit_id, title, description,
+    category, priority, status, source, vendor, cost, scheduled_date,
+    completed_date, created, resolved.
+    Use ``completed_date`` (not ``created``) for trend analysis by work period.
+    """
+    qs = _qs(property_id=property_id, unit_id=unit_id, manager_id=manager_id, status=status)
+    data = _get(f"/maintenance{qs}")
     result = data.get("requests", data)
     return _maybe_df(result, as_df)
 
 
-def maintenance_summary(property_id=None):
+def maintenance_summary(property_id=None, unit_id=None, manager_id=None):
     """Get maintenance summary stats (counts by status/category, total cost)."""
-    return _get(f"/maintenance/summary{_qs(property_id=property_id)}")
+    qs = _qs(property_id=property_id, unit_id=unit_id, manager_id=manager_id)
+    return _get(f"/maintenance/summary{qs}")
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +223,7 @@ def tenant_detail(tenant_id):
 # ---------------------------------------------------------------------------
 
 def dashboard_overview(manager_id=None):
-    """Portfolio-wide overview (or filtered to one manager)."""
+    """Overview of all managed properties (or filtered to one manager)."""
     return _get(f"/dashboard/overview{_qs(manager_id=manager_id)}")
 
 
@@ -242,7 +266,7 @@ def create_action(
     manager_id, title, description="", priority="medium",
     due_date=None, entity_type=None, entity_id=None,
 ):
-    """Create an action item for a manager's portfolio.
+    """Create an action item for a manager.
 
     Parameters
     ----------
@@ -301,7 +325,7 @@ def create_note(content, entity_type=None, entity_id=None, tags=None):
 
 
 def search(query, types=None, manager_id=None, limit=10, as_df=False):
-    """Hybrid keyword + semantic search across all portfolio entities.
+    """Hybrid keyword + semantic search across all entities.
 
     Fast, deterministic — no LLM involved. Useful for finding managers,
     properties, tenants, units, or maintenance requests by name, address,
@@ -339,6 +363,15 @@ def search(query, types=None, manager_id=None, limit=10, as_df=False):
 
 
 def trigger_signal_inference():
-    """Trigger the signal inference pipeline to re-evaluate all signals."""
-    return _post("/signals/infer")
+    """Trigger the signal inference pipeline to re-evaluate all signals.
+
+    NOTE: The precomputed signal engine has been removed. Signals are now
+    evaluated on demand by the agent. This function is a no-op stub.
+    """
+    import warnings
+    warnings.warn(
+        "trigger_signal_inference is a no-op — signals are evaluated on demand by the agent",
+        stacklevel=2,
+    )
+    return {"status": "noop", "message": "signal inference removed — agent evaluates on demand"}
 '''

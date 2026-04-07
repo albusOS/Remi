@@ -1,7 +1,7 @@
 """REST endpoints for action items.
 
 Action items are stored via PropertyStore (SQL-backed).
-Manager notes have moved to the dedicated /notes router (NoteRepository).
+Manager notes have moved to the dedicated /notes router.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from remi.application.api.shared_schemas import DeletedResponse
 from remi.application.core.models import (
     ActionItem,
-    ActionItemPriority,
     ActionItemStatus,
+    Priority,
 )
 from remi.shell.api.dependencies import Ctr
 from remi.types.errors import NotFoundError
@@ -105,7 +105,7 @@ async def create_action_item(
         id=f"action:{uuid.uuid4().hex[:12]}",
         title=body.title,
         description=body.description,
-        priority=ActionItemPriority(body.priority),
+        priority=Priority(body.priority),
         manager_id=body.manager_id,
         property_id=body.property_id,
         tenant_id=body.tenant_id,
@@ -133,7 +133,7 @@ async def update_action_item(
     if body.status is not None:
         updates["status"] = ActionItemStatus(body.status)
     if body.priority is not None:
-        updates["priority"] = ActionItemPriority(body.priority)
+        updates["priority"] = Priority(body.priority)
     if body.due_date is not None:
         updates["due_date"] = body.due_date
 

@@ -41,14 +41,18 @@ _GENERIC_METADATA_PATTERNS = (
 _MIN_HEADER_CELLS = 3
 
 _CSV_CONTENT_TYPES = frozenset({"text/csv", "application/csv"})
-_EXCEL_CONTENT_TYPES = frozenset({
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-})
+_EXCEL_CONTENT_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    }
+)
 _PDF_CONTENT_TYPES = frozenset({"application/pdf"})
-_DOCX_CONTENT_TYPES = frozenset({
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-})
+_DOCX_CONTENT_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+)
 _TEXT_CONTENT_TYPES = frozenset({"text/plain", "text/markdown"})
 _IMAGE_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
@@ -146,8 +150,7 @@ def parse_excel(
         from openpyxl import load_workbook
     except ImportError as exc:
         raise ImportError(
-            "openpyxl is required for Excel parsing. "
-            "Install with: pip install remi[documents]"
+            "openpyxl is required for Excel parsing. Install with: pip install remi[documents]"
         ) from exc
 
     content_type_xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -176,14 +179,7 @@ def parse_excel(
     header = all_rows[header_idx]
     columns = [str(h).strip() if h is not None else f"col_{i}" for i, h in enumerate(header)]
 
-    rows: list[dict[str, Any]] = []
-    for raw_row in all_rows[header_idx + 1:]:
-        if all(c is None for c in raw_row):
-            continue
-        row_dict = {}
-        for col_name, val in zip(columns, raw_row, strict=False):
-            row_dict[col_name] = _coerce_value(val)
-        rows.append(row_dict)
+    rows, _section_ctx = _parse_data_rows(all_rows[header_idx + 1 :], columns)
 
     return DocumentContent(
         id=f"doc-{uuid.uuid4().hex[:12]}",
@@ -199,6 +195,92 @@ def parse_excel(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+_DO_NOT_USE_RE = re.compile(r"^do\s+not\s+use\s*[-–]?\s*", re.I)
+
+# Section-label values that appear as standalone rows in hierarchical reports
+# (e.g. AppFolio rent rolls). These propagate as _section_label context.
+_SECTION_LABELS = frozenset(
+    {
+        "current",
+        "vacant",
+        "notice",
+        "past",
+        "future",
+        "eviction",
+        "month-to-month",
+        "total",
+        "grand total",
+        "subtotal",
+        "vacant-unrented",
+        "vacant-rented",
+        "notice-unrented",
+        "notice-rented",
+    }
+)
+
+
+def _normalize_cell_address(val: str) -> str:
+    """Strip 'DO NOT USE' prefixes from address strings."""
+    return _DO_NOT_USE_RE.sub("", val).strip()
+
+
+def _parse_data_rows(
+    raw_rows: list[tuple[Any, ...]],
+    columns: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Convert raw sheet rows into data row dicts with section context propagated.
+
+    Hierarchical reports (AppFolio rent rolls, etc.) embed context rows between
+    data rows — a row with a single non-null value that identifies either:
+      - A property address  → stored as ``_ctx_property_address``
+      - A section label     → stored as ``_ctx_section_label``
+
+    These are NOT emitted as data rows. Instead their values are attached to
+    every subsequent data row until the next context row overwrites them.
+    Address values have "DO NOT USE" prefixes stripped before propagation.
+
+    Returns (data_rows, final_context).
+    """
+    context: dict[str, str] = {}
+    rows: list[dict[str, Any]] = []
+    n_cols = len(columns)
+
+    for raw_row in raw_rows:
+        # Skip fully empty rows
+        non_null = [(i, c) for i, c in enumerate(raw_row) if c is not None]
+        if not non_null:
+            continue
+
+        # Coerce all cells
+        coerced = [_coerce_value(c) for c in raw_row]
+        non_empty = [(i, v) for i, v in enumerate(coerced) if v is not None]
+
+        # Section context row: exactly one non-null cell across all columns
+        if len(non_empty) == 1 and n_cols > 1:
+            raw_val = str(non_empty[0][1]).strip()
+            clean_val = _normalize_cell_address(raw_val)
+            lower_val = clean_val.lower()
+            if lower_val in _SECTION_LABELS:
+                context["_ctx_section_label"] = clean_val
+            else:
+                # Treat as a property/section address
+                context["_ctx_property_address"] = clean_val
+                # Reset section label when we enter a new property section
+                context.pop("_ctx_section_label", None)
+            continue
+
+        # Data row — build dict and attach current context
+        row_dict: dict[str, Any] = {}
+        for col_name, val in zip(columns, coerced, strict=False):
+            # Normalize any address-like values inline
+            if isinstance(val, str):
+                val = _normalize_cell_address(val) if _DO_NOT_USE_RE.match(val) else val
+            row_dict[col_name] = val
+        row_dict.update(context)
+        rows.append(row_dict)
+
+    return rows, context
 
 
 def _compile_skip_pattern(extra: tuple[str, ...] = ()) -> re.Pattern[str]:

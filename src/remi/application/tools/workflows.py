@@ -1,10 +1,10 @@
 """Workflow tools — deterministic multi-step data gathering as single tool calls.
 
-Provides: portfolio_review, delinquency_review, lease_risk_review,
+Provides: manager_review, delinquency_review, lease_risk_review,
           draft_action_plan, approve_action_plan.
 
-Workflow tools compose existing services (ManagerReviewService,
-DashboardQueryService, PropertyStore, KnowledgeGraph) into pre-built
+Workflow tools compose existing resolvers (ManagerResolver,
+DashboardResolver, PropertyStore, KnowledgeGraph) into pre-built
 data packages the agent would otherwise need 5–15 tool calls to assemble.
 """
 
@@ -13,16 +13,21 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+import structlog
+
 from remi.agent.graph import KnowledgeGraph
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.models import (
     ActionItem,
-    ActionItemPriority,
     ActionItemStatus,
+    Priority,
 )
 from remi.application.core.protocols import PropertyStore
-from remi.application.portfolio.dashboard import DashboardQueryService
-from remi.application.portfolio.managers import ManagerReviewService
+from remi.application.views.dashboard import DashboardResolver
+from remi.application.views.managers import ManagerResolver
+from remi.types.identity import manager_id as _manager_id
+
+_log = structlog.get_logger(__name__)
 
 
 class SubAgentInvoker(Protocol):
@@ -31,20 +36,62 @@ class SubAgentInvoker(Protocol):
     async def ask(self, agent_name: str, question: str, *, mode: str) -> tuple[str | None, str]: ...
 
 
+async def _resolve_manager_id(
+    ps: PropertyStore,
+    args: dict[str, Any],
+) -> str | None:
+    """Resolve manager_id from args, accepting either manager_id or manager_name.
+
+    Resolution order:
+      1. Explicit ``manager_id`` — used as-is.
+      2. ``manager_name`` — converted to deterministic slug, verified against store.
+         Falls back to substring match on all managers if slug miss.
+    """
+    mid = args.get("manager_id")
+    if mid:
+        return mid
+
+    name = args.get("manager_name")
+    if not name:
+        return None
+
+    slug = _manager_id(name)
+    mgr = await ps.get_manager(slug)
+    if mgr:
+        return slug
+
+    all_managers = await ps.list_managers()
+    query_lower = name.lower().strip()
+    for m in all_managers:
+        if m.name.lower().strip() == query_lower:
+            return m.id
+    for m in all_managers:
+        if query_lower in m.name.lower() or m.name.lower() in query_lower:
+            return m.id
+
+    _log.warning(
+        "manager_resolution_failed",
+        name=name,
+        slug=slug,
+        available=[m.name for m in all_managers],
+    )
+    return None
+
+
 class WorkflowToolProvider(ToolProvider):
     def __init__(
         self,
         property_store: PropertyStore,
         knowledge_graph: KnowledgeGraph,
-        manager_review: ManagerReviewService,
-        dashboard_service: DashboardQueryService,
+        manager_resolver: ManagerResolver,
+        dashboard_resolver: DashboardResolver,
         *,
         sub_agent: SubAgentInvoker | None = None,
     ) -> None:
         self._ps = property_store
         self._kg = knowledge_graph
-        self._mr = manager_review
-        self._ds = dashboard_service
+        self._mr = manager_resolver
+        self._ds = dashboard_resolver
         self._sub_agent = sub_agent
 
     def register(self, registry: ToolRegistry) -> None:
@@ -53,8 +100,12 @@ class WorkflowToolProvider(ToolProvider):
         mr = self._mr
         ds = self._ds
 
-        async def portfolio_review(args: dict[str, Any]) -> Any:
-            manager_id = args["manager_id"]
+        async def manager_review(args: dict[str, Any]) -> Any:
+            manager_id = await _resolve_manager_id(ps, args)
+            if not manager_id:
+                return {
+                    "error": "Could not resolve manager. Provide manager_id or manager_name.",
+                }
             summary = await mr.aggregate_manager(manager_id)
             if not summary:
                 return {"error": f"Manager '{manager_id}' not found"}
@@ -65,11 +116,11 @@ class WorkflowToolProvider(ToolProvider):
                 board = await ds.delinquency_board(manager_id=manager_id)
                 result["delinquency"] = board.model_dump(mode="json")
 
-            if summary.expiring_leases_90d > 0:
+            if summary.metrics.expiring_leases_90d > 0:
                 calendar = await ds.lease_expiration_calendar(days=90, manager_id=manager_id)
                 result["lease_expirations"] = calendar.model_dump(mode="json")
 
-            if summary.vacant > 0:
+            if summary.metrics.vacant > 0:
                 vacancies = await ds.vacancy_tracker(manager_id=manager_id)
                 result["vacancies"] = vacancies.model_dump(mode="json")
 
@@ -88,28 +139,33 @@ class WorkflowToolProvider(ToolProvider):
             return result
 
         registry.register(
-            "portfolio_review",
-            portfolio_review,
+            "manager_review",
+            manager_review,
             ToolDefinition(
-                name="portfolio_review",
+                name="manager_review",
                 description=(
-                    "Complete portfolio review for a manager — returns summary, "
+                    "Complete review for a manager — returns summary, "
                     "property breakdown, delinquency, lease expirations, vacancies, "
                     "open action items, and notes in a single call. Use this before "
-                    "answering any question about a manager's performance."
+                    "answering any question about a manager's performance. "
+                    "Accepts either manager_id or manager_name (name is resolved "
+                    "automatically to an ID)."
                 ),
                 args=[
                     ToolArg(
                         name="manager_id",
-                        description="Manager ID to review",
-                        required=True,
+                        description="Manager ID to review (or use manager_name instead)",
+                    ),
+                    ToolArg(
+                        name="manager_name",
+                        description="Manager name — resolved to ID automatically",
                     ),
                 ],
             ),
         )
 
         async def delinquency_review(args: dict[str, Any]) -> Any:
-            manager_id = args.get("manager_id")
+            manager_id = await _resolve_manager_id(ps, args)
             board = await ds.delinquency_board(manager_id=manager_id)
             result: dict[str, Any] = board.model_dump(mode="json")
 
@@ -127,9 +183,7 @@ class WorkflowToolProvider(ToolProvider):
 
                 tenant_actions = await ps.list_action_items(tenant_id=tid)
                 if tenant_actions:
-                    actions_by_tenant[tid] = [
-                        ai.model_dump(mode="json") for ai in tenant_actions
-                    ]
+                    actions_by_tenant[tid] = [ai.model_dump(mode="json") for ai in tenant_actions]
 
             if notes_by_tenant:
                 result["notes_by_tenant"] = notes_by_tenant
@@ -146,27 +200,30 @@ class WorkflowToolProvider(ToolProvider):
                 description=(
                     "Complete delinquency picture — delinquent tenants with balances, "
                     "report notes, user notes, and action items per tenant. Optionally "
-                    "scoped to a manager."
+                    "scoped to a manager. Accepts either manager_id or manager_name."
                 ),
                 args=[
                     ToolArg(
                         name="manager_id",
-                        description="Filter to a specific manager (optional)",
+                        description="Filter to a specific manager (optional, or use manager_name)",
+                    ),
+                    ToolArg(
+                        name="manager_name",
+                        description="Manager name — resolved to ID automatically",
                     ),
                 ],
             ),
         )
 
         async def lease_risk_review(args: dict[str, Any]) -> Any:
-            manager_id = args.get("manager_id")
+            manager_id = await _resolve_manager_id(ps, args)
             days = int(args.get("days", 90))
 
             calendar = await ds.lease_expiration_calendar(days=days, manager_id=manager_id)
             vacancies = await ds.vacancy_tracker(manager_id=manager_id)
 
             revenue_at_risk = (
-                sum(le.monthly_rent for le in calendar.leases)
-                + vacancies.total_market_rent_at_risk
+                sum(le.monthly_rent for le in calendar.leases) + vacancies.total_market_rent_at_risk
             )
 
             return {
@@ -183,12 +240,17 @@ class WorkflowToolProvider(ToolProvider):
                 description=(
                     "Lease expiration and vacancy risk analysis — expiring leases, "
                     "month-to-month leases, current vacancies, and estimated revenue "
-                    "at risk. Optionally scoped to a manager."
+                    "at risk. Optionally scoped to a manager. Accepts either "
+                    "manager_id or manager_name."
                 ),
                 args=[
                     ToolArg(
                         name="manager_id",
-                        description="Filter to a specific manager (optional)",
+                        description="Filter to a specific manager (optional, or use manager_name)",
+                    ),
+                    ToolArg(
+                        name="manager_name",
+                        description="Manager name — resolved to ID automatically",
                     ),
                     ToolArg(
                         name="days",
@@ -203,7 +265,11 @@ class WorkflowToolProvider(ToolProvider):
             _sa = self._sub_agent
 
             async def draft_action_plan(args: dict[str, Any]) -> Any:
-                manager_id = args["manager_id"]
+                manager_id = await _resolve_manager_id(ps, args)
+                if not manager_id:
+                    return {
+                        "error": "Could not resolve manager. Provide manager_id or manager_name.",
+                    }
                 focus = args.get("focus", "all")
 
                 summary = await mr.aggregate_manager(manager_id)
@@ -221,17 +287,17 @@ class WorkflowToolProvider(ToolProvider):
                     board = await ds.delinquency_board(manager_id=manager_id)
                     review_data["delinquency"] = board.model_dump(mode="json")
 
-                if focus in ("leases", "all") and summary.expiring_leases_90d > 0:
+                if focus in ("leases", "all") and summary.metrics.expiring_leases_90d > 0:
                     cal = await ds.lease_expiration_calendar(days=90, manager_id=manager_id)
                     review_data["lease_expirations"] = cal.model_dump(mode="json")
 
-                if focus in ("maintenance", "all") and summary.open_maintenance > 0:
+                if focus in ("maintenance", "all") and summary.metrics.open_maintenance > 0:
                     review_data["maintenance"] = {
-                        "open": summary.open_maintenance,
+                        "open": summary.metrics.open_maintenance,
                         "emergency": summary.emergency_maintenance,
                     }
 
-                if focus in ("vacancies", "all") and summary.vacant > 0:
+                if focus in ("vacancies", "all") and summary.metrics.vacant > 0:
                     vac = await ds.vacancy_tracker(manager_id=manager_id)
                     review_data["vacancies"] = vac.model_dump(mode="json")
 
@@ -261,7 +327,7 @@ class WorkflowToolProvider(ToolProvider):
                 ToolDefinition(
                     name="draft_action_plan",
                     description=(
-                        "Analyze a manager's portfolio and propose action items. "
+                        "Analyze a manager's properties and propose action items. "
                         "Returns a plan for the director to review — does NOT write "
                         "anything. Present the proposed items to the director and "
                         "use approve_action_plan upon their approval."
@@ -269,8 +335,11 @@ class WorkflowToolProvider(ToolProvider):
                     args=[
                         ToolArg(
                             name="manager_id",
-                            description="Manager to analyze",
-                            required=True,
+                            description="Manager to analyze (or use manager_name)",
+                        ),
+                        ToolArg(
+                            name="manager_name",
+                            description="Manager name — resolved to ID automatically",
                         ),
                         ToolArg(
                             name="focus",
@@ -303,7 +372,7 @@ class WorkflowToolProvider(ToolProvider):
                     id=item_id,
                     title=action["title"],
                     description=action.get("description", ""),
-                    priority=ActionItemPriority(action.get("priority", "medium")),
+                    priority=Priority(action.get("priority", "medium")),
                     manager_id=action.get("manager_id"),
                     property_id=action.get("property_id"),
                     tenant_id=action.get("tenant_id"),

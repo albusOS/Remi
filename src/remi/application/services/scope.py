@@ -28,11 +28,7 @@ async def resolve_manager_scope(
         if mgr is None:
             return ScopeContext()
 
-        portfolios = await property_store.list_portfolios(manager_id=manager_id)
-        portfolio_props = await asyncio.gather(
-            *[property_store.list_properties(portfolio_id=p.id) for p in portfolios]
-        )
-        all_props = [prop for props in portfolio_props for prop in props]
+        all_props = await property_store.list_properties(manager_id=manager_id)
         unit_lists = await asyncio.gather(
             *[property_store.list_units(property_id=prop.id) for prop in all_props]
         )
@@ -44,13 +40,10 @@ async def resolve_manager_scope(
         scope_parts = [
             f"## Manager Focus: {mgr.name}\n",
             f"The user has selected **{mgr.name}** (manager_id=`{manager_id}`).",
-            f"This manager oversees {prop_count} properties "
-            f"with {total_units} total units.",
+            f"This manager oversees {prop_count} properties with {total_units} total units.",
         ]
         if property_names:
-            scope_parts.append(
-                "Properties: " + ", ".join(property_names[:20])
-            )
+            scope_parts.append("Properties: " + ", ".join(property_names[:20]))
         scope_parts.append(
             "\n**You MUST scope all tool calls to this manager.** "
             f'Always pass `manager_id="{manager_id}"` to onto_signals, '

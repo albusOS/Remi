@@ -12,8 +12,7 @@ def _get_signal_session_factory(settings: RemiSettings):  # noqa: ANN202
     dsn = settings.state_store.dsn or settings.secrets.database_url
     if not dsn:
         raise ValueError(
-            "signals.backend is 'postgres' but no DATABASE_URL or "
-            "state_store.dsn is configured."
+            "signals.backend is 'postgres' but no DATABASE_URL or state_store.dsn is configured."
         )
     from remi.agent.db.engine import async_session_factory, create_async_engine_from_url
 

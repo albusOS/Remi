@@ -1,8 +1,6 @@
-"""Narrow repository protocols — one per entity group.
+"""Storage protocols for the domain layer.
 
-New code should depend on the narrowest protocol it actually needs.
-``PropertyStore`` is a composite that inherits every protocol for
-backward compatibility.
+``PropertyStore`` is the single storage port for all domain entities.
 
 Infrastructure ports (KnowledgeWriter, etc.) decouple
 ``application/services/`` from ``agent/`` primitives.  Implementations
@@ -18,30 +16,33 @@ from typing import Any
 from remi.application.core.models import (
     ActionItem,
     ActionItemStatus,
+    BalanceObservation,
     Document,
     DocumentType,
     Lease,
     LeaseStatus,
     MaintenanceRequest,
     MaintenanceStatus,
+    MeetingBrief,
     Note,
     NoteProvenance,
-    OccupancyStatus,
     Owner,
-    Portfolio,
     Property,
     PropertyManager,
     Tenant,
     TenantStatus,
+    TradeCategory,
     Unit,
-    UnitStatus,
     Vendor,
-    VendorCategory,
 )
 from remi.types.result import WriteResult
 
 
-class ManagerRepository(abc.ABC):
+class PropertyStore(abc.ABC):
+    """Single storage port for all domain entities."""
+
+    # -- Manager --------------------------------------------------------------
+
     @abc.abstractmethod
     async def get_manager(self, manager_id: str) -> PropertyManager | None: ...
 
@@ -54,24 +55,18 @@ class ManagerRepository(abc.ABC):
     @abc.abstractmethod
     async def delete_manager(self, manager_id: str) -> bool: ...
 
+    # -- Property -------------------------------------------------------------
 
-class PortfolioRepository(abc.ABC):
-    @abc.abstractmethod
-    async def get_portfolio(self, portfolio_id: str) -> Portfolio | None: ...
-
-    @abc.abstractmethod
-    async def list_portfolios(self, *, manager_id: str | None = None) -> list[Portfolio]: ...
-
-    @abc.abstractmethod
-    async def upsert_portfolio(self, portfolio: Portfolio) -> WriteResult[Portfolio]: ...
-
-
-class PropertyRepository(abc.ABC):
     @abc.abstractmethod
     async def get_property(self, property_id: str) -> Property | None: ...
 
     @abc.abstractmethod
-    async def list_properties(self, *, portfolio_id: str | None = None) -> list[Property]: ...
+    async def list_properties(
+        self,
+        *,
+        manager_id: str | None = None,
+        owner_id: str | None = None,
+    ) -> list[Property]: ...
 
     @abc.abstractmethod
     async def upsert_property(self, prop: Property) -> WriteResult[Property]: ...
@@ -79,8 +74,8 @@ class PropertyRepository(abc.ABC):
     @abc.abstractmethod
     async def delete_property(self, property_id: str) -> bool: ...
 
+    # -- Unit -----------------------------------------------------------------
 
-class UnitRepository(abc.ABC):
     @abc.abstractmethod
     async def get_unit(self, unit_id: str) -> Unit | None: ...
 
@@ -89,20 +84,16 @@ class UnitRepository(abc.ABC):
         self,
         *,
         property_id: str | None = None,
-        status: UnitStatus | None = None,
-        occupancy_status: OccupancyStatus | None = None,
     ) -> list[Unit]: ...
 
     @abc.abstractmethod
     async def upsert_unit(self, unit: Unit) -> WriteResult[Unit]: ...
 
     @abc.abstractmethod
-    async def delete_units_by_property(self, property_id: str) -> int:
-        """Remove all units for a property. Returns count deleted."""
-        ...
+    async def delete_unit(self, unit_id: str) -> bool: ...
 
+    # -- Lease ----------------------------------------------------------------
 
-class LeaseRepository(abc.ABC):
     @abc.abstractmethod
     async def get_lease(self, lease_id: str) -> Lease | None: ...
 
@@ -120,12 +111,10 @@ class LeaseRepository(abc.ABC):
     async def upsert_lease(self, lease: Lease) -> WriteResult[Lease]: ...
 
     @abc.abstractmethod
-    async def delete_leases_by_property(self, property_id: str) -> int:
-        """Remove all leases for a property. Returns count deleted."""
-        ...
+    async def delete_lease(self, lease_id: str) -> bool: ...
 
+    # -- Tenant ---------------------------------------------------------------
 
-class TenantRepository(abc.ABC):
     @abc.abstractmethod
     async def get_tenant(self, tenant_id: str) -> Tenant | None: ...
 
@@ -143,8 +132,8 @@ class TenantRepository(abc.ABC):
     @abc.abstractmethod
     async def delete_tenant(self, tenant_id: str) -> bool: ...
 
+    # -- Maintenance ----------------------------------------------------------
 
-class MaintenanceRepository(abc.ABC):
     @abc.abstractmethod
     async def get_maintenance_request(self, request_id: str) -> MaintenanceRequest | None: ...
 
@@ -154,6 +143,7 @@ class MaintenanceRepository(abc.ABC):
         *,
         property_id: str | None = None,
         unit_id: str | None = None,
+        manager_id: str | None = None,
         status: MaintenanceStatus | None = None,
     ) -> list[MaintenanceRequest]: ...
 
@@ -163,8 +153,11 @@ class MaintenanceRepository(abc.ABC):
         request: MaintenanceRequest,
     ) -> WriteResult[MaintenanceRequest]: ...
 
+    @abc.abstractmethod
+    async def delete_maintenance_request(self, request_id: str) -> bool: ...
 
-class ActionItemRepository(abc.ABC):
+    # -- Action Item ----------------------------------------------------------
+
     @abc.abstractmethod
     async def get_action_item(self, item_id: str) -> ActionItem | None: ...
 
@@ -184,8 +177,8 @@ class ActionItemRepository(abc.ABC):
     @abc.abstractmethod
     async def delete_action_item(self, item_id: str) -> bool: ...
 
+    # -- Owner ----------------------------------------------------------------
 
-class OwnerRepository(abc.ABC):
     @abc.abstractmethod
     async def get_owner(self, owner_id: str) -> Owner | None: ...
 
@@ -195,11 +188,8 @@ class OwnerRepository(abc.ABC):
     @abc.abstractmethod
     async def upsert_owner(self, owner: Owner) -> WriteResult[Owner]: ...
 
-    @abc.abstractmethod
-    async def delete_owner(self, owner_id: str) -> bool: ...
+    # -- Vendor ---------------------------------------------------------------
 
-
-class VendorRepository(abc.ABC):
     @abc.abstractmethod
     async def get_vendor(self, vendor_id: str) -> Vendor | None: ...
 
@@ -207,18 +197,15 @@ class VendorRepository(abc.ABC):
     async def list_vendors(
         self,
         *,
-        category: VendorCategory | None = None,
+        category: TradeCategory | None = None,
         is_internal: bool | None = None,
     ) -> list[Vendor]: ...
 
     @abc.abstractmethod
     async def upsert_vendor(self, vendor: Vendor) -> WriteResult[Vendor]: ...
 
-    @abc.abstractmethod
-    async def delete_vendor(self, vendor_id: str) -> bool: ...
+    # -- Note -----------------------------------------------------------------
 
-
-class NoteRepository(abc.ABC):
     @abc.abstractmethod
     async def get_note(self, note_id: str) -> Note | None: ...
 
@@ -237,8 +224,24 @@ class NoteRepository(abc.ABC):
     @abc.abstractmethod
     async def delete_note(self, note_id: str) -> bool: ...
 
+    # -- Meeting Brief --------------------------------------------------------
 
-class DocumentRepository(abc.ABC):
+    @abc.abstractmethod
+    async def list_meeting_briefs(
+        self,
+        *,
+        manager_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MeetingBrief]: ...
+
+    @abc.abstractmethod
+    async def upsert_meeting_brief(
+        self,
+        brief: MeetingBrief,
+    ) -> WriteResult[MeetingBrief]: ...
+
+    # -- Document -------------------------------------------------------------
+
     @abc.abstractmethod
     async def get_document(self, doc_id: str) -> Document | None: ...
 
@@ -254,29 +257,28 @@ class DocumentRepository(abc.ABC):
     ) -> list[Document]: ...
 
     @abc.abstractmethod
+    async def find_by_content_hash(self, content_hash: str) -> Document | None: ...
+
+    @abc.abstractmethod
     async def upsert_document(self, doc: Document) -> WriteResult[Document]: ...
 
     @abc.abstractmethod
     async def delete_document(self, doc_id: str) -> bool: ...
 
+    # -- Balance --------------------------------------------------------------
 
-class PropertyStore(
-    OwnerRepository,
-    ManagerRepository,
-    PortfolioRepository,
-    PropertyRepository,
-    UnitRepository,
-    LeaseRepository,
-    TenantRepository,
-    MaintenanceRepository,
-    VendorRepository,
-    ActionItemRepository,
-    NoteRepository,
-    DocumentRepository,
-):
-    """Full property store — prefer narrow per-entity protocols in new code."""
+    @abc.abstractmethod
+    async def list_balance_observations(
+        self,
+        *,
+        tenant_id: str | None = None,
+        property_id: str | None = None,
+    ) -> list[BalanceObservation]: ...
 
-    pass
+    @abc.abstractmethod
+    async def insert_balance_observation(
+        self, obs: BalanceObservation
+    ) -> WriteResult[BalanceObservation]: ...
 
 
 # ---------------------------------------------------------------------------

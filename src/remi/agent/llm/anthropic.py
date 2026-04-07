@@ -360,14 +360,7 @@ class AnthropicProvider(LLMProvider):
         model: str,
         tools: list[ToolDefinition] | None = None,
     ) -> int:
-        """Approximate token count using character heuristic.
-
-        Anthropic's server-side count_tokens API is async and requires a
-        network call. For synchronous budget checks we use a conservative
-        4-chars-per-token estimate — the same heuristic used elsewhere in
-        the codebase. Callers needing exact counts should use the Anthropic
-        SDK directly.
-        """
+        """Approximate token count using character heuristic."""
         total_chars = 0
         for msg in messages:
             text = (

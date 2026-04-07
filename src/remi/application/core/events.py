@@ -18,6 +18,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from remi.application.core.models.enums import ReportType
+
 
 class ChangeType(StrEnum):
     """What happened to the entity."""
@@ -74,7 +76,7 @@ class ChangeSet:
     source: ChangeSource = ChangeSource.ADAPTER_IMPORT
     source_detail: str = ""
     adapter_name: str = ""
-    report_type: str = ""
+    report_type: ReportType = ReportType.UNKNOWN
     document_id: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 

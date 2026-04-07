@@ -141,22 +141,24 @@ body {
 
 /* ---- Slide panel (drawer) ---- */
 @keyframes drawerSlide {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 @keyframes drawerSlideLeft {
   from { transform: translateX(-100%); }
   to { transform: translateX(0); }
 }
 @keyframes drawerFade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(6px); }
 }
 .drawer-overlay {
-  animation: drawerFade 0.2s ease-out both;
+  animation: drawerFade 0.25s ease-out both;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 .drawer-panel {
-  animation: drawerSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: drawerSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* ---- Elevated card hover ---- */
@@ -248,3 +250,97 @@ body {
 .prose-remi > *:last-child { margin-bottom: 0; }
 .prose-remi pre { margin: 0; }
 .prose-remi code { font-size: 0.8125rem; }
+
+/* ---- Form field animations ---- */
+@keyframes fieldFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.form-stagger > * { opacity: 0; animation: fieldFadeIn 0.3s ease-out forwards; }
+.form-stagger > *:nth-child(1) { animation-delay: 60ms; }
+.form-stagger > *:nth-child(2) { animation-delay: 120ms; }
+.form-stagger > *:nth-child(3) { animation-delay: 180ms; }
+.form-stagger > *:nth-child(4) { animation-delay: 240ms; }
+.form-stagger > *:nth-child(5) { animation-delay: 300ms; }
+.form-stagger > *:nth-child(6) { animation-delay: 360ms; }
+.form-stagger > *:nth-child(7) { animation-delay: 420ms; }
+.form-stagger > *:nth-child(8) { animation-delay: 480ms; }
+.form-stagger > *:nth-child(9) { animation-delay: 540ms; }
+.form-stagger > *:nth-child(10) { animation-delay: 600ms; }
+
+/* Focus glow for form inputs */
+.input-glow:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(196, 114, 122, 0.15), 0 0 12px -2px rgba(196, 114, 122, 0.1);
+}
+
+/* ---- Success flash for save feedback ---- */
+@keyframes successFlash {
+  0% { box-shadow: 0 0 0 0 rgba(92, 181, 137, 0.5); }
+  50% { box-shadow: 0 0 20px 4px rgba(92, 181, 137, 0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(92, 181, 137, 0); }
+}
+.anim-success-flash {
+  animation: successFlash 0.6s ease-out;
+}
+
+/* ---- Shimmer loading skeleton ---- */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.anim-shimmer {
+  background: linear-gradient(90deg, var(--color-surface-sunken) 25%, var(--color-surface-raised) 50%, var(--color-surface-sunken) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ---- Action button glow ---- */
+.btn-glow {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.btn-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 16px -2px var(--color-accent);
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.btn-glow:hover::after {
+  opacity: 0.5;
+}
+
+/* Destructive glow variant */
+.btn-glow-danger::after {
+  box-shadow: 0 0 16px -2px var(--color-error);
+}
+
+/* ---- Confirm dialog ---- */
+@keyframes confirmIn {
+  from { opacity: 0; transform: scale(0.95) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.confirm-dialog {
+  animation: confirmIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ---- Panel glass border (top edge glow) ---- */
+.panel-glow {
+  position: relative;
+}
+.panel-glow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(196, 114, 122, 0.4), transparent);
+  pointer-events: none;
+  z-index: 1;
+}

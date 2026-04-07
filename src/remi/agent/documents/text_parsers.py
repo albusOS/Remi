@@ -68,11 +68,13 @@ def chunk_text(
             return
         text = "\n\n".join(current).strip()
         if text:
-            chunks.append(TextChunk(
-                index=len(chunks),
-                text=text,
-                page=_page_at(char_offset - current_len),
-            ))
+            chunks.append(
+                TextChunk(
+                    index=len(chunks),
+                    text=text,
+                    page=_page_at(char_offset - current_len),
+                )
+            )
         current = []
         current_len = 0
 

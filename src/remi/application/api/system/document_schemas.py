@@ -33,8 +33,17 @@ class KnowledgeInfo(BaseModel):
     rows_accepted: int = 0
     rows_rejected: int = 0
     rows_skipped: int = 0
+    observations_captured: int = 0
     validation_warnings: list[str] = []
     review_items: list[ReviewItemSchema] = []
+
+
+class DuplicateInfo(BaseModel):
+    """Populated when the uploaded file is byte-identical to an existing document."""
+
+    existing_id: str
+    existing_filename: str
+    uploaded_at: str
 
 
 class UploadResponse(BaseModel):
@@ -50,6 +59,7 @@ class UploadResponse(BaseModel):
     tags: list[str] = []
     size_bytes: int = 0
     knowledge: KnowledgeInfo
+    duplicate: DuplicateInfo | None = None
 
 
 class DocumentListItem(BaseModel):

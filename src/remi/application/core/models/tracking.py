@@ -1,6 +1,6 @@
 """Tracking — director follow-up.
 
-ActionItem, Note.
+ActionItem, Note, MeetingBrief.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 
 from remi.application.core.models._helpers import _utcnow
 from remi.application.core.models.enums import (
-    ActionItemPriority,
     ActionItemStatus,
     NoteProvenance,
+    Priority,
 )
 
 
@@ -24,7 +24,7 @@ class ActionItem(BaseModel, frozen=True):
     title: str
     description: str = ""
     status: ActionItemStatus = ActionItemStatus.OPEN
-    priority: ActionItemPriority = ActionItemPriority.MEDIUM
+    priority: Priority = Priority.MEDIUM
     manager_id: str | None = None
     property_id: str | None = None
     tenant_id: str | None = None
@@ -50,3 +50,27 @@ class Note(BaseModel, frozen=True):
     created_by: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class MeetingBrief(BaseModel, frozen=True):
+    """An LLM-generated meeting review brief for a property manager.
+
+    Each brief is a point-in-time artifact — ``snapshot_hash`` is a
+    deterministic hash of the portfolio data that was fed into the pipeline,
+    so consumers can tell whether the underlying data has changed since the
+    brief was generated.  ``generated_at`` records when.
+
+    ``brief`` and ``analysis`` store the structured JSON output from the
+    two pipeline stages.  ``focus`` records the optional user-supplied
+    focus area that scoped the generation.
+    """
+
+    id: str
+    manager_id: str
+    snapshot_hash: str
+    brief: dict[str, object]
+    analysis: dict[str, object]
+    focus: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    generated_at: datetime = Field(default_factory=_utcnow)

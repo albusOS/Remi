@@ -1,1 +1,1 @@
-"""CLI interface using Typer."""
+"""REMI CLI — minimal server entrypoint."""

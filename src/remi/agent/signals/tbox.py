@@ -56,6 +56,7 @@ class Policy(BaseModel, frozen=True):
     description: str
     trigger: str
     deontic: Deontic
+    governs: list[str] = Field(default_factory=list)
 
 
 class CausalChain(BaseModel, frozen=True):
@@ -64,6 +65,7 @@ class CausalChain(BaseModel, frozen=True):
     cause: str
     effect: str
     description: str
+    manifests_as: str | None = None
 
 
 class CompositionRule(BaseModel, frozen=True):
@@ -84,6 +86,7 @@ class CompositionRule(BaseModel, frozen=True):
 class WorkflowStep(BaseModel, frozen=True):
     id: str
     description: str
+    applies_to: list[str] = Field(default_factory=list)
 
 
 class WorkflowSeed(BaseModel, frozen=True):
@@ -117,8 +120,11 @@ class DomainTBox(BaseModel, frozen=True):
         raw_chains: list[dict[str, Any]] = []
 
         top_level_keys = {
-            "compositions", "signals", "policies",
-            "thresholds", "causal_chains",
+            "compositions",
+            "signals",
+            "policies",
+            "thresholds",
+            "causal_chains",
         }
 
         for key, section in tbox.items():
@@ -152,6 +158,7 @@ class DomainTBox(BaseModel, frozen=True):
                 description=p.get("description", ""),
                 trigger=p.get("trigger", ""),
                 deontic=Deontic(p["deontic"]),
+                governs=p.get("governs", []),
             )
             for p in raw_policies
         ]
@@ -161,6 +168,7 @@ class DomainTBox(BaseModel, frozen=True):
                 cause=c["cause"],
                 effect=c["effect"],
                 description=c.get("description", ""),
+                manifests_as=c.get("manifests_as"),
             )
             for c in raw_chains
         ]
@@ -207,7 +215,6 @@ class DomainTBox(BaseModel, frozen=True):
         names = list(self.signals.keys())
         names.extend(c.name for c in self.compositions)
         return names
-
 
 
 class MutableTBox:
@@ -259,4 +266,3 @@ class MutableTBox:
 
     def all_signal_names(self) -> list[str]:
         return self._base.all_signal_names()
-

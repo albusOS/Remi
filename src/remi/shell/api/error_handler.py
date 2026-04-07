@@ -91,12 +91,8 @@ async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
-async def _handle_validation_error(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    messages = "; ".join(
-        f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
-    )
+async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    messages = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
     return JSONResponse(
         status_code=422,
         content=_error_body("VALIDATION_ERROR", messages),

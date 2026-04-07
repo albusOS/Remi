@@ -128,9 +128,7 @@ class GraphRetriever:
         for _hop in range(depth):
             next_frontier: set[str] = set()
             for fid in frontier:
-                graph_links: list[GraphLink] = await self._kg.get_links(
-                    fid, direction="both"
-                )
+                graph_links: list[GraphLink] = await self._kg.get_links(fid, direction="both")
                 for gl in graph_links:
                     if link_type_filter and gl.link_type not in link_type_filter:
                         continue

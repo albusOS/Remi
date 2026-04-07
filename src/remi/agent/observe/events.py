@@ -52,26 +52,11 @@ class Event:
     SIGNAL_RETRIEVAL_FAILED = "signal_retrieval_failed"
     VECTOR_SEARCH_FAILED = "vector_search_failed"
 
-    PATTERN_DETECTION_FAILED = "pattern_detection_failed"
-
-    PRODUCER_STARTING = "producer_starting"
-
     # -- Ingestion / Documents ----------------------------------------------
     CLASSIFY_DOCUMENT_FAILED = "classify_document_failed"
     ENRICH_ROWS_FAILED = "enrich_rows_failed"
     INGESTION_FAILED = "ingestion_failed"
     PROPERTY_DIRECTORY_EMPTY = "property_directory_empty"
-    SNAPSHOT_CAPTURE_FAILED = "snapshot_capture_failed"
-
-    LOAD_REPORT_MISSING = "load_report_missing"
-    LOAD_REPORT_FAILED = "load_report_failed"
-
-    # -- Embeddings ---------------------------------------------------------
-    EMBEDDING_PIPELINE_EMPTY = "embedding_pipeline_empty"
-    EMBEDDING_BATCH_FAILED = "embedding_batch_failed"
-    EMBEDDING_PIPELINE_FAILED = "embedding_pipeline_failed"
-    MANAGER_SIGNAL_AGG_FAILED = "manager_signal_aggregation_failed"
-
     # -- Server lifecycle ---------------------------------------------------
     SERVER_READY = "server_ready"
     SERVER_SHUTDOWN = "server_shutdown"

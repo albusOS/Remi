@@ -1,208 +1,119 @@
-"""Manager resolution for the ingestion pipeline.
+"""Manager resolution during ingestion — find-or-create by tag.
 
-Extracts manager tags from report rows using a declared extraction
-strategy, classifies them via frequency analysis (real managers manage
-portfolios of properties; tags appear on few), and resolves/upserts
-PropertyManager + Portfolio records.
+Given a raw manager tag string from a report header (e.g. "Ryan Steen Mgmt"),
+resolves it to an existing PropertyManager or creates a new one.  Uses
+normalize_entity_name for fuzzy matching against existing managers.
+
+No LLM, no I/O beyond PropertyStore reads/writes.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 import structlog
 
-from remi.application.core.models import (
-    Portfolio,
-    PropertyManager,
-)
-from remi.application.core.protocols import (
-    ManagerRepository,
-    PortfolioRepository,
-)
-from remi.application.core.rules import manager_name_from_tag
-from remi.types.text import slugify
+from remi.application.core.models import PropertyManager
+from remi.application.core.protocols import PropertyStore
+from remi.application.core.rules import manager_name_from_tag, normalize_entity_name
+from remi.types.identity import manager_id as _manager_id
 
-logger = structlog.get_logger(__name__)
+_log = structlog.get_logger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ManagerResolution:
-    """Metadata about how a manager tag was resolved."""
+    """Result of resolving a manager tag to a PropertyManager."""
 
-    portfolio_id: str
     manager_id: str
     manager_name: str
-    created_new: bool
+    created_new: bool = False
     alias_matched: bool = False
     alias_from: str | None = None
     alias_to: str | None = None
 
-_MIN_PROPERTIES_FOR_MANAGER = 3
-
-
-class ManagerExtraction(StrEnum):
-    """How to extract the manager tag from a row's raw field value."""
-
-    NONE = "none"
-    DIRECT = "direct"
-    COMMA_SPLIT_FIRST = "comma_split_first"
-
-
-def extract_manager_tag(raw: str | None, strategy: ManagerExtraction) -> str | None:
-    """Apply extraction strategy to a raw field value, returning a tag or None."""
-    if not raw or strategy == ManagerExtraction.NONE:
-        return None
-    raw = raw.strip()
-    if not raw:
-        return None
-
-    if strategy == ManagerExtraction.DIRECT:
-        return raw
-
-    if strategy == ManagerExtraction.COMMA_SPLIT_FIRST:
-        segment = raw.split(",")[0].strip()
-        if segment and segment.lower() != "month-to-month":
-            return segment
-        return None
-
-    return raw
-
-
-def classify_manager_values(
-    property_tags: dict[str, str],
-) -> set[str]:
-    """Return tag values that represent real managers based on frequency.
-
-    ``property_tags`` maps property_id → manager tag (one tag per property,
-    first non-empty value wins). Real managers manage portfolios: they appear
-    across many *distinct properties*. Tags/labels appear on few.
-
-    Tags are normalized (whitespace-collapsed) before counting so that
-    "Aaron  Smay" and "Aaron Smay" count as the same value.
-    """
-    if not property_tags:
-        return set()
-
-    normalized_to_properties: dict[str, set[str]] = {}
-    raw_to_normalized: dict[str, str] = {}
-    for prop_id, tag in property_tags.items():
-        normalized = manager_name_from_tag(tag)
-        raw_to_normalized[tag] = normalized
-        normalized_to_properties.setdefault(normalized, set()).add(prop_id)
-
-    counts = {n: len(ps) for n, ps in normalized_to_properties.items()}
-    manager_names = {n for n, c in counts.items() if c >= _MIN_PROPERTIES_FOR_MANAGER}
-    skipped = {n: c for n, c in counts.items() if c < _MIN_PROPERTIES_FOR_MANAGER}
-
-    if manager_names or skipped:
-        logger.info(
-            "manager_value_classification",
-            managers={n: counts[n] for n in sorted(manager_names)},
-            tags_skipped=dict(sorted(skipped.items())),
-        )
-
-    return {tag for tag, n in raw_to_normalized.items() if n in manager_names}
-
 
 class ManagerResolver:
-    """Resolves manager tags to portfolio IDs, creating managers as needed."""
+    """Resolves raw manager tags to PropertyManager entities.
 
-    def __init__(
-        self,
-        manager_repo: ManagerRepository,
-        portfolio_repo: PortfolioRepository,
-    ) -> None:
-        self._managers = manager_repo
-        self._portfolios = portfolio_repo
+    Caches the manager list for the duration of a single document ingestion
+    to avoid repeated store queries.
+    """
 
-    async def ensure_manager(self, manager_tag: str) -> ManagerResolution:
-        """Create or retrieve a manager + portfolio.
+    def __init__(self, property_store: PropertyStore) -> None:
+        self._ps = property_store
+        self._cache: dict[str, ManagerResolution] | None = None
+        self._existing: list[PropertyManager] | None = None
 
-        Returns a ``ManagerResolution`` with the portfolio_id and metadata
-        about how the tag was resolved (exact match, alias, or new creation).
+    async def _ensure_loaded(self) -> list[PropertyManager]:
+        if self._existing is None:
+            self._existing = await self._ps.list_managers()
+        return self._existing
+
+    async def ensure_manager(self, tag: str) -> ManagerResolution:
+        """Resolve *tag* to an existing or new PropertyManager.
+
+        Resolution strategy:
+        1. Exact ID match — tag normalises to the same manager_id as an existing manager.
+        2. Fuzzy name match — normalized tag matches normalized existing name.
+        3. Create new — no match found, create a new PropertyManager.
         """
-        mgr_name = manager_name_from_tag(manager_tag)
-        manager_id = slugify(f"manager:{mgr_name}")
-        created_new = False
-        alias_matched = False
-        alias_from: str | None = None
-        alias_to: str | None = None
+        if self._cache and tag in self._cache:
+            return self._cache[tag]
 
-        existing = await self._managers.get_manager(manager_id)
-        if existing:
-            await self._managers.upsert_manager(
-                PropertyManager(id=manager_id, name=mgr_name, manager_tag=manager_tag)
-            )
-        else:
-            resolved_id, resolved_name = await self._resolve_alias(mgr_name)
-            if resolved_id:
-                alias_matched = True
-                alias_from = mgr_name
-                alias_to = resolved_name
-                manager_id = resolved_id
-                mgr_name = resolved_name  # type: ignore[assignment]
-            else:
-                created_new = True
-                await self._managers.upsert_manager(
-                    PropertyManager(id=manager_id, name=mgr_name, manager_tag=manager_tag)
+        display_name = manager_name_from_tag(tag)
+        mid = _manager_id(display_name)
+        existing_managers = await self._ensure_loaded()
+
+        # Exact ID match
+        for mgr in existing_managers:
+            if mgr.id == mid:
+                resolution = ManagerResolution(
+                    manager_id=mgr.id,
+                    manager_name=mgr.name,
                 )
+                self._set_cache(tag, resolution)
+                return resolution
 
-        portfolio_id = slugify(f"portfolio:{mgr_name}")
-        await self._portfolios.upsert_portfolio(
-            Portfolio(
-                id=portfolio_id,
-                manager_id=manager_id,
-                name=f"{mgr_name} Portfolio",
-            )
+        # Fuzzy name match
+        tag_norm = normalize_entity_name(tag)
+        for mgr in existing_managers:
+            if normalize_entity_name(mgr.name) == tag_norm:
+                resolution = ManagerResolution(
+                    manager_id=mgr.id,
+                    manager_name=mgr.name,
+                    alias_matched=True,
+                    alias_from=tag,
+                    alias_to=mgr.name,
+                )
+                self._set_cache(tag, resolution)
+                return resolution
+
+        # Create new manager
+        manager = PropertyManager(
+            id=mid,
+            name=display_name,
+            manager_tag=tag,
         )
-        return ManagerResolution(
-            portfolio_id=portfolio_id,
-            manager_id=manager_id,
-            manager_name=mgr_name,
-            created_new=created_new,
-            alias_matched=alias_matched,
-            alias_from=alias_from,
-            alias_to=alias_to,
+        await self._ps.upsert_manager(manager)
+        self._existing = None  # invalidate cache
+
+        _log.info(
+            "manager_created",
+            manager_id=mid,
+            manager_name=display_name,
+            raw_tag=tag,
         )
 
-    async def _resolve_alias(self, name: str) -> tuple[str | None, str | None]:
-        """Find an existing manager that matches the given name.
+        resolution = ManagerResolution(
+            manager_id=mid,
+            manager_name=display_name,
+            created_new=True,
+        )
+        self._set_cache(tag, resolution)
+        return resolution
 
-        Two-tier matching:
-          1. Normalized slug match — handles casing/whitespace variants.
-          2. First-name + prefix match — handles partial names like "Denise"
-             upgrading to "Denise Shoemaker".
-
-        The longer name always wins so records become more complete over time.
-        """
-        if not name:
-            return None, None
-
-        target_slug = slugify(f"manager:{name}")
-        managers = await self._managers.list_managers()
-
-        for m in managers:
-            if m.id == target_slug:
-                canonical = name if len(name) > len(m.name) else m.name
-                if len(canonical) > len(m.name):
-                    await self._managers.upsert_manager(
-                        PropertyManager(id=m.id, name=canonical, manager_tag=m.manager_tag)
-                    )
-                return m.id, canonical
-
-        first_name = name.split()[0].lower()
-        for m in managers:
-            m_first = m.name.split()[0].lower() if m.name else ""
-            if m_first != first_name:
-                continue
-            if m.name.lower().startswith(name.lower()) or name.lower().startswith(m.name.lower()):
-                canonical = name if len(name) > len(m.name) else m.name
-                if len(canonical) > len(m.name):
-                    await self._managers.upsert_manager(
-                        PropertyManager(id=m.id, name=canonical, manager_tag=m.manager_tag)
-                    )
-                return m.id, canonical
-
-        return None, None
+    def _set_cache(self, tag: str, resolution: ManagerResolution) -> None:
+        if self._cache is None:
+            self._cache = {}
+        self._cache[tag] = resolution

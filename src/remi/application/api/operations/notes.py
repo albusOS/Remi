@@ -1,8 +1,8 @@
 """REST endpoints for entity-generic notes.
 
-Notes are first-class domain entities stored via NoteRepository (part of
-PropertyStore). The knowledge graph still surfaces them via the bridge —
-the store is now the source of truth, not KnowledgeStore.
+Notes are first-class domain entities stored via PropertyStore. The
+knowledge graph still surfaces them via the bridge — the store is now
+the source of truth, not KnowledgeStore.
 """
 
 from __future__ import annotations

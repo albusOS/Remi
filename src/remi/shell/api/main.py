@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -32,7 +31,7 @@ from remi.application.api.operations import (
 )
 from remi.application.api.portfolio import (
     managers_router,
-    portfolios_router,
+    owners_router,
     properties_router,
     units_router,
 )
@@ -40,7 +39,6 @@ from remi.application.api.system import (
     agents_router,
     documents_router,
     realtime_router,
-    reports_router,
     usage_router,
 )
 from remi.shell.api.error_handler import install_error_handlers
@@ -51,7 +49,7 @@ from remi.shell.config.settings import RemiSettings, load_settings
 
 def _attach_routers(application: FastAPI) -> None:
     application.include_router(managers_router, prefix="/api/v1")
-    application.include_router(portfolios_router, prefix="/api/v1")
+    application.include_router(owners_router, prefix="/api/v1")
     application.include_router(properties_router, prefix="/api/v1")
     application.include_router(leases_router, prefix="/api/v1")
     application.include_router(maintenance_router, prefix="/api/v1")
@@ -64,7 +62,6 @@ def _attach_routers(application: FastAPI) -> None:
     application.include_router(units_router, prefix="/api/v1")
     application.include_router(ontology_router, prefix="/api/v1")
     application.include_router(search_router, prefix="/api/v1")
-    application.include_router(reports_router, prefix="/api/v1")
     application.include_router(actions_router, prefix="/api/v1")
     application.include_router(notes_router, prefix="/api/v1")
     application.include_router(usage_router, prefix="/api/v1")
@@ -88,9 +85,6 @@ def _add_cors(application: FastAPI, settings: RemiSettings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    import asyncio
-    import os
-
     import structlog
 
     settings: RemiSettings = app.state.settings
@@ -109,36 +103,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment,
     )
 
-    load_task: asyncio.Task[None] | None = None
-    report_dir = os.environ.pop("REMI_LOAD_DIR", None)
-    if report_dir:
-        load_task = asyncio.create_task(
-            _load_reports_bg(container, Path(report_dir), log)
-        )
-    app.state.load_task = load_task
-
     yield
-    if load_task and not load_task.done():
-        load_task.cancel()
     log.info(Event.SERVER_SHUTDOWN)
-
-
-async def _load_reports_bg(
-    container: Container, report_dir: Path, log: Any,
-) -> None:
-    """Load reports in the background so the server starts accepting requests immediately."""
-    try:
-        result = await container.portfolio_loader.load_reports(report_dir)
-        log.info(
-            "load_reports_complete",
-            files=result.files_processed,
-            entities=result.total_entities,
-            relationships=result.total_relationships,
-            embedded=result.total_embedded,
-            errors=len(result.errors),
-        )
-    except Exception:
-        log.exception("load_reports_failed")
 
 
 def create_app() -> FastAPI:
@@ -168,8 +134,6 @@ def _attach_health(application: FastAPI) -> None:
 
     @application.get("/health", tags=["ops"])
     async def health() -> dict[str, Any]:
-        import asyncio as _aio
-
         container: Container | None = getattr(application.state, "container", None)
         trace_count = 0
         span_count = 0
@@ -179,16 +143,6 @@ def _attach_health(application: FastAPI) -> None:
                 trace_count = len(store._by_trace)
                 span_count = len(store._spans)
         uptime_s = round(_time.time() - _boot_time)
-
-        load_task: _aio.Task[None] | None = getattr(application.state, "load_task", None)
-        if load_task is None:
-            load_status = "not_requested"
-        elif not load_task.done():
-            load_status = "running"
-        elif load_task.exception():
-            load_status = "failed"
-        else:
-            load_status = "complete"
 
         llm_calls = 0
         llm_cost_usd = 0.0
@@ -203,7 +157,6 @@ def _attach_health(application: FastAPI) -> None:
             "status": "ok",
             "version": application.version,
             "uptime_s": uptime_s,
-            "data_load": load_status,
             "traces": trace_count,
             "spans": span_count,
             "llm_calls": llm_calls,

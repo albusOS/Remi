@@ -1,6 +1,8 @@
-"""Documents category — document parsing, LLM extraction, and persistence.
+"""Ingestion — report parsing, classification, mapping, and persistence.
 
-``DocumentIngestService`` orchestrates the full inbound path: parse, LLM
-extract, validate, resolve to domain models, and persist to PropertyStore
-+ KnowledgeStore.
+``DocumentIngestService`` orchestrates the full inbound path: parse,
+classify, map columns, validate, persist entities, and store the document.
+
+``IngestionService`` handles the persistence tier: mapped rows through
+per-entity-type persisters.
 """

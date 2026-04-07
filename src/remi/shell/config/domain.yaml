@@ -54,26 +54,31 @@ tbox:
         description: Late fee assessed after 5-day grace period
         trigger: rent_overdue_5_days
         deontic: MUST
+        governs: [Lease, Tenant]
 
       - id: policy:three_day_notice
         description: 3-day notice to pay or quit after 10 days overdue
         trigger: rent_overdue_10_days
         deontic: MUST
+        governs: [Tenant]
 
       - id: policy:demand_letter
         description: Formal demand letter sent after 10 days overdue
         trigger: rent_overdue_10_days
         deontic: MUST
+        governs: [Tenant]
 
       - id: policy:eviction_filing
         description: Eviction filing initiated within 30 days if demand unanswered
         trigger: demand_unanswered_30_days
         deontic: MUST
+        governs: [Tenant]
 
       - id: policy:owner_notification_legal
         description: Owner notified before any eviction filing
         trigger: pre_eviction_filing
         deontic: MUST
+        governs: [Owner, PropertyManager]
 
     thresholds:
       delinquency_critical_pct: 0.08
@@ -82,12 +87,14 @@ tbox:
 
       - cause: stalled_collections
         effect: chronic_delinquency
+        manifests_as: DelinquencyConcentration
         description: >
           When the collections workflow stalls at any step (no demand letter,
           no filing, no escalation), tenants carry balances indefinitely
 
       - cause: chronic_delinquency
         effect: eviction_filing
+        manifests_as: LegalEscalationRisk
         description: >
           Chronic unresolved balances eventually require legal action,
           increasing cost and vacancy risk
@@ -131,6 +138,7 @@ tbox:
         description: Renewal offer sent 90 days before lease expiration
         trigger: lease_expires_90_days
         deontic: MUST
+        governs: [Lease, PropertyManager]
 
       - id: policy:non_renewal_notice
         description: >
@@ -138,6 +146,7 @@ tbox:
           30-60 days). Timeline varies by lease.
         trigger: non_renewal_decision
         deontic: MUST
+        governs: [Lease, Tenant]
 
     thresholds:
       lease_cliff_pct: 0.30
@@ -149,12 +158,14 @@ tbox:
 
       - cause: missed_renewal_window
         effect: month_to_month_drift
+        manifests_as: LeaseExpirationCliff
         description: >
           Failing to offer renewal 90 days out causes leases to lapse into
           month-to-month, reducing revenue predictability
 
       - cause: month_to_month_drift
         effect: turnover_spike
+        manifests_as: OccupancyDrift
         description: >
           Month-to-month tenants leave with minimal notice, creating
           unpredictable vacancy clusters
@@ -165,6 +176,7 @@ tbox:
 
       - cause: below_market_rent
         effect: missed_revenue
+        manifests_as: BelowMarketRent
         description: Below-market rents lead to missed revenue opportunities
 
   # ===========================================================================
@@ -193,11 +205,13 @@ tbox:
         description: Emergency work orders responded to within 4 hours
         trigger: priority_emergency
         deontic: MUST
+        governs: [MaintenanceRequest, PropertyManager]
 
       - id: policy:make_ready_deadline
         description: Make-ready must complete within 14 days of move-out
         trigger: move_out_completed
         deontic: MUST
+        governs: [Unit, PropertyManager]
 
     thresholds:
       maintenance_backlog_days: 30
@@ -207,19 +221,21 @@ tbox:
 
       - cause: slow_maintenance
         effect: extended_vacancy
+        manifests_as: MaintenanceBacklog
         description: Slow maintenance response increases vacancy duration
 
       - cause: scattered_site_geography
         effect: maintenance_inefficiency
+        manifests_as: MaintenanceBacklog
         description: >
-          Scattered-site portfolios have higher per-unit maintenance costs
+          Scattered-site properties have higher per-unit maintenance costs
           due to travel time and vendor coordination
 
   # ===========================================================================
-  # Portfolio — occupancy, concentration, asset class performance
+  # Performance — occupancy, concentration, asset class performance
   # ===========================================================================
 
-  portfolio:
+  performance:
 
     signals:
 
@@ -250,7 +266,7 @@ tbox:
       - name: ConcentrationRisk
         description: >
           A single property, tenant type, or subsidy program represents too
-          large a share of a manager's portfolio. If external conditions
+          large a share of a manager's book. If external conditions
           change, that manager is disproportionately exposed.
         severity: medium
         entity: PropertyManager
@@ -272,6 +288,7 @@ tbox:
 
       - cause: subsidy_recertification_lapse
         effect: subsidy_payment_gap
+        manifests_as: ConcentrationRisk
         description: >
           Missing subsidy recertification deadlines causes payment gaps —
           the HA stops paying until paperwork clears
@@ -340,6 +357,7 @@ tbox:
           expiry to avoid gap in payments
         trigger: subsidy_expiring_60_days
         deontic: MUST
+        governs: [Lease, Tenant, PropertyManager]
 
       - id: policy:payment_plan_owner_approval
         description: >
@@ -347,11 +365,13 @@ tbox:
           manager commits
         trigger: payment_plan_above_threshold
         deontic: MUST
+        governs: [Tenant, Owner, PropertyManager]
 
     causal_chains:
 
       - cause: owner_decision_delay
         effect: collections_stall
+        manifests_as: PolicyBreach
         description: >
           When owner approval is required for payment plans or non-renewals,
           delays in owner response stall the manager's workflow
@@ -385,7 +405,7 @@ tbox:
     - name: DecliningPortfolio
       description: >
         A manager shows both occupancy drift AND below-percentile
-        performance. The portfolio is deteriorating and the manager is
+        performance. The book is deteriorating and the manager is
         already an outlier among peers.
       constituents: [OccupancyDrift, OutlierPerformance]
       scope: PropertyManager
@@ -403,59 +423,85 @@ abox:
       steps:
         - id: "turnover:lease_expiration"
           description: Lease expiration notice sent
+          applies_to: [Lease, Tenant]
         - id: "turnover:move_out_inspection"
           description: Move-out inspection scheduled
+          applies_to: [Unit, Tenant]
         - id: "turnover:security_deposit"
           description: Security deposit assessment
+          applies_to: [Lease, Tenant]
         - id: "turnover:make_ready_scope"
           description: Make-ready scope defined
+          applies_to: [Unit, PropertyManager]
         - id: "turnover:vendor_scheduling"
           description: Vendors scheduled for make-ready
+          applies_to: [Unit, Vendor]
         - id: "turnover:make_ready_work"
           description: Make-ready work in progress
+          applies_to: [Unit, MaintenanceRequest, Vendor]
         - id: "turnover:final_inspection"
           description: Final inspection after make-ready
+          applies_to: [Unit, PropertyManager]
         - id: "turnover:listing_published"
           description: Unit listed for rent
+          applies_to: [Unit, Property]
         - id: "turnover:new_lease_signed"
           description: New lease signed
+          applies_to: [Unit, Lease, Tenant]
 
     - name: collections
       steps:
         - id: "collections:rent_due"
           description: Rent due date
+          applies_to: [Lease, Tenant]
         - id: "collections:grace_period"
           description: Grace period active
+          applies_to: [Lease, Tenant]
         - id: "collections:late_fee_applied"
           description: Late fee applied
+          applies_to: [Lease, Tenant]
         - id: "collections:first_notice"
           description: First contact / reminder sent
+          applies_to: [Tenant, PropertyManager]
         - id: "collections:demand_letter"
           description: Formal demand letter
+          applies_to: [Tenant, PropertyManager]
         - id: "collections:three_day_notice"
           description: 3-day notice to pay or quit
+          applies_to: [Tenant, PropertyManager]
         - id: "collections:eviction_filing"
           description: Eviction filing
+          applies_to: [Tenant, PropertyManager, Owner]
         - id: "collections:court_hearing"
           description: Court hearing scheduled
+          applies_to: [Tenant, PropertyManager]
         - id: "collections:judgment"
           description: Judgment / resolution
+          applies_to: [Tenant, PropertyManager]
 
     - name: maintenance
       steps:
         - id: "maintenance:request_received"
           description: Maintenance request received
+          applies_to: [MaintenanceRequest, Unit, Tenant]
         - id: "maintenance:triage"
           description: Request triaged and prioritized
+          applies_to: [MaintenanceRequest, PropertyManager]
         - id: "maintenance:vendor_assigned"
           description: Vendor assigned
+          applies_to: [MaintenanceRequest, Vendor]
         - id: "maintenance:scheduled"
           description: Work scheduled with tenant
+          applies_to: [MaintenanceRequest, Tenant, Vendor]
         - id: "maintenance:in_progress"
           description: Work in progress
+          applies_to: [MaintenanceRequest, Vendor]
         - id: "maintenance:completion"
           description: Work completed
+          applies_to: [MaintenanceRequest, Vendor, Unit]
         - id: "maintenance:inspection"
           description: Post-work inspection
+          applies_to: [MaintenanceRequest, Unit, PropertyManager]
         - id: "maintenance:closed"
           description: Request closed
+          applies_to: [MaintenanceRequest]

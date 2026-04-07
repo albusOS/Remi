@@ -65,7 +65,7 @@ The `Container` (in `shell/config/container.py`) is pure wiring — it calls fac
 | Layer | What | Where |
 |-------|------|-------|
 | **Domain TBox** | What things mean — signal definitions, thresholds, policies, causal chains | `shell/config/domain.yaml` |
-| **Ontology** | What entity types exist and how they relate — typed properties, structural links, constraints | `application/infra/ontology/schema.py` |
+| **Graph** | What entity types exist and how they relate — typed properties, structural links, constraints | `application/infra/graph/schema.py` |
 | **Knowledge Graph** | What actually happened — entities, relationships, observations | `PropertyStore` + `KnowledgeStore` via `BridgedKnowledgeGraph` |
 
 The agent uses the TBox as its rubric for understanding the domain. It queries the knowledge graph through tools and reasons about what it finds — no precomputed signal engine in the loop.

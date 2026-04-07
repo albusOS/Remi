@@ -107,7 +107,7 @@ export function SessionInput({
                 >
                   <option value="">All managers</option>
                   {managers
-                    .filter((m) => m.total_units > 0 || m.property_count > 0)
+                    .filter((m) => m.metrics.total_units > 0 || m.property_count > 0)
                     .map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name}

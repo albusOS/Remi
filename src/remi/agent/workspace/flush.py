@@ -115,7 +115,7 @@ async def flush_before_trim(
 
     if len(new_content) > _MAX_CONTEXT_CHARS:
         overflow = len(new_content) - _MAX_CONTEXT_CHARS
-        new_content = header + new_content[len(header) + overflow:]
+        new_content = header + new_content[len(header) + overflow :]
 
     await sandbox.write_file(session_id, _CONTEXT_FILE, new_content)
 

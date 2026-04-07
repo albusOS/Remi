@@ -152,6 +152,7 @@ class PostgresVectorStore(VectorStore):
     async def count(self) -> int:
         async with self._sf() as session:
             from sqlalchemy import func
+
             stmt = select(func.count()).select_from(VectorEmbeddingRow)
             result = await session.exec(stmt)
             return result.one()

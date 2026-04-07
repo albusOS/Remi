@@ -56,7 +56,9 @@ async def _assert_fact(
 
     if related_to and relation_type:
         await kg.put_link(
-            eid, relation_type, related_to,
+            eid,
+            relation_type,
+            related_to,
             properties={"provenance_source": "user"},
         )
 
@@ -71,9 +73,7 @@ async def _assert_fact(
                     entity_type=entity_type,
                     entity_id=eid,
                     change_type=ChangeType.CREATED,
-                    fields=tuple(
-                        FieldChange(field=k, new_value=v) for k, v in properties.items()
-                    ),
+                    fields=tuple(FieldChange(field=k, new_value=v) for k, v in properties.items()),
                     source=ChangeSource.AGENT_ASSERTION,
                     timestamp=now,
                 ),
@@ -153,18 +153,24 @@ async def _add_context(
     """Attach a user-context annotation to an entity."""
     aid = f"annotation:{uuid4().hex[:12]}"
 
-    await kg.put_object("Annotation", aid, {
-        "annotation_id": aid,
-        "content": context,
-        "annotation_type": "user_context",
-        "target_entity_id": entity_id,
-        "target_entity_type": entity_type,
-        "source": "user",
-        "confidence": "1.0",
-        "extracted_at": datetime.now(UTC).isoformat(),
-    })
+    await kg.put_object(
+        "Annotation",
+        aid,
+        {
+            "annotation_id": aid,
+            "content": context,
+            "annotation_type": "user_context",
+            "target_entity_id": entity_id,
+            "target_entity_type": entity_type,
+            "source": "user",
+            "confidence": "1.0",
+            "extracted_at": datetime.now(UTC).isoformat(),
+        },
+    )
     await kg.put_link(
-        entity_id, "HAS_ANNOTATION", aid,
+        entity_id,
+        "HAS_ANNOTATION",
+        aid,
         properties={"annotation_type": "user_context"},
     )
 
@@ -249,8 +255,10 @@ class AssertionToolProvider(ToolProvider):
                 args=[
                     ToolArg(name="entity_type", description="Entity type name", required=True),
                     ToolArg(
-                        name="properties", description="Entity properties as JSON",
-                        type="object", required=True,
+                        name="properties",
+                        description="Entity properties as JSON",
+                        type="object",
+                        required=True,
                     ),
                     ToolArg(name="entity_id", description="Optional entity ID"),
                     ToolArg(name="related_to", description="ID of entity to link to"),
@@ -271,8 +279,10 @@ class AssertionToolProvider(ToolProvider):
                     ToolArg(name="entity_type", description="Entity type name", required=True),
                     ToolArg(name="entity_id", description="Entity ID to correct", required=True),
                     ToolArg(
-                        name="corrections", description="Field corrections as JSON",
-                        type="object", required=True,
+                        name="corrections",
+                        description="Field corrections as JSON",
+                        type="object",
+                        required=True,
                     ),
                 ],
             ),

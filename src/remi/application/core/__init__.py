@@ -16,7 +16,6 @@ from remi.application.core.events import (
     FieldChange,
 )
 from remi.application.core.protocols import (
-    DocumentRepository,
     EmbedRequest,
     KBEntity,
     KBRelationship,
@@ -33,7 +32,6 @@ __all__ = [
     "ChangeSet",
     "ChangeSource",
     "ChangeType",
-    "DocumentRepository",
     "EmbedRequest",
     "EventStore",
     "FieldChange",

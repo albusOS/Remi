@@ -187,24 +187,23 @@ src/remi/
 
   application/        # Real estate product (hexagonal)
     core/             Pure business: models, protocols, rules, events
-    portfolio/        Entity resolvers — the read side of the domain:
+    views/            Computed read-models — the read side of the domain:
       managers.py     Manager aggregation and ranking
-      properties.py   Property list and detail
-      units.py        Cross-property unit queries
-      leases.py       Lease list and expiring-lease queries
+      properties.py   Property list, detail, cross-property unit queries
+      leases.py       Lease list, expiring-lease calendar, tenant detail
       maintenance.py  Maintenance list and summary
-      portfolios.py   Portfolio list and summary
       dashboard.py    Composite dashboard views
       rent_roll.py    Detailed rent-roll assembly
-      auto_assign.py  KB-tag-based property-to-manager assignment
+      signals.py      Signal digest and grouping
       _models.py      Read-model types (Pydantic)
-    services/         Orchestration pipelines (not entity access):
+    services/         Orchestration pipelines (writes + async work):
       ingestion/      Rule-based + LLM ingestion (rules.py, pipeline.py,
                       service.py, persist.py, managers.py)
+      auto_assign.py  KB-tag-based property-to-manager assignment
       embedding/      Vector indexing pipeline
-      seeding/        Batch report loading (PortfolioLoader)
+      seeding/        Batch report loading (ReportLoader)
       search.py       RE-aware hybrid search
-    infra/            Port implementations: stores (mem, pg), ontology,
+    infra/            Port implementations: stores (mem, pg), graph,
                       ports (agent ↔ application bridges)
     tools/            Agent tool registrations
     agents/           RE agent YAML manifests
@@ -258,14 +257,14 @@ Port interfaces for storage live in `application/core/protocols.py` as
 
 ## Boundary Model Discipline
 
-- **`application/portfolio/` owns read-models** (`RentRollResult`, etc.).
-- **`api/` schemas re-export** from `portfolio/` — no duplicate Pydantic classes.
-  Only HTTP-specific types (request bodies, envelope wrappers) are defined in `api/`.
-- **CLI delegates** to resolvers and renders the result — no inline store queries.
+- **`application/views/` owns read-models** (`RentRollResult`, etc.).
+- **`api/schemas.py`** imports only types used as field types in envelope
+  classes. Routes import read-models directly from `views`.
+- **CLI delegates** to views and renders the result — no inline store queries.
 - **No `SomeApiType(**service_result.model_dump())`** between identical types.
 
-**There is no `services/queries/` package.** Entity resolvers live in
-`application/portfolio/`. Do not create or import from
+**There is no `services/queries/` package.** Computed views live in
+`application/views/`. Do not create or import from
 `remi.application.services.queries`.
 
 ## Container Discipline
@@ -280,7 +279,7 @@ Port interfaces for storage live in `application/core/protocols.py` as
 
 Each module owns the factory for the thing it defines:
 
-- `application/infra/ontology/bridge.py` -> `build_knowledge_graph()`
+- `application/infra/graph/bridge.py` -> `build_knowledge_graph()`
 - `agent/context/builder.py` -> `build_context_builder()`
 - `application/infra/stores/factory.py` -> `build_store_suite()`
 - `agent/llm/factory.py` -> `build_provider_factory()`

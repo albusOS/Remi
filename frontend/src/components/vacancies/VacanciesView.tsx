@@ -8,15 +8,19 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ManagerFilter } from "@/components/ui/ManagerFilter";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { VacancyTracker } from "@/lib/types";
 
 export function VacanciesView() {
   const [managerId, setManagerId] = useState("");
-  const { data, loading } = useApiQuery<VacancyTracker>(
-    () => api.vacancyTracker(managerId || undefined),
-    [managerId]
+
+  const effectiveScope = managerId ? { manager_id: managerId } : undefined;
+
+  const { data, loading, error, refetch } = useApiQuery<VacancyTracker>(
+    () => api.vacancyTracker(effectiveScope),
+    [managerId],
   );
 
   return (
@@ -56,28 +60,20 @@ export function VacanciesView() {
           </MetricStrip>
         )}
 
+        <ErrorBanner error={error} onRetry={refetch} />
+
         {loading && (
           <div className="py-12 text-center text-sm text-fg-faint animate-pulse">Loading...</div>
         )}
 
         {!loading && data && data.units.length > 0 && (() => {
-          const listedCount = data.units.filter((u) => u.listed_on_website || u.listed_on_internet).length;
-          const notListedCount = data.units.length - listedCount;
-          const stuckCount = data.units.filter((u) => (u.days_vacant ?? 0) > 30 && !u.listed_on_website).length;
+          const stuckCount = data.units.filter((u) => (u.days_vacant ?? 0) > 30).length;
           return (
             <>
               <div className="flex items-center gap-4 text-xs">
-                <span className="text-fg-secondary">
-                  <span className="font-semibold text-fg">{listedCount}</span> listed
-                </span>
-                {notListedCount > 0 && (
-                  <span className="text-warn">
-                    <span className="font-semibold">{notListedCount}</span> not listed
-                  </span>
-                )}
                 {stuckCount > 0 && (
                   <span className="text-error">
-                    <span className="font-semibold">{stuckCount}</span> unlisted 30+ days
+                    <span className="font-semibold">{stuckCount}</span> vacant 30+ days
                   </span>
                 )}
               </div>
@@ -92,14 +88,12 @@ export function VacanciesView() {
                         <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide">Status</th>
                         <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide">Days Vacant</th>
                         <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide">Market Rent</th>
-                        <th className="text-center px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide">Website</th>
-                        <th className="text-center px-4 py-2.5 text-[11px] font-semibold text-fg-muted uppercase tracking-wide">Internet</th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.units.map((u) => {
                         const isNotice = u.occupancy_status?.includes("notice");
-                        const stuck = (u.days_vacant ?? 0) > 30 && !u.listed_on_website;
+                        const stuck = (u.days_vacant ?? 0) > 30;
                         return (
                           <tr key={u.unit_id} className={`border-b border-border-subtle hover:bg-surface-raised transition-colors ${stuck ? "bg-error-soft/30" : ""}`}>
                             <td className="px-4 py-2.5">
@@ -121,20 +115,6 @@ export function VacanciesView() {
                               {u.days_vacant ?? "—"}
                             </td>
                             <td className="px-4 py-2.5 text-right font-mono text-fg-secondary">{fmt$(u.market_rent)}</td>
-                            <td className="px-4 py-2.5 text-center">
-                              {u.listed_on_website ? (
-                                <span className="text-ok text-xs">Yes</span>
-                              ) : (
-                                <span className="text-error text-xs">No</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2.5 text-center">
-                              {u.listed_on_internet ? (
-                                <span className="text-ok text-xs">Yes</span>
-                              ) : (
-                                <span className="text-error text-xs">No</span>
-                              )}
-                            </td>
                           </tr>
                         );
                       })}

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from remi.agent.observe.types import SpanKind, SpanStatus
+from remi.agent.observe.mem import InMemoryTraceStore
 from remi.agent.observe.types import (
+    SpanKind,
+    SpanStatus,
     Tracer,
     get_current_span_id,
     get_current_trace_id,
 )
-from remi.agent.observe.mem import InMemoryTraceStore
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ async def test_child_spans_form_tree(
 ) -> None:
     async with (
         tracer.start_trace("root") as root,
-        root.span(SpanKind.ENTAILMENT, "child1"),
+        root.span(SpanKind.REASONING, "child1"),
         root.span(SpanKind.LLM_CALL, "child2"),
     ):
         pass
@@ -71,7 +72,7 @@ async def test_nested_child_spans(
     async with (
         tracer.start_trace("root") as root,
         root.span(
-            SpanKind.ENTAILMENT,
+            SpanKind.REASONING,
             "parent",
         ) as parent,
         parent.span(SpanKind.SIGNAL, "grandchild"),
@@ -136,7 +137,7 @@ async def test_standalone_span_creates_own_trace(
     tracer: Tracer,
     store: InMemoryTraceStore,
 ) -> None:
-    async with tracer.span(SpanKind.ENTAILMENT, "orphan") as ctx:
+    async with tracer.span(SpanKind.REASONING, "orphan") as ctx:
         pass
 
     spans = await store.list_spans(ctx.trace_id)

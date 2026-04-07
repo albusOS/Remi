@@ -1,56 +1,34 @@
-"""Schema-driven row resolution — LLM row type names to domain model helpers.
+"""Type coercion, address parsing, and enum maps for ingestion rows.
 
-Maps LLM-extracted row types to canonical ontology names and provides
-type-coercion helpers (strings to enums, decimals, dates) shared by the
-persistence layer in ``persist.py``.
+Pure leaf module — zero I/O, zero LLM. Imported by persisters, context,
+and matcher. Every function is deterministic and safe to call on arbitrary
+user-supplied strings.
 """
 
 from __future__ import annotations
 
-from datetime import date
-from decimal import Decimal
-from typing import Any
+import re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
-import structlog
-
-from remi.application.core.models import (
-    Address,
-    MaintenanceCategory,
+from remi.application.core.models.address import Address
+from remi.application.core.models.enums import (
     MaintenanceStatus,
-    OccupancyStatus,
     Priority,
     TenantStatus,
-    UnitStatus,
+    TradeCategory,
 )
 
-_log = structlog.get_logger(__name__)
-
-LEASE_START_FALLBACK = date(2000, 1, 1)
-LEASE_END_FALLBACK = date(2099, 12, 31)
-
-
 # ---------------------------------------------------------------------------
-# Type resolution — ontology names + legacy compat
+# Entity types that have ROW_PERSISTERS in persisters.py
 # ---------------------------------------------------------------------------
-
-LEGACY_TYPE_MAP: dict[str, str] = {
-    "unit": "Unit",
-    "tenant_balance": "Tenant",
-    "lease": "Lease",
-    "property": "Property",
-}
-
-
-def resolve_row_type(raw_type: str) -> str:
-    """Map legacy/lowercase type names to canonical ontology names."""
-    return LEGACY_TYPE_MAP.get(raw_type, raw_type)
-
 
 PERSISTABLE_TYPES: frozenset[str] = frozenset(
     {
         "Unit",
         "Tenant",
         "Lease",
+        "BalanceObservation",
         "Property",
         "MaintenanceRequest",
         "Owner",
@@ -59,18 +37,16 @@ PERSISTABLE_TYPES: frozenset[str] = frozenset(
     }
 )
 
+# ---------------------------------------------------------------------------
+# Sentinel dates for leases without explicit bounds
+# ---------------------------------------------------------------------------
+
+LEASE_START_FALLBACK = date(2000, 1, 1)
+LEASE_END_FALLBACK = date(2099, 12, 31)
 
 # ---------------------------------------------------------------------------
-# Enum mapping tables
+# Enum maps — raw report strings to domain enums
 # ---------------------------------------------------------------------------
-
-OCCUPANCY_MAP: dict[str, OccupancyStatus] = {
-    "occupied": OccupancyStatus.OCCUPIED,
-    "notice_rented": OccupancyStatus.NOTICE_RENTED,
-    "notice_unrented": OccupancyStatus.NOTICE_UNRENTED,
-    "vacant_rented": OccupancyStatus.VACANT_RENTED,
-    "vacant_unrented": OccupancyStatus.VACANT_UNRENTED,
-}
 
 TENANT_STATUS_MAP: dict[str, TenantStatus] = {
     "current": TenantStatus.CURRENT,
@@ -80,86 +56,161 @@ TENANT_STATUS_MAP: dict[str, TenantStatus] = {
     "hearing": TenantStatus.HEARING,
     "judgment": TenantStatus.JUDGMENT,
     "evict": TenantStatus.EVICT,
+    "eviction": TenantStatus.EVICT,
     "past": TenantStatus.PAST,
 }
 
-UNIT_STATUS_FROM_OCCUPANCY: dict[OccupancyStatus, UnitStatus] = {
-    OccupancyStatus.OCCUPIED: UnitStatus.OCCUPIED,
-    OccupancyStatus.NOTICE_RENTED: UnitStatus.OCCUPIED,
-    OccupancyStatus.NOTICE_UNRENTED: UnitStatus.OCCUPIED,
-    OccupancyStatus.VACANT_RENTED: UnitStatus.VACANT,
-    OccupancyStatus.VACANT_UNRENTED: UnitStatus.VACANT,
+MAINTENANCE_CATEGORY_MAP: dict[str, TradeCategory] = {
+    "plumbing": TradeCategory.PLUMBING,
+    "electrical": TradeCategory.ELECTRICAL,
+    "hvac": TradeCategory.HVAC,
+    "appliance": TradeCategory.APPLIANCE,
+    "structural": TradeCategory.STRUCTURAL,
+    "general": TradeCategory.GENERAL,
+    "cleaning": TradeCategory.CLEANING,
+    "painting": TradeCategory.PAINTING,
+    "flooring": TradeCategory.FLOORING,
+    "roofing": TradeCategory.ROOFING,
+    "landscaping": TradeCategory.LANDSCAPING,
+    "other": TradeCategory.OTHER,
 }
 
-MAINTENANCE_CATEGORY_MAP: dict[str, MaintenanceCategory] = {v.value: v for v in MaintenanceCategory}
-MAINTENANCE_STATUS_MAP: dict[str, MaintenanceStatus] = {v.value: v for v in MaintenanceStatus}
-PRIORITY_MAP: dict[str, Priority] = {v.value: v for v in Priority}
+MAINTENANCE_STATUS_MAP: dict[str, MaintenanceStatus] = {
+    "open": MaintenanceStatus.OPEN,
+    "in_progress": MaintenanceStatus.IN_PROGRESS,
+    "in progress": MaintenanceStatus.IN_PROGRESS,
+    "completed": MaintenanceStatus.COMPLETED,
+    "complete": MaintenanceStatus.COMPLETED,
+    "closed": MaintenanceStatus.COMPLETED,
+    "cancelled": MaintenanceStatus.CANCELLED,
+    "canceled": MaintenanceStatus.CANCELLED,
+}
 
+PRIORITY_MAP: dict[str, Priority] = {
+    "low": Priority.LOW,
+    "medium": Priority.MEDIUM,
+    "normal": Priority.MEDIUM,
+    "high": Priority.HIGH,
+    "urgent": Priority.URGENT,
+    "emergency": Priority.EMERGENCY,
+}
 
 # ---------------------------------------------------------------------------
-# Parsing / coercion helpers
+# Type coercion — safe on arbitrary user-supplied strings
 # ---------------------------------------------------------------------------
 
-
-def property_name(full_address: str) -> str:
-    """Extract the property name from a full address string."""
-    if " - " in full_address:
-        return full_address.split(" - ")[0].strip()
-    parts = full_address.split(",")
-    return parts[0].strip() if len(parts) >= 2 else full_address.strip()
-
-
-def parse_address(raw: str) -> Address:
-    """Parse a raw address string into an Address model."""
-    name = property_name(raw)
-    parts = raw.rsplit(",", 1)
-    city, state, zip_code = "Unknown", "XX", ""
-    if len(parts) >= 2:
-        tail = parts[1].strip().split()
-        if len(tail) >= 2:
-            state, zip_code = tail[0], tail[1]
-        elif tail:
-            state = tail[0]
-    return Address(street=name, city=city, state=state, zip_code=zip_code)
+_DATE_FORMATS = (
+    "%m/%d/%Y",
+    "%Y-%m-%d",
+    "%m-%d-%Y",
+    "%m/%d/%y",
+    "%Y/%m/%d",
+    "%d-%b-%Y",
+    "%b %d, %Y",
+)
 
 
-def to_decimal(val: Any, default: str = "0") -> Decimal:
-    """Coerce a value to Decimal, falling back to *default*."""
-    if val is None:
-        return Decimal(default)
-    try:
-        return Decimal(str(val))
-    except Exception:
-        _log.warning(
-            "decimal_parse_fallback",
-            raw_value=str(val)[:50],
-            default=default,
-        )
-        return Decimal(default)
-
-
-def to_date(val: Any) -> date | None:
-    """Coerce a value to a date, trying common formats."""
+def to_date(val: object) -> date | None:
+    """Best-effort date parsing. Returns None on failure."""
     if val is None:
         return None
+    if isinstance(val, datetime):
+        return val.date()
     if isinstance(val, date):
         return val
-    from datetime import datetime as _dt
-
-    s = str(val).strip()
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+    text = str(val).strip()
+    if not text:
+        return None
+    for fmt in _DATE_FORMATS:
         try:
-            return _dt.strptime(s, fmt).date()
+            return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
     return None
 
 
-def to_int(val: Any) -> int | None:
-    """Coerce a value to int, returning None on failure."""
+_CURRENCY_STRIP_RE = re.compile(r"[$,\s]")
+_PARENS_RE = re.compile(r"^\((.+)\)$")
+
+
+def to_decimal(val: object) -> Decimal:
+    """Parse a currency/numeric value into Decimal. Returns 0 on failure."""
+    if val is None:
+        return Decimal("0")
+    if isinstance(val, Decimal):
+        return val
+    if isinstance(val, (int, float)):
+        return Decimal(str(val))
+    text = _CURRENCY_STRIP_RE.sub("", str(val).strip())
+    if not text:
+        return Decimal("0")
+    m = _PARENS_RE.match(text)
+    if m:
+        text = f"-{m.group(1)}"
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return Decimal("0")
+
+
+def to_int(val: object) -> int | None:
+    """Safe integer coercion. Returns None on failure."""
     if val is None:
         return None
+    if isinstance(val, int):
+        return val
     try:
-        return int(val)
-    except (TypeError, ValueError):
+        return int(float(str(val).strip()))
+    except (ValueError, TypeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Address / property name helpers
+# ---------------------------------------------------------------------------
+
+_CITY_STATE_ZIP_RE = re.compile(r",\s*([A-Za-z\s]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$")
+
+_TRAILING_STATE_RE = re.compile(r",\s*([A-Z]{2})\s*$")
+
+
+def property_name(address: str) -> str:
+    """Extract the canonical short name from a full address.
+
+    Strips city/state/zip suffix: "123 Main St, Pittsburgh, PA 15203" -> "123 Main St"
+    """
+    addr = address.strip()
+    if not addr:
+        return ""
+    m = _CITY_STATE_ZIP_RE.search(addr)
+    if m:
+        return addr[: m.start()].strip().rstrip(",")
+    m = _TRAILING_STATE_RE.search(addr)
+    if m:
+        return addr[: m.start()].strip().rstrip(",")
+    return addr
+
+
+def parse_address(raw: str) -> Address:
+    """Split a raw address string into an Address model.
+
+    Handles "123 Main St, Pittsburgh, PA 15203" and partial addresses
+    where city/state/zip may be missing.
+    """
+    raw = raw.strip()
+    m = _CITY_STATE_ZIP_RE.search(raw)
+    if m:
+        street = raw[: m.start()].strip().rstrip(",")
+        return Address(
+            street=street,
+            city=m.group(1).strip(),
+            state=m.group(2),
+            zip_code=m.group(3),
+        )
+    parts = [p.strip() for p in raw.split(",")]
+    return Address(
+        street=parts[0] if parts else raw,
+        city=parts[1] if len(parts) > 1 else "",
+        state=parts[2].split()[0] if len(parts) > 2 else "",
+        zip_code=(parts[2].split()[1] if len(parts) > 2 and len(parts[2].split()) > 1 else ""),
+    )

@@ -83,7 +83,8 @@ class PostgresKnowledgeStore(KnowledgeStore):
 
         async with self._sf() as session:
             existing = await session.get(
-                KGEntityRow, (entity.entity_id, entity.namespace),
+                KGEntityRow,
+                (entity.entity_id, entity.namespace),
             )
             if existing is not None:
                 existing.entity_type = entity.entity_type
@@ -125,7 +126,8 @@ class PostgresKnowledgeStore(KnowledgeStore):
         if query:
             q = query.lower()
             entities = [
-                e for e in entities
+                e
+                for e in entities
                 if q in e.entity_id.lower()
                 or q in e.entity_type.lower()
                 or q in str(e.properties).lower()
@@ -171,10 +173,13 @@ class PostgresKnowledgeStore(KnowledgeStore):
                 stmt = stmt.where(col(KGRelationshipRow.target_id) == entity_id)
             else:
                 from sqlalchemy import or_
-                stmt = stmt.where(or_(
-                    col(KGRelationshipRow.source_id) == entity_id,
-                    col(KGRelationshipRow.target_id) == entity_id,
-                ))
+
+                stmt = stmt.where(
+                    or_(
+                        col(KGRelationshipRow.source_id) == entity_id,
+                        col(KGRelationshipRow.target_id) == entity_id,
+                    )
+                )
             if relation_type:
                 stmt = stmt.where(col(KGRelationshipRow.relation_type) == relation_type)
             result = await session.exec(stmt)
@@ -224,11 +229,15 @@ class PostgresKnowledgeStore(KnowledgeStore):
                 return False
             await session.delete(row)
 
-            rel_stmt = select(KGRelationshipRow).where(
-                col(KGRelationshipRow.namespace) == namespace,
-            ).where(
-                (col(KGRelationshipRow.source_id) == entity_id)
-                | (col(KGRelationshipRow.target_id) == entity_id)
+            rel_stmt = (
+                select(KGRelationshipRow)
+                .where(
+                    col(KGRelationshipRow.namespace) == namespace,
+                )
+                .where(
+                    (col(KGRelationshipRow.source_id) == entity_id)
+                    | (col(KGRelationshipRow.target_id) == entity_id)
+                )
             )
             rel_result = await session.exec(rel_stmt)
             for rel_row in rel_result.all():

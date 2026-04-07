@@ -20,6 +20,10 @@ function reportLabel(reportType: string): string {
  *   "Lease agreement — 14 passages indexed"
  */
 export function summarizeUpload(r: UploadResult): string {
+  if (r.duplicate) {
+    return `Duplicate — already uploaded as "${r.duplicate.existing_filename}"`;
+  }
+
   const label = reportLabel(r.report_type);
   const { entities_extracted, relationships_extracted } = r.knowledge;
 
@@ -53,6 +57,12 @@ export function summarizeUpload(r: UploadResult): string {
  */
 export function uploadWarnings(r: UploadResult): string[] {
   const warnings: string[] = [];
+
+  if (r.duplicate) {
+    warnings.push(`This file was already uploaded on ${new Date(r.duplicate.uploaded_at).toLocaleDateString()}. No data was re-ingested.`);
+    return warnings;
+  }
+
   const k = r.knowledge;
 
   if (k.rows_rejected > 0) {

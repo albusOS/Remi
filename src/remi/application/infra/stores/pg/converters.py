@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -9,37 +10,43 @@ from sqlmodel import SQLModel
 
 from remi.application.core.models import (
     ActionItem,
-    ActionItemPriority,
     ActionItemStatus,
     Address,
+    BalanceObservation,
+    DateRange,
+    Document,
+    DocumentType,
+    ImportStatus,
     Lease,
     LeaseStatus,
-    MaintenanceCategory,
     MaintenanceRequest,
+    MaintenanceSource,
     MaintenanceStatus,
     Note,
     NoteProvenance,
-    OccupancyStatus,
     Owner,
-    Portfolio,
+    Platform,
     Priority,
     Property,
     PropertyManager,
     PropertyType,
+    ReportScope,
+    ReportType,
     Tenant,
     TenantStatus,
+    TradeCategory,
     Unit,
-    UnitStatus,
+    UnitType,
     Vendor,
-    VendorCategory,
 )
 from remi.application.infra.stores.pg.tables import (
     ActionItemRow,
+    AppDocumentRow,
+    BalanceObservationRow,
     LeaseRow,
     MaintenanceRequestRow,
     NoteRow,
     OwnerRow,
-    PortfolioRow,
     PropertyManagerRow,
     PropertyRow,
     TenantRow,
@@ -62,7 +69,7 @@ def manager_from_row(row: PropertyManagerRow) -> PropertyManager:
         territory=row.territory,
         max_units=row.max_units,
         license_number=row.license_number,
-        portfolio_ids=row.portfolio_ids,
+        source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
 
@@ -79,47 +86,15 @@ def manager_to_row(m: PropertyManager) -> PropertyManagerRow:
         territory=m.territory,
         max_units=m.max_units,
         license_number=m.license_number,
-        portfolio_ids=list(m.portfolio_ids),
+        source_document_id=m.source_document_id,
         created_at=m.created_at,
-    )
-
-
-def portfolio_from_row(row: PortfolioRow) -> Portfolio:
-    from remi.application.core.models.enums import AssetClass
-
-    return Portfolio(
-        id=row.id,
-        manager_id=row.manager_id,
-        name=row.name,
-        description=row.description,
-        asset_class=AssetClass(row.asset_class) if row.asset_class else None,
-        strategy=row.strategy,
-        target_occupancy=row.target_occupancy,
-        market=row.market,
-        property_ids=row.property_ids,
-        created_at=row.created_at,
-    )
-
-
-def portfolio_to_row(p: Portfolio) -> PortfolioRow:
-    return PortfolioRow(
-        id=p.id,
-        manager_id=p.manager_id,
-        name=p.name,
-        description=p.description,
-        asset_class=p.asset_class.value if p.asset_class else None,
-        strategy=p.strategy,
-        target_occupancy=p.target_occupancy,
-        market=p.market,
-        property_ids=list(p.property_ids),
-        created_at=p.created_at,
     )
 
 
 def property_from_row(row: PropertyRow) -> Property:
     return Property(
         id=row.id,
-        portfolio_id=row.portfolio_id,
+        manager_id=row.manager_id,
         name=row.name,
         address=Address(
             street=row.address_street,
@@ -128,8 +103,13 @@ def property_from_row(row: PropertyRow) -> Property:
             zip_code=row.address_zip_code,
             country=row.address_country,
         ),
-        property_type=PropertyType(row.property_type),
+        property_type=(
+            PropertyType.MULTI_FAMILY
+            if row.property_type == "residential"
+            else PropertyType(row.property_type)
+        ),
         year_built=row.year_built,
+        owner_id=row.owner_id,
         source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
@@ -138,10 +118,11 @@ def property_from_row(row: PropertyRow) -> Property:
 def property_to_row(p: Property) -> PropertyRow:
     return PropertyRow(
         id=p.id,
-        portfolio_id=p.portfolio_id,
+        manager_id=p.manager_id,
         name=p.name,
         property_type=p.property_type.value,
         year_built=p.year_built,
+        owner_id=p.owner_id,
         address_street=p.address.street,
         address_city=p.address.city,
         address_state=p.address.state,
@@ -160,15 +141,11 @@ def unit_from_row(row: UnitRow) -> Unit:
         bedrooms=row.bedrooms,
         bathrooms=row.bathrooms,
         sqft=row.sqft,
-        market_rent=row.market_rent,
-        current_rent=row.current_rent,
-        status=UnitStatus(row.status),
-        occupancy_status=OccupancyStatus(row.occupancy_status) if row.occupancy_status else None,
-        days_vacant=row.days_vacant,
-        listed_on_website=row.listed_on_website,
-        listed_on_internet=row.listed_on_internet,
+        unit_type=UnitType(row.unit_type) if row.unit_type else None,
         floor=row.floor,
+        market_rent=row.market_rent,
         source_document_id=row.source_document_id,
+        created_at=row.created_at,
     )
 
 
@@ -180,15 +157,11 @@ def unit_to_row(u: Unit) -> UnitRow:
         bedrooms=u.bedrooms,
         bathrooms=u.bathrooms,
         sqft=u.sqft,
-        market_rent=u.market_rent,
-        current_rent=u.current_rent,
-        status=u.status.value,
-        occupancy_status=u.occupancy_status.value if u.occupancy_status else None,
-        days_vacant=u.days_vacant,
-        listed_on_website=u.listed_on_website,
-        listed_on_internet=u.listed_on_internet,
+        unit_type=u.unit_type.value if u.unit_type else None,
         floor=u.floor,
+        market_rent=u.market_rent,
         source_document_id=u.source_document_id,
+        created_at=u.created_at,
     )
 
 
@@ -205,6 +178,11 @@ def lease_from_row(row: LeaseRow) -> Lease:
         status=LeaseStatus(row.status),
         market_rent=row.market_rent,
         is_month_to_month=row.is_month_to_month,
+        notice_date=row.notice_date,
+        move_in_date=row.move_in_date,
+        move_out_date=row.move_out_date,
+        first_seen_at=row.first_seen_at,
+        last_confirmed_at=row.last_confirmed_at,
         source_document_id=row.source_document_id,
     )
 
@@ -222,6 +200,11 @@ def lease_to_row(le: Lease) -> LeaseRow:
         status=le.status.value,
         market_rent=le.market_rent,
         is_month_to_month=le.is_month_to_month,
+        notice_date=le.notice_date,
+        move_in_date=le.move_in_date,
+        move_out_date=le.move_out_date,
+        first_seen_at=le.first_seen_at,
+        last_confirmed_at=le.last_confirmed_at,
         source_document_id=le.source_document_id,
     )
 
@@ -233,12 +216,6 @@ def tenant_from_row(row: TenantRow) -> Tenant:
         email=row.email,
         phone=row.phone,
         status=TenantStatus(row.status),
-        balance_owed=row.balance_owed,
-        balance_0_30=row.balance_0_30,
-        balance_30_plus=row.balance_30_plus,
-        last_payment_date=row.last_payment_date,
-        tags=row.tags,
-        lease_ids=row.lease_ids,
         source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
@@ -251,14 +228,40 @@ def tenant_to_row(t: Tenant) -> TenantRow:
         email=t.email,
         phone=t.phone,
         status=t.status.value,
-        balance_owed=t.balance_owed,
-        balance_0_30=t.balance_0_30,
-        balance_30_plus=t.balance_30_plus,
-        last_payment_date=t.last_payment_date,
-        tags=list(t.tags),
-        lease_ids=list(t.lease_ids),
         source_document_id=t.source_document_id,
         created_at=t.created_at,
+    )
+
+
+def balance_observation_from_row(row: BalanceObservationRow) -> BalanceObservation:
+    return BalanceObservation(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        lease_id=row.lease_id,
+        property_id=row.property_id,
+        observed_at=row.observed_at,
+        balance_total=row.balance_total,
+        balance_0_30=row.balance_0_30,
+        balance_30_plus=row.balance_30_plus,
+        last_payment_date=row.last_payment_date,
+        source_document_id=row.source_document_id,
+        created_at=row.created_at,
+    )
+
+
+def balance_observation_to_row(obs: BalanceObservation) -> BalanceObservationRow:
+    return BalanceObservationRow(
+        id=obs.id,
+        tenant_id=obs.tenant_id,
+        lease_id=obs.lease_id,
+        property_id=obs.property_id,
+        observed_at=obs.observed_at,
+        balance_total=obs.balance_total,
+        balance_0_30=obs.balance_0_30,
+        balance_30_plus=obs.balance_30_plus,
+        last_payment_date=obs.last_payment_date,
+        source_document_id=obs.source_document_id,
+        created_at=obs.created_at,
     )
 
 
@@ -268,15 +271,22 @@ def maintenance_from_row(row: MaintenanceRequestRow) -> MaintenanceRequest:
         unit_id=row.unit_id,
         property_id=row.property_id,
         tenant_id=row.tenant_id,
-        category=MaintenanceCategory(row.category),
+        category=TradeCategory(row.category),
         priority=Priority(row.priority),
+        source=MaintenanceSource(row.source) if row.source else None,
         title=row.title,
         description=row.description,
         status=MaintenanceStatus(row.status),
-        created_at=row.created_at,
+        scheduled_date=row.scheduled_date,
+        completed_date=row.completed_date,
         resolved_at=row.resolved_at,
+        sla_hours=row.sla_hours,
         cost=row.cost,
         vendor=row.vendor,
+        vendor_id=row.vendor_id,
+        content_hash=row.content_hash,
+        source_document_id=row.source_document_id,
+        created_at=row.created_at,
     )
 
 
@@ -288,14 +298,91 @@ def maintenance_to_row(mr: MaintenanceRequest) -> MaintenanceRequestRow:
         tenant_id=mr.tenant_id,
         category=mr.category.value,
         priority=mr.priority.value,
+        source=mr.source.value if mr.source else None,
         title=mr.title,
         description=mr.description,
         status=mr.status.value,
-        created_at=mr.created_at,
+        scheduled_date=mr.scheduled_date,
+        completed_date=mr.completed_date,
         resolved_at=mr.resolved_at,
+        sla_hours=mr.sla_hours,
         cost=mr.cost,
         vendor=mr.vendor,
+        vendor_id=mr.vendor_id,
+        content_hash=mr.content_hash,
+        source_document_id=mr.source_document_id,
+        created_at=mr.created_at,
     )
+
+
+def document_from_row(row: AppDocumentRow) -> Document:
+    coverage: DateRange | None = None
+    if row.coverage_start and row.coverage_end:
+        with contextlib.suppress(ValueError):
+            coverage = DateRange(start=row.coverage_start, end=row.coverage_end)
+
+    return Document(
+        id=row.id,
+        filename=row.filename,
+        content_type=row.content_type,
+        content_hash=row.content_hash,
+        document_type=DocumentType(row.document_type),
+        kind=row.kind,
+        page_count=row.page_count,
+        chunk_count=row.chunk_count,
+        row_count=row.row_count,
+        size_bytes=row.size_bytes,
+        tags=list(row.tags),
+        report_type=_coerce_enum(ReportType, row.report_type, ReportType.UNKNOWN),
+        platform=_coerce_enum(Platform, row.platform, Platform.UNKNOWN),
+        scope=_coerce_enum(ReportScope, row.scope, ReportScope.UNKNOWN),
+        import_status=_coerce_enum(ImportStatus, row.import_status, ImportStatus.COMPLETE),
+        effective_date=row.effective_date,
+        coverage=coverage,
+        unit_id=row.unit_id,
+        property_id=row.property_id,
+        lease_id=row.lease_id,
+        manager_id=row.manager_id,
+        source_document_id=row.source_document_id,
+        uploaded_at=row.uploaded_at,
+    )
+
+
+def document_to_row(doc: Document) -> AppDocumentRow:
+    return AppDocumentRow(
+        id=doc.id,
+        filename=doc.filename,
+        content_type=doc.content_type,
+        content_hash=doc.content_hash,
+        document_type=doc.document_type.value,
+        kind=doc.kind,
+        page_count=doc.page_count,
+        chunk_count=doc.chunk_count,
+        row_count=doc.row_count,
+        size_bytes=doc.size_bytes,
+        tags=list(doc.tags),
+        report_type=doc.report_type.value,
+        platform=doc.platform.value,
+        scope=doc.scope.value,
+        import_status=doc.import_status.value,
+        effective_date=doc.effective_date,
+        coverage_start=doc.coverage.start if doc.coverage else None,
+        coverage_end=doc.coverage.end if doc.coverage else None,
+        unit_id=doc.unit_id,
+        property_id=doc.property_id,
+        lease_id=doc.lease_id,
+        manager_id=doc.manager_id,
+        source_document_id=doc.source_document_id,
+        uploaded_at=doc.uploaded_at,
+    )
+
+
+def _coerce_enum(enum_cls: type, raw: str, default: object) -> object:
+    """Parse *raw* into *enum_cls*, falling back to *default* on unknown values."""
+    try:
+        return enum_cls(raw)
+    except ValueError:
+        return default
 
 
 def action_item_from_row(row: ActionItemRow) -> ActionItem:
@@ -304,7 +391,7 @@ def action_item_from_row(row: ActionItemRow) -> ActionItem:
         title=row.title,
         description=row.description,
         status=ActionItemStatus(row.status),
-        priority=ActionItemPriority(row.priority),
+        priority=Priority(row.priority),
         manager_id=row.manager_id,
         property_id=row.property_id,
         tenant_id=row.tenant_id,
@@ -365,7 +452,7 @@ def owner_from_row(row: OwnerRow) -> Owner:
         entity_type_label=row.entity_type_label,
         email=row.email,
         phone=row.phone,
-        property_ids=row.property_ids,
+        source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
 
@@ -377,7 +464,7 @@ def owner_to_row(o: Owner) -> OwnerRow:
         entity_type_label=o.entity_type_label,
         email=o.email,
         phone=o.phone,
-        property_ids=list(o.property_ids),
+        source_document_id=o.source_document_id,
         created_at=o.created_at,
     )
 
@@ -386,13 +473,14 @@ def vendor_from_row(row: VendorRow) -> Vendor:
     return Vendor(
         id=row.id,
         name=row.name,
-        category=VendorCategory(row.category) if row.category else VendorCategory.GENERAL,
+        category=TradeCategory(row.category) if row.category else TradeCategory.GENERAL,
         phone=row.phone,
         email=row.email,
         is_internal=row.is_internal,
         license_number=row.license_number,
         insurance_expiry=row.insurance_expiry,
         rating=row.rating,
+        source_document_id=row.source_document_id,
         created_at=row.created_at,
     )
 
@@ -408,6 +496,7 @@ def vendor_to_row(v: Vendor) -> VendorRow:
         license_number=v.license_number,
         insurance_expiry=v.insurance_expiry,
         rating=v.rating,
+        source_document_id=v.source_document_id,
         created_at=v.created_at,
     )
 
@@ -430,11 +519,8 @@ def apply_merge(existing_row: _T, incoming_dto: BaseModel) -> _T:
             updates["address_country"] = value.country
             continue
 
-        if field_name in ("status", "property_type", "category", "priority", "occupancy_status"):
+        if field_name in ("status", "property_type", "category", "priority", "unit_type"):
             value = value.value if value is not None else None
-
-        if field_name in ("portfolio_ids", "property_ids", "tags", "lease_ids"):
-            value = list(value)
 
         updates[field_name] = value
 

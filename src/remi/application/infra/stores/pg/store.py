@@ -8,29 +8,34 @@ from sqlmodel import select
 from remi.application.core.models import (
     ActionItem,
     ActionItemStatus,
+    BalanceObservation,
+    Document,
+    DocumentType,
     Lease,
     LeaseStatus,
     MaintenanceRequest,
     MaintenanceStatus,
+    MeetingBrief,
     Note,
     NoteProvenance,
-    OccupancyStatus,
     Owner,
-    Portfolio,
     Property,
     PropertyManager,
     Tenant,
     TenantStatus,
+    TradeCategory,
     Unit,
-    UnitStatus,
     Vendor,
-    VendorCategory,
 )
 from remi.application.core.protocols import PropertyStore
 from remi.application.infra.stores.pg.converters import (
     action_item_from_row,
     action_item_to_row,
     apply_merge,
+    balance_observation_from_row,
+    balance_observation_to_row,
+    document_from_row,
+    document_to_row,
     lease_from_row,
     lease_to_row,
     maintenance_from_row,
@@ -41,8 +46,6 @@ from remi.application.infra.stores.pg.converters import (
     note_to_row,
     owner_from_row,
     owner_to_row,
-    portfolio_from_row,
-    portfolio_to_row,
     property_from_row,
     property_to_row,
     tenant_from_row,
@@ -54,11 +57,12 @@ from remi.application.infra.stores.pg.converters import (
 )
 from remi.application.infra.stores.pg.tables import (
     ActionItemRow,
+    AppDocumentRow,
+    BalanceObservationRow,
     LeaseRow,
     MaintenanceRequestRow,
     NoteRow,
     OwnerRow,
-    PortfolioRow,
     PropertyManagerRow,
     PropertyRow,
     TenantRow,
@@ -73,6 +77,7 @@ class PostgresPropertyStore(PropertyStore):
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
+        self._pg_meeting_briefs: dict[str, MeetingBrief] = {}
 
     # -- PropertyManager ----------------------------------------------------
 
@@ -90,6 +95,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(PropertyManagerRow, manager.id)
             if existing:
+                if manager.content_hash and existing.content_hash == manager.content_hash:
+                    return WriteResult(entity=manager_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, manager)
                 session.add(existing)
                 await session.commit()
@@ -104,55 +111,17 @@ class PostgresPropertyStore(PropertyStore):
             row = await session.get(PropertyManagerRow, manager_id)
             if not row:
                 return False
-            pf_result = await session.execute(
-                select(PortfolioRow).where(PortfolioRow.manager_id == manager_id)
+
+            mgr_prop_result = await session.execute(
+                select(PropertyRow).where(PropertyRow.manager_id == manager_id)
             )
-            pf_ids = [pf.id for pf in pf_result.scalars().all()]
-            if pf_ids:
-                prop_result = await session.execute(
-                    select(PropertyRow).where(PropertyRow.portfolio_id.in_(pf_ids))  # type: ignore[union-attr]
-                )
-                for prop in prop_result.scalars().all():
-                    prop.portfolio_id = ""
-                    session.add(prop)
-                for pf_id in pf_ids:
-                    pf_row = await session.get(PortfolioRow, pf_id)
-                    if pf_row:
-                        await session.delete(pf_row)
+            for prop in mgr_prop_result.scalars().all():
+                prop.manager_id = None
+                session.add(prop)
+
             await session.delete(row)
             await session.commit()
             return True
-
-    # -- Portfolio ----------------------------------------------------------
-
-    async def get_portfolio(self, portfolio_id: str) -> Portfolio | None:
-        async with self._session_factory() as session:
-            row = await session.get(PortfolioRow, portfolio_id)
-            return portfolio_from_row(row) if row else None
-
-    async def list_portfolios(self, *, manager_id: str | None = None) -> list[Portfolio]:
-        async with self._session_factory() as session:
-            stmt = select(PortfolioRow)
-            if manager_id:
-                stmt = stmt.where(PortfolioRow.manager_id == manager_id)
-            result = await session.execute(stmt)
-            return [portfolio_from_row(r) for r in result.scalars().all()]
-
-    async def upsert_portfolio(self, portfolio: Portfolio) -> WriteResult[Portfolio]:
-        async with self._session_factory() as session:
-            existing = await session.get(PortfolioRow, portfolio.id)
-            if existing:
-                apply_merge(existing, portfolio)
-                session.add(existing)
-                await session.commit()
-                await session.refresh(existing)
-                return WriteResult(
-                    entity=portfolio_from_row(existing),
-                    outcome=WriteOutcome.UPDATED,
-                )
-            session.add(portfolio_to_row(portfolio))
-            await session.commit()
-            return WriteResult(entity=portfolio, outcome=WriteOutcome.CREATED)
 
     # -- Property -----------------------------------------------------------
 
@@ -161,11 +130,18 @@ class PostgresPropertyStore(PropertyStore):
             row = await session.get(PropertyRow, property_id)
             return property_from_row(row) if row else None
 
-    async def list_properties(self, *, portfolio_id: str | None = None) -> list[Property]:
+    async def list_properties(
+        self,
+        *,
+        manager_id: str | None = None,
+        owner_id: str | None = None,
+    ) -> list[Property]:
         async with self._session_factory() as session:
             stmt = select(PropertyRow)
-            if portfolio_id:
-                stmt = stmt.where(PropertyRow.portfolio_id == portfolio_id)
+            if manager_id:
+                stmt = stmt.where(PropertyRow.manager_id == manager_id)
+            if owner_id:
+                stmt = stmt.where(PropertyRow.owner_id == owner_id)
             result = await session.execute(stmt)
             return [property_from_row(r) for r in result.scalars().all()]
 
@@ -173,6 +149,11 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(PropertyRow, prop.id)
             if existing:
+                if prop.content_hash and existing.content_hash == prop.content_hash:
+                    return WriteResult(
+                        entity=property_from_row(existing),
+                        outcome=WriteOutcome.NOOP,
+                    )
                 apply_merge(existing, prop)
                 session.add(existing)
                 await session.commit()
@@ -209,17 +190,11 @@ class PostgresPropertyStore(PropertyStore):
         self,
         *,
         property_id: str | None = None,
-        status: UnitStatus | None = None,
-        occupancy_status: OccupancyStatus | None = None,
     ) -> list[Unit]:
         async with self._session_factory() as session:
             stmt = select(UnitRow)
             if property_id:
                 stmt = stmt.where(UnitRow.property_id == property_id)
-            if status:
-                stmt = stmt.where(UnitRow.status == status.value)
-            if occupancy_status:
-                stmt = stmt.where(UnitRow.occupancy_status == occupancy_status.value)
             result = await session.execute(stmt)
             return [unit_from_row(r) for r in result.scalars().all()]
 
@@ -227,6 +202,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(UnitRow, unit.id)
             if existing:
+                if unit.content_hash and existing.content_hash == unit.content_hash:
+                    return WriteResult(entity=unit_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, unit)
                 session.add(existing)
                 await session.commit()
@@ -236,15 +213,14 @@ class PostgresPropertyStore(PropertyStore):
             await session.commit()
             return WriteResult(entity=unit, outcome=WriteOutcome.CREATED)
 
-    async def delete_units_by_property(self, property_id: str) -> int:
+    async def delete_unit(self, unit_id: str) -> bool:
         async with self._session_factory() as session:
-            stmt = select(UnitRow).where(UnitRow.property_id == property_id)
-            result = await session.execute(stmt)
-            rows = result.scalars().all()
-            for row in rows:
-                await session.delete(row)
+            row = await session.get(UnitRow, unit_id)
+            if not row:
+                return False
+            await session.delete(row)
             await session.commit()
-            return len(rows)
+            return True
 
     # -- Lease --------------------------------------------------------------
 
@@ -278,6 +254,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(LeaseRow, lease.id)
             if existing:
+                if lease.content_hash and existing.content_hash == lease.content_hash:
+                    return WriteResult(entity=lease_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, lease)
                 session.add(existing)
                 await session.commit()
@@ -287,15 +265,14 @@ class PostgresPropertyStore(PropertyStore):
             await session.commit()
             return WriteResult(entity=lease, outcome=WriteOutcome.CREATED)
 
-    async def delete_leases_by_property(self, property_id: str) -> int:
+    async def delete_lease(self, lease_id: str) -> bool:
         async with self._session_factory() as session:
-            stmt = select(LeaseRow).where(LeaseRow.property_id == property_id)
-            result = await session.execute(stmt)
-            rows = result.scalars().all()
-            for row in rows:
-                await session.delete(row)
+            row = await session.get(LeaseRow, lease_id)
+            if not row:
+                return False
+            await session.delete(row)
             await session.commit()
-            return len(rows)
+            return True
 
     # -- Tenant -------------------------------------------------------------
 
@@ -324,6 +301,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(TenantRow, tenant.id)
             if existing:
+                if tenant.content_hash and existing.content_hash == tenant.content_hash:
+                    return WriteResult(entity=tenant_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, tenant)
                 session.add(existing)
                 await session.commit()
@@ -357,10 +336,16 @@ class PostgresPropertyStore(PropertyStore):
         *,
         property_id: str | None = None,
         unit_id: str | None = None,
+        manager_id: str | None = None,
         status: MaintenanceStatus | None = None,
     ) -> list[MaintenanceRequest]:
         async with self._session_factory() as session:
             stmt = select(MaintenanceRequestRow)
+            if manager_id:
+                stmt = stmt.join(
+                    PropertyRow,
+                    MaintenanceRequestRow.property_id == PropertyRow.id,
+                ).where(PropertyRow.manager_id == manager_id)
             if property_id:
                 stmt = stmt.where(MaintenanceRequestRow.property_id == property_id)
             if unit_id:
@@ -377,6 +362,11 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(MaintenanceRequestRow, request.id)
             if existing:
+                if request.content_hash and existing.content_hash == request.content_hash:
+                    return WriteResult(
+                        entity=maintenance_from_row(existing),
+                        outcome=WriteOutcome.NOOP,
+                    )
                 apply_merge(existing, request)
                 session.add(existing)
                 await session.commit()
@@ -388,6 +378,15 @@ class PostgresPropertyStore(PropertyStore):
             session.add(maintenance_to_row(request))
             await session.commit()
             return WriteResult(entity=request, outcome=WriteOutcome.CREATED)
+
+    async def delete_maintenance_request(self, request_id: str) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(MaintenanceRequestRow, request_id)
+            if not row:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
 
     # -- Owners ---------------------------------------------------------------
 
@@ -405,6 +404,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(OwnerRow, owner.id)
             if existing:
+                if owner.content_hash and existing.content_hash == owner.content_hash:
+                    return WriteResult(entity=owner_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, owner)
                 session.add(existing)
                 await session.commit()
@@ -413,15 +414,6 @@ class PostgresPropertyStore(PropertyStore):
             session.add(owner_to_row(owner))
             await session.commit()
             return WriteResult(entity=owner, outcome=WriteOutcome.CREATED)
-
-    async def delete_owner(self, owner_id: str) -> bool:
-        async with self._session_factory() as session:
-            row = await session.get(OwnerRow, owner_id)
-            if not row:
-                return False
-            await session.delete(row)
-            await session.commit()
-            return True
 
     # -- Vendors --------------------------------------------------------------
 
@@ -433,7 +425,7 @@ class PostgresPropertyStore(PropertyStore):
     async def list_vendors(
         self,
         *,
-        category: VendorCategory | None = None,
+        category: TradeCategory | None = None,
         is_internal: bool | None = None,
     ) -> list[Vendor]:
         async with self._session_factory() as session:
@@ -449,6 +441,8 @@ class PostgresPropertyStore(PropertyStore):
         async with self._session_factory() as session:
             existing = await session.get(VendorRow, vendor.id)
             if existing:
+                if vendor.content_hash and existing.content_hash == vendor.content_hash:
+                    return WriteResult(entity=vendor_from_row(existing), outcome=WriteOutcome.NOOP)
                 apply_merge(existing, vendor)
                 session.add(existing)
                 await session.commit()
@@ -457,15 +451,6 @@ class PostgresPropertyStore(PropertyStore):
             session.add(vendor_to_row(vendor))
             await session.commit()
             return WriteResult(entity=vendor, outcome=WriteOutcome.CREATED)
-
-    async def delete_vendor(self, vendor_id: str) -> bool:
-        async with self._session_factory() as session:
-            row = await session.get(VendorRow, vendor_id)
-            if not row:
-                return False
-            await session.delete(row)
-            await session.commit()
-            return True
 
     # -- Action Items -------------------------------------------------------
 
@@ -566,3 +551,117 @@ class PostgresPropertyStore(PropertyStore):
             await session.delete(row)
             await session.commit()
             return True
+
+    # -- Meeting Briefs (in-memory; PG table not yet migrated) -----------------
+
+    async def list_meeting_briefs(
+        self,
+        *,
+        manager_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MeetingBrief]:
+        briefs = list(self._pg_meeting_briefs.values())
+        if manager_id:
+            briefs = [b for b in briefs if b.manager_id == manager_id]
+        briefs.sort(key=lambda b: b.generated_at, reverse=True)
+        return briefs[:limit]
+
+    async def upsert_meeting_brief(
+        self,
+        brief: MeetingBrief,
+    ) -> WriteResult[MeetingBrief]:
+        self._pg_meeting_briefs[brief.id] = brief
+        return WriteResult(entity=brief, outcome=WriteOutcome.CREATED)
+
+    # -- Documents ------------------------------------------------------------
+
+    async def get_document(self, doc_id: str) -> Document | None:
+        async with self._session_factory() as session:
+            row = await session.get(AppDocumentRow, doc_id)
+            return document_from_row(row) if row else None
+
+    async def list_documents(
+        self,
+        *,
+        unit_id: str | None = None,
+        property_id: str | None = None,
+        manager_id: str | None = None,
+        lease_id: str | None = None,
+        document_type: DocumentType | None = None,
+    ) -> list[Document]:
+        async with self._session_factory() as session:
+            stmt = select(AppDocumentRow)
+            if unit_id:
+                stmt = stmt.where(AppDocumentRow.unit_id == unit_id)
+            if property_id:
+                stmt = stmt.where(AppDocumentRow.property_id == property_id)
+            if manager_id:
+                stmt = stmt.where(AppDocumentRow.manager_id == manager_id)
+            if lease_id:
+                stmt = stmt.where(AppDocumentRow.lease_id == lease_id)
+            if document_type:
+                stmt = stmt.where(AppDocumentRow.document_type == document_type.value)
+            result = await session.execute(stmt)
+            return [document_from_row(r) for r in result.scalars().all()]
+
+    async def find_by_content_hash(self, content_hash: str) -> Document | None:
+        if not content_hash:
+            return None
+        async with self._session_factory() as session:
+            stmt = select(AppDocumentRow).where(AppDocumentRow.content_hash == content_hash)
+            result = await session.execute(stmt)
+            row = result.scalars().first()
+            return document_from_row(row) if row else None
+
+    async def upsert_document(self, doc: Document) -> WriteResult[Document]:
+        async with self._session_factory() as session:
+            existing = await session.get(AppDocumentRow, doc.id)
+            if existing:
+                apply_merge(existing, doc)
+                session.add(existing)
+                await session.commit()
+                await session.refresh(existing)
+                return WriteResult(entity=document_from_row(existing), outcome=WriteOutcome.UPDATED)
+            session.add(document_to_row(doc))
+            await session.commit()
+            return WriteResult(entity=doc, outcome=WriteOutcome.CREATED)
+
+    async def delete_document(self, doc_id: str) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(AppDocumentRow, doc_id)
+            if not row:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    # -- BalanceObservation ---------------------------------------------------
+
+    async def list_balance_observations(
+        self,
+        *,
+        tenant_id: str | None = None,
+        property_id: str | None = None,
+    ) -> list[BalanceObservation]:
+        async with self._session_factory() as session:
+            stmt = select(BalanceObservationRow)
+            if tenant_id:
+                stmt = stmt.where(BalanceObservationRow.tenant_id == tenant_id)
+            if property_id:
+                stmt = stmt.where(BalanceObservationRow.property_id == property_id)
+            stmt = stmt.order_by(BalanceObservationRow.observed_at.desc())  # type: ignore[attr-defined]
+            result = await session.execute(stmt)
+            return [balance_observation_from_row(r) for r in result.scalars().all()]
+
+    async def insert_balance_observation(
+        self, obs: BalanceObservation
+    ) -> WriteResult[BalanceObservation]:
+        async with self._session_factory() as session:
+            existing = await session.get(BalanceObservationRow, obs.id)
+            if existing:
+                return WriteResult(
+                    entity=balance_observation_from_row(existing), outcome=WriteOutcome.NOOP
+                )
+            session.add(balance_observation_to_row(obs))
+            await session.commit()
+            return WriteResult(entity=obs, outcome=WriteOutcome.CREATED)

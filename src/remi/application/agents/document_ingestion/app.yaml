@@ -3,22 +3,19 @@ kind: Pipeline
 
 metadata:
   name: document-ingestion
-  version: "2.0.0"
+  version: "4.0.0"
   description: >
-    Three-stage document ingestion pipeline. Runs entirely outside the chat
-    runtime — each step is a direct LLMProvider.complete() call.
+    Ontology-driven document ingestion. The domain model IS the extraction spec —
+    no hardcoded column maps, no report-type classification gate.
 
-    Stage 1 (classify): cheap, fast model identifies report type and maps
-    columns to canonical field names derived from the domain ontology.
+    Step 1 (extract): fast model receives the full domain ontology plus the
+    report metadata (title, property group, date range) and column headers. It
+    produces a column_map (raw_header → canonical_field) in a single call regardless
+    of row count. Python then applies the map deterministically to every row.
 
-    Stage 2 (extract): capable model uses the classification + ontology
-    entity schemas to extract every row into typed JSON. Row types match
-    ontology entity type names (Unit, Tenant, Lease, Property, etc.).
-
-    Stage 3 (enrich): if the extractor flagged any rows as unknown type,
-    a second capable model call attempts to identify what those rows
-    represent using the full ontology schema. Unknown rows that still
-    cannot be classified are preserved as raw_row events for human review.
+    Step 2 (capture): runs when observations_likely=true. Structures rows that don't
+    fit any known entity type as knowledge graph entries — this is how the ontology
+    grows from new report formats.
 
   tags: [ingestion, extraction, internal]
   domain: real-estate
@@ -27,146 +24,138 @@ metadata:
 
 steps:
   # ---------------------------------------------------------------------------
-  # Step 1 — Classify
-  # Fast, cheap model. Identifies report type and maps columns.
-  # ---------------------------------------------------------------------------
-  - id: classify
-    provider: anthropic
-    model: claude-haiku-4-5-20251001
-    temperature: 0.0
-    max_tokens: 1024
-    response_format: json
-    system_prompt: |
-      You are a real-estate data classification agent.
-
-      You will receive a JSON payload with:
-        - column_names: header columns of an uploaded report
-        - sample_rows: up to 5 data rows
-        - known_types: known report type identifiers with plain-English descriptions
-
-      DOMAIN ONTOLOGY — known entity types and their fields:
-      {context.entity_schemas}
-
-      Your job:
-      1. Identify the report type using a known type identifier, or invent a
-         descriptive snake_case identifier if none match (e.g. "vendor_invoice").
-      2. Map EVERY column name to a canonical snake_case field name that matches
-         the ontology field names above. Use property_address for the property
-         column (it gets resolved to a Property entity downstream).
-
-      Known report types and their primary entity:
-        rent_roll         → Unit rows (with occupancy, rent, vacancy data)
-        delinquency       → Tenant rows (with balance owed, aging buckets)
-        lease_expiration  → Lease rows (with dates, rent vs market rent)
-        property_directory → Property rows (with manager, address)
-        work_order        → MaintenanceRequest rows (with category, status, cost)
-
-      Property name convention: some platforms encode addresses as
-      "Name - Full Address, City, State ZIP". Extract just the name part.
-
-      RESPOND ONLY WITH VALID JSON — no markdown, no prose:
-      {
-        "report_type": "rent_roll",
-        "confidence": 0.95,
-        "reasoning": "one sentence",
-        "column_map": {
-          "Property": "property_address",
-          "Unit": "unit_number",
-          "BD/BA": "bd_ba"
-        }
-      }
-
-    input_template: |
-      {input}
-
-  # ---------------------------------------------------------------------------
-  # Step 2 — Extract
-  # Capable model. Full row extraction using the column map from step 1.
+  # Step 1 — Extract
+  #
+  # Column mapping only — not per-row transformation.
+  # Returns column_map + primary_entity_type. Python applies the map to all rows.
+  # Cost is constant: 1 LLM call per document regardless of row count.
   # ---------------------------------------------------------------------------
   - id: extract
     provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: claude-haiku-4-5-20251001
     temperature: 0.0
-    max_tokens: 16384
+    max_tokens: 4096
     response_format: json
     system_prompt: |
       You are a real-estate data extraction agent.
 
-      DOMAIN ONTOLOGY — extract rows into these entity types:
+      DOMAIN ONTOLOGY — the entity types the system knows and their canonical fields:
       {context.entity_schemas}
 
-      You receive:
-        - classification: the output of the classify step (report_type, column_map)
-        - document: the original payload (column_names, all_rows)
+      You receive three things:
+        - metadata: key-value pairs from the report header rows. AppFolio reports
+          always include a title like "Ryan Steen Rent Roll" and lines like
+          "Property Groups: Ryan Steen Mgmt" and "Exported On: 03/23/2026".
+          USE THIS — it tells you the manager, the report type, and the date.
+        - column_names: raw header columns from the data table
+        - sample_rows: up to 5 data rows for orientation
 
-      Use the column_map to translate raw column names to canonical field names.
-      Extract EVERY data row. Rules:
+      YOUR JOB IS COLUMN MAPPING ONLY. Produce these fields:
 
-      SKIP section header rows — rows where the primary address/name field
-      contains an occupancy label instead of an address. For rent_roll, track
-      the current section label (Current / Notice-Rented / Notice-Unrented /
-      Vacant-Rented / Vacant-Unrented) and apply it to subsequent unit rows as
-      occupancy_status.
+      1. report_type: snake_case label for the report. Derive from
+         metadata.report_title first (e.g. "Ryan Steen Rent Roll" → "rent_roll"),
+         fall back to column pattern inference. Common values: "rent_roll",
+         "delinquency", "lease_expiration", "maintenance", "property_directory".
 
-      SKIP summary rows — rows that contain unit counts like "136 Units" or
-      portfolio totals.
+      2. platform: source system from metadata if present. Default "appfolio".
 
-      Property name: extract from address using "Name - Full Address" pattern.
-      If the address is "1018 Woodbourne Ave - 1018 Woodbourne Ave Pittsburgh PA",
-      the name is "1018 Woodbourne Ave".
+      3. manager: manager name extracted from metadata.property_groups or
+         metadata.report_title (e.g. "Ryan Steen"). Null if not identifiable.
 
-      Row types — use the ontology entity type name:
-        rent_roll rows        → type: "Unit"
-        delinquency rows      → type: "Tenant"  (include balance fields)
-        lease_expiration rows  → type: "Lease"   (include tenant_name, dates)
-        property_directory     → type: "Property"
-        work_order rows       → type: "MaintenanceRequest"
-        anything unrecognized → type: "raw_row", preserve all fields as-is
+      4. scope: what slice of the portfolio this report covers. One of:
+           "portfolio_wide"    — all properties, no manager/property filter
+           "manager_portfolio" — one manager's full book (most common)
+           "single_property"   — report header names a single property address
+           "single_unit"       — report header names a specific unit
+           "unknown"           — cannot determine from metadata
 
-      Each row MUST include:
-        - type: the entity type name from the ontology
-        - property_address: the full property address string
-        - All fields from the ontology schema that are present in the data
+      5. effective_date: the export/run date as "YYYY-MM-DD" if visible in
+         metadata (e.g. "Exported On: 03/23/2026" → "2026-03-23"). Null otherwise.
 
-      Null policy: use null for missing or unparseable values — never omit the
-      field, never fabricate a value.
+      6. date_range_start / date_range_end: the start and end of the DATA the
+         report covers, as "YYYY-MM-DD". Distinct from effective_date (which is
+         when it was exported). A "2024 Annual Maintenance History" has
+         date_range_start="2024-01-01", date_range_end="2024-12-31". A report
+         titled "As Of 03/23/2026" has both set to that date. Null when the
+         report is a point-in-time snapshot with no explicit range.
 
-      RESPOND ONLY WITH VALID JSON:
+      8. primary_entity_type: the ontology entity whose fields best match the
+         column headers. Look at each entity's field list in the ontology above
+         and pick the closest structural match. Examples to orient you:
+           - Rent roll / occupancy reports → "Unit"
+           - Delinquency / balance / aging reports → "BalanceObservation"
+           - Lease expiration reports → "Lease"
+           - Work orders / maintenance → "MaintenanceRequest"
+           - Property directory → "Property"
+         For a truly novel report type with no close match, pick the closest
+         entity and set observations_likely to true.
+
+      9. column_map: dict mapping every meaningful raw column header to the
+         canonical snake_case field from the ontology. Match by meaning, not
+         just string similarity. Use the entity's field names exactly.
+
+         Useful conventions:
+           - Property/address columns → "property_address"
+           - Unit/apt identifier → "unit_number"
+           - Person name → "tenant_name" or "name" depending on entity type
+           - Combined "Beds/Baths" or "BD/BA" → "_bd_ba" (auto-split by Python)
+           - Columns with no ontology match → prefix with "_" (stored as extra_fields)
+
+      10. section_header_column: the raw column name whose value encodes section
+          context (property address or occupancy status label) in hierarchical
+          reports. Usually "Property". Null if the report is flat.
+
+      11. observations_likely: true when ANY of these apply:
+            - Document type has no strong match in the ontology
+            - More than ~30% of columns map to "_*" (no ontology match)
+            - The report clearly contains mixed data types
+            - The data is a new concept not yet in the ontology
+          False only when the document is cleanly one entity type with strong coverage.
+
+      12. unknown_columns: list of raw column headers mapped to "_*" that contain
+          meaningful data the capture step should preserve.
+
+      SKIP pure formatting columns (blank headers, row numbers, page markers).
+
+      RESPOND ONLY WITH VALID JSON matching this shape:
       {
         "report_type": "rent_roll",
         "platform": "appfolio",
-        "rows": [
-          {
-            "type": "Unit",
-            "property_address": "1018 Woodbourne Avenue - 1018 Woodbourne Avenue Pittsburgh, PA 15226",
-            "property_name": "1018 Woodbourne Avenue",
-            "unit_number": "1",
-            "occupancy_status": "occupied",
-            "bedrooms": 3,
-            "bathrooms": 1.0,
-            "market_rent": null,
-            "current_rent": 950.00,
-            "days_vacant": null
-          }
-        ],
-        "unknown_rows": []
+        "manager": "Ryan Steen",
+        "scope": "manager_portfolio",
+        "effective_date": "2026-03-23",
+        "date_range_start": null,
+        "date_range_end": null,
+        "primary_entity_type": "Unit",
+        "column_map": {
+          "Property": "property_address",
+          "Unit": "unit_number",
+          "BD/BA": "_bd_ba",
+          "Sq Ft": "sqft",
+          "Lease From": "start_date",
+          "Lease To": "end_date",
+          "Rent": "monthly_rent",
+          "Market Rent": "market_rent",
+          "Status": "_occupancy_section",
+          "Days Vacant": "_days_vacant"
+        },
+        "section_header_column": "Property",
+        "observations_likely": false,
+        "unknown_columns": ["Status", "Days Vacant"]
       }
 
     input_template: |
-      Classification result:
-      {steps.classify}
-
-      Document to extract:
       {input}
 
   # ---------------------------------------------------------------------------
-  # Step 3 — Enrich
-  # Only runs when the extractor produced unknown_rows.
-  # Attempts to identify what unrecognized rows represent using schema context.
+  # Step 2 — Capture (conditional — only runs when observations_likely=true)
+  #
+  # Structures rows that don't fit the primary entity type as KG entries.
+  # This is how the ontology grows from new report formats.
   # ---------------------------------------------------------------------------
-  - id: enrich
+  - id: capture
     provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: claude-haiku-4-5-20251001
     temperature: 0.1
     max_tokens: 8192
     response_format: json
@@ -176,34 +165,44 @@ steps:
       DOMAIN ONTOLOGY — known entity types:
       {context.entity_schemas}
 
-      You receive:
-        - extraction: the extract step output (report_type, rows, unknown_rows)
-        - The unknown_rows are data rows that the extractor could not map to
-          a known domain type.
+      You receive rows from a document that either (a) don't fit any known entity
+      type, or (b) come from a report type not yet in the ontology.
 
-      Your job: for each unknown row, determine what real-estate entity or
-      concept it represents, and produce a structured entity record.
+      Your job: create KG entries that preserve everything meaningful.
+      This is how the ontology grows — don't discard novel data.
 
-      Use entity type names from the ontology above when the row matches a
-      known type. If a row represents something genuinely new (vendor invoice,
-      inspection record, etc.) invent a descriptive entity_type in PascalCase.
+      For each row (or group of related rows), produce:
 
-      If a row is truly noise (page headers, blank rows, etc.) set
-      entity_type to "noise" and it will be discarded.
+      1. entity_type: descriptive PascalCase for this concept. If the whole document
+         is a new type (e.g. "InspectionLog", "InsuranceCertificate"), use that.
+         Use "noise" only for truly blank/junk rows.
+
+      2. entity_id: stable slug — "<lowercase_type>:<key_fields_slugified>"
+
+      3. properties: ALL fields from the row including unknown_columns.
+         Preserve everything — the system can reason over it later.
+
+      4. relationships: link to known entities using UPPER_SNAKE_CASE relation types
+         (AT_PROPERTY, AFFECTS, REPORTED_BY, SERVICED_BY). Propose new types if needed.
 
       RESPOND ONLY WITH VALID JSON:
       {
-        "enriched_rows": [
+        "captured": [
           {
-            "row_index": 0,
-            "entity_type": "Tenant",
-            "entity_id": "tenant:john-doe:1018-woodbourne",
-            "properties": {"name": "John Doe", "status": "current"},
+            "entity_type": "InspectionRecord",
+            "entity_id": "inspection_record:123-main-st:apt-2:2026-03-01",
+            "properties": {
+              "property_address": "123 Main St",
+              "unit_number": "Apt 2",
+              "inspector": "Mike Jones",
+              "score": 87,
+              "date": "2026-03-01"
+            },
             "relationships": [
               {
-                "source_id": "tenant:john-doe:1018-woodbourne",
-                "target_id": "unit:1018-woodbourne:1",
-                "relation_type": "COVERS"
+                "source_id": "inspection_record:123-main-st:apt-2:2026-03-01",
+                "target_id": "property:123-main-st",
+                "relation_type": "AT_PROPERTY"
               }
             ]
           }
@@ -211,8 +210,8 @@ steps:
       }
 
     input_template: |
-      Extraction result:
+      Extraction context (report_type, primary_entity_type, unknown_columns):
       {steps.extract}
 
-      Unknown rows to enrich:
+      Raw rows to capture as knowledge graph entries:
       {input}

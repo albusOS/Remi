@@ -176,13 +176,15 @@ async def run_agent_loop(
 
                 if next_phase.tools:
                     preferred = ", ".join(next_phase.tools)
-                    thread.append(Message(
-                        role="system",
-                        content=(
-                            f"Preferred tools for {next_phase.name} phase: {preferred}. "
-                            "Focus on these tools but all tools remain available."
-                        ),
-                    ))
+                    thread.append(
+                        Message(
+                            role="system",
+                            content=(
+                                f"Preferred tools for {next_phase.name} phase: {preferred}. "
+                                "Focus on these tools but all tools remain available."
+                            ),
+                        )
+                    )
                     log.info(
                         "phase_tool_hint",
                         phase=next_phase.name,
@@ -299,8 +301,12 @@ async def run_agent_loop(
         tool_messages = await asyncio.gather(
             *[
                 _execute_tool_call(
-                    tc, iteration, tool_executor, emit,
-                    memory=memory, memory_namespace=memory_namespace,
+                    tc,
+                    iteration,
+                    tool_executor,
+                    emit,
+                    memory=memory,
+                    memory_namespace=memory_namespace,
                 )
                 for tc in response.tool_calls
             ]

@@ -13,7 +13,6 @@ class EntityType(StrEnum):
 
     OWNER = "Owner"
     PROPERTY_MANAGER = "PropertyManager"
-    PORTFOLIO = "Portfolio"
     PROPERTY = "Property"
     UNIT = "Unit"
     TENANT = "Tenant"
@@ -23,7 +22,8 @@ class EntityType(StrEnum):
 
 
 class PropertyType(StrEnum):
-    RESIDENTIAL = "residential"
+    SINGLE_FAMILY = "single_family"
+    MULTI_FAMILY = "multi_family"
     COMMERCIAL = "commercial"
     MIXED = "mixed"
     INDUSTRIAL = "industrial"
@@ -34,13 +34,6 @@ class AssetClass(StrEnum):
     B = "b"
     C = "c"
     D = "d"
-
-
-class UnitStatus(StrEnum):
-    VACANT = "vacant"
-    OCCUPIED = "occupied"
-    MAINTENANCE = "maintenance"
-    OFFLINE = "offline"
 
 
 class UnitType(StrEnum):
@@ -99,27 +92,18 @@ class TenantStatus(StrEnum):
     PAST = "past"
 
 
-class VendorCategory(StrEnum):
-    PLUMBING = "plumbing"
-    ELECTRICAL = "electrical"
-    HVAC = "hvac"
-    APPLIANCE = "appliance"
-    GENERAL = "general"
-    CLEANING = "cleaning"
-    PAINTING = "painting"
-    FLOORING = "flooring"
-    ROOFING = "roofing"
-    LANDSCAPING = "landscaping"
-    OTHER = "other"
-
-
-class MaintenanceCategory(StrEnum):
+class TradeCategory(StrEnum):
     PLUMBING = "plumbing"
     ELECTRICAL = "electrical"
     HVAC = "hvac"
     APPLIANCE = "appliance"
     STRUCTURAL = "structural"
     GENERAL = "general"
+    CLEANING = "cleaning"
+    PAINTING = "painting"
+    FLOORING = "flooring"
+    ROOFING = "roofing"
+    LANDSCAPING = "landscaping"
     OTHER = "other"
 
 
@@ -135,6 +119,7 @@ class Priority(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    URGENT = "urgent"
     EMERGENCY = "emergency"
 
 
@@ -152,13 +137,6 @@ class ActionItemStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class ActionItemPriority(StrEnum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    URGENT = "urgent"
-
-
 class NoteProvenance(StrEnum):
     USER_STATED = "user_stated"
     DATA_DERIVED = "data_derived"
@@ -173,3 +151,68 @@ class DocumentType(StrEnum):
     INSPECTION = "inspection"
     CORRESPONDENCE = "correspondence"
     OTHER = "other"
+
+
+class ReportScope(StrEnum):
+    """What slice of the portfolio a report covers.
+
+    Populated by the extract pipeline from report metadata (header rows).
+    Used to answer "do we have data for property X in period Y?" without
+    scanning all rows.
+    """
+
+    UNKNOWN = "unknown"
+    PORTFOLIO_WIDE = "portfolio_wide"  # all properties, all managers
+    MANAGER_PORTFOLIO = "manager_portfolio"  # one manager's full book
+    SINGLE_PROPERTY = "single_property"  # scoped to one property address
+    SINGLE_UNIT = "single_unit"  # scoped to one unit
+
+
+class ReportType(StrEnum):
+    """The business category of a report — what domain data it contains.
+
+    Values align with ``_ENTITY_TO_REPORT_TYPE`` in the matcher so that
+    rule-matched and LLM-extracted reports share the same vocabulary.
+    """
+
+    UNKNOWN = "unknown"
+    RENT_ROLL = "rent_roll"
+    DELINQUENCY = "delinquency"
+    WORK_ORDER = "work_order"
+    LEASE_EXPIRATION = "lease_expiration"
+    PROPERTY_DIRECTORY = "property_directory"
+    TENANT_DIRECTORY = "tenant_directory"
+    VENDOR_DIRECTORY = "vendor_directory"
+    OWNER_DIRECTORY = "owner_directory"
+    MANAGER_DIRECTORY = "manager_directory"
+    OWNER_STATEMENT = "owner_statement"
+    INSPECTION = "inspection"
+
+
+class Platform(StrEnum):
+    """Property management software the report was exported from."""
+
+    UNKNOWN = "unknown"
+    APPFOLIO = "appfolio"
+    YARDI = "yardi"
+    BUILDIUM = "buildium"
+    REALPAGE = "realpage"
+    ENTRATA = "entrata"
+    PROPERTYWARE = "propertyware"
+
+
+class ImportStatus(StrEnum):
+    """Lifecycle state of a report import.
+
+    COMPLETE means all rows were extracted and persisted.
+    PARTIAL means some rows failed (see the source document's error log).
+    FAILED means the import did not produce any entities.
+    SUPERSEDED means a newer import for the same scope+period replaced this one.
+    """
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"

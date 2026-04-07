@@ -8,9 +8,17 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
 import { ManagerFilter } from "@/components/ui/ManagerFilter";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { DelinquencyBoard, EntityNoteResponse } from "@/lib/types";
+
+const TENANT_FIELDS: FieldDef[] = [
+  { name: "name", label: "Name", required: true, placeholder: "John Smith" },
+  { name: "email", label: "Email", placeholder: "john@example.com" },
+  { name: "phone", label: "Phone", placeholder: "(555) 123-4567" },
+];
 
 interface NoteSeed {
   content: string;
@@ -178,9 +186,13 @@ function daysSincePayment(lastPayment: string | null): number | null {
 
 export function DelinquencyView() {
   const [managerId, setManagerId] = useState("");
-  const { data, loading } = useApiQuery<DelinquencyBoard>(
-    () => api.delinquencyBoard(managerId || undefined),
-    [managerId]
+  const [showAddTenant, setShowAddTenant] = useState(false);
+
+  const effectiveScope = managerId ? { manager_id: managerId } : undefined;
+
+  const { data, loading, error, refetch } = useApiQuery<DelinquencyBoard>(
+    () => api.delinquencyBoard(effectiveScope),
+    [managerId],
   );
 
   const tenantIds = data?.tenants.map((t) => t.tenant_id) ?? [];
@@ -195,7 +207,16 @@ export function DelinquencyView() {
               Tenants with outstanding balances
             </p>
           </div>
-          <ManagerFilter value={managerId} onChange={setManagerId} />
+          <div className="flex items-center gap-2">
+            <ManagerFilter value={managerId} onChange={setManagerId} />
+            <button
+              onClick={() => setShowAddTenant(true)}
+              className="h-9 flex items-center gap-2 px-4 rounded-xl border border-dashed border-border bg-surface hover:border-accent/40 hover:text-accent hover:shadow-md hover:shadow-accent/5 text-xs font-medium text-fg-muted transition-all btn-glow"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+              Add Tenant
+            </button>
+          </div>
         </div>
 
         {data && (
@@ -220,6 +241,8 @@ export function DelinquencyView() {
         {loading && (
           <div className="py-12 text-center text-sm text-fg-faint animate-pulse">Loading...</div>
         )}
+
+        <ErrorBanner error={error} onRetry={refetch} />
 
         {!loading && data && data.tenants.length > 0 && (
           <div className="rounded-xl border border-border bg-surface overflow-hidden">
@@ -297,6 +320,18 @@ export function DelinquencyView() {
             No delinquent tenants found
           </div>
         )}
+
+        <EntityFormPanel
+          open={showAddTenant}
+          onClose={() => setShowAddTenant(false)}
+          title="Add Tenant"
+          fields={TENANT_FIELDS}
+          submitLabel="Create Tenant"
+          onSubmit={async (values) => {
+            await api.createTenant(values as { name: string; email?: string; phone?: string });
+            refetch();
+          }}
+        />
     </PageContainer>
   );
 }

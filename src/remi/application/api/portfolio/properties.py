@@ -7,18 +7,21 @@ from typing import Any
 from fastapi import APIRouter
 
 from remi.application.api.schemas import (
+    CreatePropertyRequest,
+    CreatePropertyResponse,
     PropertyDetail,
     PropertyListResponse,
     UnitListResponse,
     UpdatePropertyRequest,
 )
 from remi.application.api.shared_schemas import DeletedResponse, UpdatedResponse
-from remi.application.core.models import Address, UnitStatus
-from remi.application.portfolio import (
+from remi.application.core.models import Address, Property, PropertyType
+from remi.application.views import (
     RentRollResult,
 )
 from remi.shell.api.dependencies import Ctr
 from remi.types.errors import NotFoundError
+from remi.types.identity import property_id as _property_id
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -26,10 +29,40 @@ router = APIRouter(prefix="/properties", tags=["properties"])
 @router.get("", response_model=PropertyListResponse)
 async def list_properties(
     c: Ctr,
-    portfolio_id: str | None = None,
+    manager_id: str | None = None,
+    owner_id: str | None = None,
 ) -> PropertyListResponse:
-    items = await c.property_resolver.list_properties(portfolio_id=portfolio_id)
+    items = await c.property_resolver.list_properties(
+        manager_id=manager_id,
+        owner_id=owner_id,
+    )
     return PropertyListResponse(properties=items)
+
+
+@router.post("", response_model=CreatePropertyResponse, status_code=201)
+async def create_property(
+    body: CreatePropertyRequest,
+    c: Ctr,
+) -> CreatePropertyResponse:
+    pid = _property_id(body.name)
+    prop = Property(
+        id=pid,
+        manager_id=body.manager_id,
+        name=body.name,
+        address=Address(
+            street=body.street,
+            city=body.city,
+            state=body.state,
+            zip_code=body.zip_code,
+        ),
+        property_type=PropertyType(body.property_type),
+        year_built=body.year_built,
+    )
+    await c.property_store.upsert_property(prop)
+    return CreatePropertyResponse(
+        property_id=pid,
+        name=body.name,
+    )
 
 
 @router.get("/{property_id}", response_model=PropertyDetail)
@@ -54,8 +87,7 @@ async def list_units(
         raise NotFoundError("Property", property_id)
     units = detail.units
     if status:
-        target = UnitStatus(status)
-        units = [u for u in units if u.status == target.value]
+        units = [u for u in units if u.status == status]
     return UnitListResponse(
         property_id=property_id,
         count=len(units),
@@ -68,7 +100,7 @@ async def rent_roll(
     property_id: str,
     c: Ctr,
 ) -> RentRollResult:
-    result = await c.rent_roll_service.build_rent_roll(property_id)
+    result = await c.rent_roll_resolver.build_rent_roll(property_id)
     if result is None:
         raise NotFoundError("Property", property_id)
     return result
@@ -87,8 +119,8 @@ async def update_property(
     updates: dict[str, object] = {}
     if body.name is not None:
         updates["name"] = body.name
-    if body.portfolio_id is not None:
-        updates["portfolio_id"] = body.portfolio_id
+    if body.manager_id is not None:
+        updates["manager_id"] = body.manager_id
     if any(f is not None for f in (body.street, body.city, body.state, body.zip_code)):
         updates["address"] = Address(
             street=body.street or prop.address.street,
@@ -114,13 +146,16 @@ async def property_context(
     if not detail:
         raise NotFoundError("Property", property_id)
 
-    rr_task = c.rent_roll_service.build_rent_roll(property_id)
+    rr_task = c.rent_roll_resolver.build_rent_roll(property_id)
     sig_task = c.signal_store.list_signals(scope={"property_id": property_id})
     ev_task = c.event_store.list_by_entity(property_id, limit=20)
     maint_task = c.maintenance_resolver.maintenance_summary(property_id=property_id)
 
     rr, sigs, changesets, maint = await asyncio.gather(
-        rr_task, sig_task, ev_task, maint_task,
+        rr_task,
+        sig_task,
+        ev_task,
+        maint_task,
     )
 
     from remi.application.api.intelligence.signal_schemas import SignalSummary

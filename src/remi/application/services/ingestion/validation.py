@@ -1,417 +1,100 @@
-"""Row-level validation between LLM extraction and persistence.
+"""Pre-persistence row validation — check rows have enough data for persisters.
 
-Validates extracted rows before they reach the resolver.  Rows that fail
-critical checks (no address, unrecognised type) are quarantined into
-``IngestionResult.ambiguous_rows``.  Rows that pass critical checks but
-have field-level issues (out-of-range rent, unparseable date) get warnings
-appended to ``IngestionResult.validation_warnings`` and are still forwarded.
+The persisters derive IDs and FK fields from human-readable data (address,
+tenant name, unit number). This validator checks that the *source data*
+needed by each persister is present — NOT the Pydantic model's required
+fields, which include computed FKs.
+
+Used by the orchestrator before handing rows to persisters.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import structlog
 
-from remi.application.services.ingestion.base import (
-    IngestionResult,
-    ReviewItem,
-    ReviewKind,
-    ReviewSeverity,
-    RowWarning,
-)
-from remi.application.services.ingestion.resolver import PERSISTABLE_TYPES, resolve_row_type
+from remi.application.services.ingestion.base import IngestionResult, RowWarning
+from remi.application.services.ingestion.resolver import PERSISTABLE_TYPES
 
 _log = structlog.get_logger(__name__)
 
-_MAX_MONTHLY_RENT = Decimal("100_000")
-_MAX_BALANCE = Decimal("1_000_000")
-_MAX_SQFT = 50_000
-_MAX_COST = Decimal("10_000_000")
+# What each persister actually needs from the mapped row to function.
+# These are the human-readable columns that the LLM maps, not FK IDs.
+_PERSISTER_REQUIREMENTS: dict[str, frozenset[str]] = {
+    "Unit": frozenset({"property_address"}),
+    "Tenant": frozenset({"property_address"}),
+    "BalanceObservation": frozenset({"property_address"}),
+    "Lease": frozenset({"property_address"}),
+    "Property": frozenset({"property_address"}),
+    "MaintenanceRequest": frozenset({"property_address"}),
+    "Owner": frozenset(),
+    "Vendor": frozenset(),
+    "PropertyManager": frozenset(),
+}
 
 
 def validate_rows(
     rows: list[dict[str, Any]],
     result: IngestionResult,
 ) -> list[dict[str, Any]]:
-    """Validate extracted rows.  Returns accepted rows only.
+    """Validate mapped rows have the data persisters need.
 
-    Populates ``result.validation_warnings``, ``result.ambiguous_rows``,
-    ``result.rows_accepted``, ``result.rows_rejected``, and
-    ``result.review_items`` (structured items for the human review surface).
+    Returns only the accepted rows. Appends ``RowWarning`` entries to
+    *result* for each rejected row and increments the appropriate counters.
     """
     accepted: list[dict[str, Any]] = []
 
     for idx, row in enumerate(rows):
-        warnings: list[RowWarning] = []
-        reject = False
+        entity_type = row.get("type", "")
 
-        raw_type = str(row.get("type", "raw_row"))
-        resolved_type = resolve_row_type(raw_type)
-
-        if resolved_type not in PERSISTABLE_TYPES:
-            result.ambiguous_rows.append(row)
-            result.rows_rejected += 1
-            result.review_items.append(
-                ReviewItem(
-                    kind=ReviewKind.AMBIGUOUS_ROW,
-                    severity=ReviewSeverity.ACTION_NEEDED,
-                    message=f"Row {idx}: unknown entity type '{raw_type}'",
-                    row_index=idx,
-                    entity_type=raw_type,
-                    raw_value=str(row.get("property_address", ""))[:120],
-                    row_data=_safe_row_snapshot(row),
-                )
-            )
-            _log.info("row_rejected_unknown_type", row_index=idx, raw_type=raw_type)
+        if entity_type not in PERSISTABLE_TYPES:
+            result.observation_rows.append(row)
+            result.rows_skipped += 1
             continue
 
-        address = str(row.get("property_address", "")).strip()
-        if not address:
-            warnings.append(
-                RowWarning(
-                    row_index=idx,
-                    row_type=resolved_type,
-                    field="property_address",
-                    issue="missing_required",
-                    raw_value="",
+        required = _PERSISTER_REQUIREMENTS.get(entity_type, frozenset())
+        missing = [f for f in required if not _has_value(row, f)]
+
+        if missing:
+            for field_name in missing:
+                result.validation_warnings.append(
+                    RowWarning(
+                        row_index=idx,
+                        row_type=entity_type,
+                        field=field_name,
+                        issue="required source field missing",
+                        raw_value="",
+                    )
                 )
-            )
-            reject = True
-
-        type_validator = _TYPE_VALIDATORS.get(resolved_type)
-        if type_validator is not None:
-            type_warnings, type_reject = type_validator(idx, resolved_type, row)
-            warnings.extend(type_warnings)
-            reject = reject or type_reject
-
-        if reject:
-            result.ambiguous_rows.append(row)
             result.rows_rejected += 1
-            result.validation_warnings.extend(warnings)
-            issues = [w.issue for w in warnings]
-            result.review_items.append(
-                ReviewItem(
-                    kind=ReviewKind.AMBIGUOUS_ROW,
-                    severity=ReviewSeverity.ACTION_NEEDED,
-                    message=f"Row {idx} ({resolved_type}): {', '.join(issues)}",
-                    row_index=idx,
-                    entity_type=resolved_type,
-                    field_name=warnings[0].field if warnings else None,
-                    raw_value=warnings[0].raw_value if warnings else None,
-                    suggestion=_suggestion_for_issues(issues),
-                    row_data=_safe_row_snapshot(row),
-                )
-            )
+
             _log.info(
                 "row_rejected",
                 row_index=idx,
-                row_type=resolved_type,
-                issues=issues,
+                entity_type=entity_type,
+                missing_fields=missing,
             )
-        else:
-            if warnings:
-                result.validation_warnings.extend(warnings)
-                for w in warnings:
-                    result.review_items.append(
-                        ReviewItem(
-                            kind=ReviewKind.VALIDATION_WARNING,
-                            severity=ReviewSeverity.WARNING,
-                            message=f"Row {w.row_index} ({w.row_type}).{w.field}: {w.issue}",
-                            row_index=w.row_index,
-                            entity_type=w.row_type,
-                            field_name=w.field,
-                            raw_value=w.raw_value,
-                        )
-                    )
-            result.rows_accepted += 1
-            accepted.append(row)
+            continue
 
-    if result.rows_rejected:
-        _log.warning(
-            "validation_summary",
-            accepted=result.rows_accepted,
-            rejected=result.rows_rejected,
-            warning_count=len(result.validation_warnings),
-        )
+        accepted.append(row)
+        result.rows_accepted += 1
 
     return accepted
 
 
-_MAX_ROW_SNAPSHOT_FIELDS = 20
+def _has_value(row: dict[str, Any], field: str) -> bool:
+    """Check if a row has a non-empty value for a field.
 
-
-def _safe_row_snapshot(row: dict[str, Any]) -> dict[str, Any]:
-    """Serialize a row dict for inclusion in a review item payload.
-
-    Limits field count and value length to keep responses manageable.
+    Also checks common aliases — e.g. ``property_address`` can be
+    satisfied by ``address``, ``property_name``, or a section header.
     """
-    out: dict[str, Any] = {}
-    for i, (k, v) in enumerate(row.items()):
-        if i >= _MAX_ROW_SNAPSHOT_FIELDS:
-            break
-        out[k] = str(v)[:200] if v is not None else None
-    return out
+    if field == "property_address":
+        for key in ("property_address", "address", "property_name", "_section_header"):
+            val = row.get(key)
+            if val is not None and str(val).strip():
+                return True
+        return False
 
-
-def _suggestion_for_issues(issues: list[str]) -> str | None:
-    if "missing_required" in issues:
-        return "Fill in the missing required field(s) and re-submit"
-    if "parse_failed" in issues:
-        return "Check the field format — expected a number or date"
-    if "out_of_range" in issues:
-        return "Value seems unusually large — verify it is correct"
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_ValidatorResult = tuple[list[RowWarning], bool]
-
-
-def _try_decimal(val: Any) -> Decimal | None:
-    if val is None:
-        return None
-    try:
-        return Decimal(str(val))
-    except (InvalidOperation, ValueError, TypeError):
-        return None
-
-
-def _try_date(val: Any) -> date | None:
-    if val is None:
-        return None
-    if isinstance(val, date):
-        return val
-    s = str(val).strip()
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _check_non_negative(
-    idx: int,
-    row_type: str,
-    row: dict[str, Any],
-    field_name: str,
-    *,
-    ceiling: Decimal | None = None,
-) -> RowWarning | None:
-    raw = row.get(field_name)
-    if raw is None:
-        return None
-    d = _try_decimal(raw)
-    if d is None:
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="parse_failed",
-            raw_value=str(raw)[:80],
-        )
-    if d < 0:
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="negative_value",
-            raw_value=str(raw)[:80],
-        )
-    if ceiling is not None and d > ceiling:
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="out_of_range",
-            raw_value=str(raw)[:80],
-        )
-    return None
-
-
-def _check_positive_int(
-    idx: int,
-    row_type: str,
-    row: dict[str, Any],
-    field_name: str,
-    *,
-    ceiling: int | None = None,
-) -> RowWarning | None:
-    raw = row.get(field_name)
-    if raw is None:
-        return None
-    try:
-        v = int(raw)
-    except (TypeError, ValueError):
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="parse_failed",
-            raw_value=str(raw)[:80],
-        )
-    if v < 0:
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="negative_value",
-            raw_value=str(raw)[:80],
-        )
-    if ceiling is not None and v > ceiling:
-        return RowWarning(
-            row_index=idx,
-            row_type=row_type,
-            field=field_name,
-            issue="out_of_range",
-            raw_value=str(raw)[:80],
-        )
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Per-type validators
-# ---------------------------------------------------------------------------
-
-
-def _validate_unit(idx: int, row_type: str, row: dict[str, Any]) -> _ValidatorResult:
-    warnings: list[RowWarning] = []
-
-    for field_name in ("market_rent", "monthly_rent", "current_rent"):
-        w = _check_non_negative(idx, row_type, row, field_name, ceiling=_MAX_MONTHLY_RENT)
-        if w:
-            warnings.append(w)
-
-    w = _check_positive_int(idx, row_type, row, "sqft", ceiling=_MAX_SQFT)
-    if w:
-        warnings.append(w)
-
-    w = _check_positive_int(idx, row_type, row, "days_vacant")
-    if w:
-        warnings.append(w)
-
-    return warnings, False
-
-
-def _validate_tenant(idx: int, row_type: str, row: dict[str, Any]) -> _ValidatorResult:
-    warnings: list[RowWarning] = []
-    reject = False
-
-    tenant_name = str(row.get("tenant_name") or row.get("name") or "").strip()
-    if not tenant_name:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="tenant_name",
-                issue="missing_required",
-                raw_value="",
-            )
-        )
-        reject = True
-
-    for field_name in ("balance_owed", "amount_owed", "balance_0_30", "balance_30_plus"):
-        ceiling = _MAX_BALANCE if field_name in ("amount_owed", "balance_owed") else None
-        w = _check_non_negative(idx, row_type, row, field_name, ceiling=ceiling)
-        if w:
-            warnings.append(w)
-
-    return warnings, reject
-
-
-def _validate_lease(idx: int, row_type: str, row: dict[str, Any]) -> _ValidatorResult:
-    warnings: list[RowWarning] = []
-
-    tenant_name = str(row.get("tenant_name") or row.get("name") or "").strip()
-    if not tenant_name:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="tenant_name",
-                issue="missing_required",
-                raw_value="",
-            )
-        )
-
-    w = _check_non_negative(idx, row_type, row, "monthly_rent", ceiling=_MAX_MONTHLY_RENT)
-    if w:
-        warnings.append(w)
-
-    start_raw = row.get("move_in_date") or row.get("start_date")
-    end_raw = row.get("lease_expires") or row.get("end_date")
-    start = _try_date(start_raw)
-    end = _try_date(end_raw)
-
-    if start_raw is not None and start is None:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="start_date",
-                issue="parse_failed",
-                raw_value=str(start_raw)[:80],
-            )
-        )
-    if end_raw is not None and end is None:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="end_date",
-                issue="parse_failed",
-                raw_value=str(end_raw)[:80],
-            )
-        )
-    if start and end and start > end:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="start_date/end_date",
-                issue="inverted_range",
-                raw_value=f"{start.isoformat()} > {end.isoformat()}",
-            )
-        )
-
-    return warnings, False
-
-
-def _validate_maintenance(idx: int, row_type: str, row: dict[str, Any]) -> _ValidatorResult:
-    warnings: list[RowWarning] = []
-
-    title = str(row.get("title") or "").strip()
-    if not title:
-        warnings.append(
-            RowWarning(
-                row_index=idx,
-                row_type=row_type,
-                field="title",
-                issue="missing_required",
-                raw_value="",
-            )
-        )
-
-    w = _check_non_negative(idx, row_type, row, "cost", ceiling=_MAX_COST)
-    if w:
-        warnings.append(w)
-
-    return warnings, False
-
-
-_TYPE_VALIDATORS: dict[
-    str,
-    Callable[[int, str, dict[str, Any]], _ValidatorResult],
-] = {
-    "Unit": _validate_unit,
-    "Tenant": _validate_tenant,
-    "Lease": _validate_lease,
-    "MaintenanceRequest": _validate_maintenance,
-}
+    val = row.get(field)
+    return val is not None and str(val).strip() != ""

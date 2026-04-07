@@ -1,9 +1,8 @@
 """Services — application-level orchestration over domain + agent ports.
 
     ingestion/      Document ingestion pipeline (parse → extract → resolve → persist)
-    embedding/      Vector indexing pipeline for portfolio entities
-    seeding/        Batch report loading (PortfolioLoader)
+    auto_assign.py  KB-tag-based property-to-manager assignment
     search.py       RE-aware hybrid search
 
-Entity resolvers live in ``application/portfolio/``, not here.
+Computed views live in ``application/views/``, not here.
 """

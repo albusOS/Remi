@@ -8,18 +8,37 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
 import { ManagerFilter } from "@/components/ui/ManagerFilter";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { LeaseCalendar } from "@/lib/types";
+
+const LEASE_FIELDS: FieldDef[] = [
+  { name: "property_id", label: "Property ID", required: true, placeholder: "property:..." },
+  { name: "unit_id", label: "Unit ID", required: true, placeholder: "unit:..." },
+  { name: "tenant_id", label: "Tenant ID", required: true, placeholder: "tenant:..." },
+  { name: "start_date", label: "Start Date", type: "date", required: true },
+  { name: "end_date", label: "End Date", type: "date", required: true },
+  { name: "monthly_rent", label: "Monthly Rent", type: "number", required: true },
+  { name: "deposit", label: "Deposit", type: "number" },
+  { name: "status", label: "Status", type: "select", defaultValue: "active", options: [
+    { value: "active", label: "Active" }, { value: "pending", label: "Pending" },
+  ]},
+];
 
 const WINDOWS = [30, 60, 90] as const;
 
 export function LeasesView() {
   const [days, setDays] = useState<number>(90);
   const [managerId, setManagerId] = useState("");
-  const { data, loading } = useApiQuery<LeaseCalendar>(
-    () => api.leasesExpiring(days, managerId || undefined),
-    [days, managerId]
+  const [showAddLease, setShowAddLease] = useState(false);
+
+  const effectiveScope = managerId ? { manager_id: managerId } : undefined;
+
+  const { data, loading, error, refetch } = useApiQuery<LeaseCalendar>(
+    () => api.leasesExpiring(days, effectiveScope),
+    [days, managerId],
   );
 
   return (
@@ -48,6 +67,13 @@ export function LeasesView() {
               ))}
             </div>
             <ManagerFilter value={managerId} onChange={setManagerId} />
+            <button
+              onClick={() => setShowAddLease(true)}
+              className="h-9 flex items-center gap-2 px-4 rounded-xl border border-dashed border-border bg-surface hover:border-accent/40 hover:text-accent hover:shadow-md hover:shadow-accent/5 text-xs font-medium text-fg-muted transition-all btn-glow"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+              Add Lease
+            </button>
           </div>
         </div>
 
@@ -74,6 +100,8 @@ export function LeasesView() {
         {loading && (
           <div className="py-12 text-center text-sm text-fg-faint animate-pulse">Loading...</div>
         )}
+
+        <ErrorBanner error={error} onRetry={refetch} />
 
         {!loading && data && data.leases.length > 0 && (
           <div className="rounded-xl border border-border bg-surface overflow-hidden">
@@ -152,6 +180,18 @@ export function LeasesView() {
             No expiring leases in the next {days} days
           </div>
         )}
+
+        <EntityFormPanel
+          open={showAddLease}
+          onClose={() => setShowAddLease(false)}
+          title="Add Lease"
+          fields={LEASE_FIELDS}
+          submitLabel="Create Lease"
+          onSubmit={async (values) => {
+            await api.createLease(values as Parameters<typeof api.createLease>[0]);
+            refetch();
+          }}
+        />
     </PageContainer>
   );
 }

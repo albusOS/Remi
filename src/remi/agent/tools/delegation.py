@@ -88,9 +88,7 @@ class DelegationToolProvider(ToolProvider):
                 "response": answer or "",
             }
 
-        agent_descriptions = "\n".join(
-            f"  - **{name}**: {desc}" for name, desc in agents.items()
-        )
+        agent_descriptions = "\n".join(f"  - **{name}**: {desc}" for name, desc in agents.items())
 
         registry.register(
             "delegate_to_agent",

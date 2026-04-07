@@ -21,9 +21,7 @@ class PostgresMemoryStore(MemoryStore):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def store(
-        self, namespace: str, key: str, value: str, *, ttl: int | None = None
-    ) -> None:
+    async def store(self, namespace: str, key: str, value: str, *, ttl: int | None = None) -> None:
         now = datetime.now(UTC)
         async with self._session_factory() as session:
             stmt = select(MemoryEntryRow).where(
@@ -66,9 +64,7 @@ class PostgresMemoryStore(MemoryStore):
                 return None
             return row.value
 
-    async def search(
-        self, namespace: str, query: str, *, limit: int = 5
-    ) -> list[MemoryEntry]:
+    async def search(self, namespace: str, query: str, *, limit: int = 5) -> list[MemoryEntry]:
         query_lower = query.lower()
         async with self._session_factory() as session:
             stmt = select(MemoryEntryRow).where(

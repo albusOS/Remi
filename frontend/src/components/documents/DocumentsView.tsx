@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/Badge";
 import { Empty } from "@/components/ui/Empty";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { UploadPanel } from "@/components/documents/UploadPanel";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import type { DocumentMeta, DocumentKind, ManagerListItem, SignalSummary } from "@/lib/types";
@@ -92,20 +93,25 @@ export function DocumentsView() {
   const [editingTags, setEditingTags] = useState(false);
   const [editTagValue, setEditTagValue] = useState("");
 
+  const [loadError, setLoadError] = useState<Error | null>(null);
+
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const [docs, mgrs, tags] = await Promise.all([
         api.listDocuments({
           q: searchQuery || undefined,
           kind: kindFilter || undefined,
           tags: tagFilter || undefined,
-        }).catch(() => []),
+        }),
         api.listManagers().catch(() => []),
         api.listDocumentTags().catch(() => []),
       ]);
       setDocuments(docs);
       setManagers(mgrs);
       setAllTags(tags);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err : new Error("Failed to load documents"));
     } finally {
       setLoading(false);
     }
@@ -259,6 +265,12 @@ export function DocumentsView() {
           ))}
         </div>
       </div>
+
+      {loadError && (
+        <div className="px-4 sm:px-6 pt-3">
+          <ErrorBanner error={loadError} onRetry={load} />
+        </div>
+      )}
 
       {/* Documents tab */}
       {activeTab === "documents" && (
@@ -590,7 +602,7 @@ export function DocumentsView() {
           {!eventsLoading && events.length > 0 && (
             <div className="space-y-2 max-w-4xl">
               {events.map((evt, i) => (
-                <div key={(evt.changeset_id as string) ?? i} className="rounded-lg border border-border-subtle p-3 flex items-center gap-4">
+                <div key={(evt.id as string) ?? i} className="rounded-lg border border-border-subtle p-3 flex items-center gap-4">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-fg">
                       {String(evt.source ?? "")}
@@ -611,6 +623,7 @@ export function DocumentsView() {
           )}
         </div>
       )}
+
     </div>
   );
 }

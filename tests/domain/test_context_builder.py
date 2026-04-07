@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from remi.agent.context.rendering import (
-    render_active_signals,
-    render_domain_context,
-    render_graph_context,
-)
-from remi.agent.types import Message
-from remi.agent.graph.types import KnowledgeLink
-from remi.agent.signals import DomainTBox, Severity, Signal
-from remi.types.text import estimate_tokens, truncate_to_tokens
 from remi.agent.context.builder import ContextBuilder
 from remi.agent.context.frame import (
     ContextFrame,
     PerceptionSnapshot,
     WorldState,
 )
+from remi.agent.context.rendering import (
+    render_active_signals,
+    render_domain_context,
+    render_graph_context,
+)
 from remi.agent.graph.retrieval.retriever import ResolvedEntity
-from remi.application.infra.ontology.schema import load_domain_yaml
+from remi.agent.graph.types import KnowledgeLink
+from remi.agent.signals import DomainTBox, Severity, Signal
 from remi.agent.signals.persistence.mem import InMemorySignalStore
+from remi.agent.types import Message
+from remi.application.infra.graph.schema import load_domain_yaml
+from remi.types.text import estimate_tokens, truncate_to_tokens
 
 # -- token utilities ----------------------------------------------------------
 
@@ -83,8 +83,8 @@ def test_render_graph_context_with_neighborhood() -> None:
             "prop-1": [
                 KnowledgeLink(
                     source_id="prop-1",
-                    link_type="IN_PORTFOLIO",
-                    target_id="pf-1",
+                    link_type="MANAGED_BY",
+                    target_id="mgr-1",
                 ),
                 KnowledgeLink(
                     source_id="unit-1",
@@ -96,9 +96,9 @@ def test_render_graph_context_with_neighborhood() -> None:
     )
 
     result = render_graph_context(frame)
-    assert "IN_PORTFOLIO" in result
+    assert "MANAGED_BY" in result
     assert "BELONGS_TO" in result
-    assert "pf-1" in result
+    assert "mgr-1" in result
     assert "unit-1" in result
 
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmt$ } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import type { ManagerListItem } from "@/lib/types";
+import type { DashboardOverview } from "@/lib/types";
 
 function getTimeOfDay(): "morning" | "afternoon" | "evening" {
   const h = new Date().getHours();
@@ -21,32 +21,19 @@ function formatDate(): string {
   });
 }
 
-function buildOneLiner(managers: ManagerListItem[]): { text: string; tone: "good" | "neutral" | "warn" } | null {
-  const active = managers.filter((m) => m.total_units > 0);
-  if (active.length === 0) return null;
+function buildOneLiner(ov: DashboardOverview): { text: string; tone: "good" | "neutral" | "warn" } | null {
+  if (ov.total_units === 0) return null;
 
-  const totalUnits = active.reduce((s, m) => s + m.total_units, 0);
-  const totalOccupied = active.reduce((s, m) => s + m.occupied, 0);
-  const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
-  const totalVacant = active.reduce((s, m) => s + m.vacant, 0);
-  const totalExpired = active.reduce((s, m) => s + m.expired_leases, 0);
-  const totalExpiring = active.reduce((s, m) => s + m.expiring_leases_90d, 0);
-  const totalEmergency = active.reduce((s, m) => s + m.emergency_maintenance, 0);
-  const totalLTL = active.reduce((s, m) => s + m.total_loss_to_lease, 0);
-
+  const occPct = (ov.occupancy_rate * 100).toFixed(1);
+  const vacant = ov.total_units - ov.occupied;
   const flags: string[] = [];
 
-  if (totalEmergency > 0) flags.push(`${totalEmergency} emergency work order${totalEmergency > 1 ? "s" : ""}`);
-  if (totalExpired > 0) flags.push(`${totalExpired} expired lease${totalExpired > 1 ? "s" : ""}`);
-  if (totalVacant > 3) flags.push(`${totalVacant} vacancies`);
-  if (totalExpiring > 5) flags.push(`${totalExpiring} leases expiring soon`);
-  if (totalLTL > 5000) flags.push(`${fmt$(totalLTL)}/mo in lost rent`);
-
-  const occPct = (avgOcc * 100).toFixed(1);
+  if (vacant > 3) flags.push(`${vacant} vacancies`);
+  if (ov.total_loss_to_lease > 5000) flags.push(`${fmt$(ov.total_loss_to_lease)}/mo in lost rent`);
 
   if (flags.length === 0) {
     return {
-      text: `${occPct}% occupied across ${totalUnits.toLocaleString()} units. Nothing urgent.`,
+      text: `${occPct}% occupied across ${ov.total_units.toLocaleString()} units. Nothing urgent.`,
       tone: "good",
     };
   }
@@ -71,14 +58,13 @@ const TONE_DOT: Record<string, string> = {
 };
 
 export function DashboardBrief() {
-  const { data, loading } = useApiQuery<ManagerListItem[]>(
-    () => api.listManagers().catch(() => []),
+  const { data, loading } = useApiQuery<DashboardOverview | null>(
+    () => api.dashboardOverview().catch(() => null),
     []
   );
-  const managers = data ?? [];
 
   const timeOfDay = getTimeOfDay();
-  const brief = buildOneLiner(managers);
+  const brief = data ? buildOneLiner(data) : null;
 
   return (
     <div className="h-full flex items-center justify-center">
@@ -91,7 +77,6 @@ export function DashboardBrief() {
           {timeOfDay === "morning" ? "Good morning." : timeOfDay === "afternoon" ? "Good afternoon." : "Good evening."}
         </h1>
 
-        {/* The brief */}
         {loading && (
           <div className="mt-5">
             <div className="h-4 w-3/4 bg-surface-sunken rounded animate-pulse" />
@@ -109,19 +94,18 @@ export function DashboardBrief() {
           <p className="mt-5 text-sm text-fg-faint">No data yet. Upload some reports to get started.</p>
         )}
 
-        {/* Quick links */}
         <div className="mt-8 flex gap-3">
           <Link
             href="/ask"
             className="text-xs text-accent hover:text-accent-hover transition-colors"
           >
-            Ask REMI →
+            Ask REMI
           </Link>
           <Link
             href="/"
             className="text-xs text-fg-faint hover:text-fg-secondary transition-colors"
           >
-            View managers
+            View dashboard
           </Link>
         </div>
       </div>

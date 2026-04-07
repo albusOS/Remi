@@ -5,7 +5,7 @@ metadata:
   name: action_planner
   version: "1.0.0"
   description: >
-    Sub-agent that analyzes a portfolio review and proposes action items.
+    Sub-agent that analyzes a manager review and proposes action items.
     Called by the draft_action_plan workflow tool — not user-facing.
   tags: [workflow, internal]
   domain: real-estate
@@ -17,7 +17,7 @@ modules:
   - id: planner
     kind: agent
     description: >
-      Analyzes portfolio data and proposes prioritized action items.
+      Analyzes manager data and proposes prioritized action items.
       Receives a JSON payload with manager summary, delinquency,
       lease expirations, vacancies, and existing action items.
       Returns a JSON plan.
@@ -29,9 +29,9 @@ modules:
       max_iterations: 2
 
       system_prompt: |
-        You are an action item planner for a real estate portfolio.
+        You are an action item planner for real estate operations.
 
-        You receive a JSON payload containing a manager's portfolio review:
+        You receive a JSON payload containing a manager review:
         summary metrics, delinquency data, lease expirations, vacancies,
         maintenance issues, and any existing open action items.
 

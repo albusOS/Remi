@@ -14,7 +14,7 @@ _RE_NAME_FIELDS = (
     "tenant_name",
     "property_name",
     "manager_name",
-    "title",    # ActionItem
+    "title",  # ActionItem
     "content",  # Note (short content snippets)
 )
 
@@ -38,9 +38,9 @@ _RE_AVAILABLE_AGENTS = {
         "protocol (LOAD > EXPLORE > HYPOTHESIZE > MODEL > VALIDATE > SYNTHESIZE)."
     ),
     "action_planner": (
-        "Action item generator. Use for: analyzing a manager's portfolio data "
+        "Action item generator. Use for: analyzing a manager's property data "
         "and proposing prioritized, concrete action items. Receives a JSON "
-        "payload with portfolio context and returns structured action plans."
+        "payload with manager context and returns structured action plans."
     ),
 }
 
@@ -78,7 +78,7 @@ def build_re_profile() -> DomainProfile:
     return DomainProfile(
         name_fields=_RE_NAME_FIELDS,
         metadata_skip_patterns=_RE_METADATA_SKIP_PATTERNS,
-        empty_state_label="portfolio",
+        empty_state_label="data",
         scope_entity_type="PropertyManager",
         tool_hints=dict(_RE_TOOL_HINTS),
         available_agents=dict(_RE_AVAILABLE_AGENTS),

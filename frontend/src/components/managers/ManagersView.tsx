@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { fmt$, pct } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -22,6 +23,7 @@ function ManagerCard({
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeTarget, setMergeTarget] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,11 +36,10 @@ function ManagerCard({
   }, [menuOpen]);
 
   const issueCount =
-    m.vacant + m.open_maintenance + m.expiring_leases_90d + m.expired_leases + m.below_market_units + m.delinquent_count;
+    m.metrics.vacant + m.metrics.open_maintenance + m.metrics.expiring_leases_90d + m.expired_leases + m.below_market_units + m.delinquent_count;
   const hasUrgent = m.emergency_maintenance > 0 || m.expired_leases > 0 || m.delinquent_count > 5;
 
   const handleDelete = async () => {
-    if (!confirm(`Delete manager "${m.name}" and unlink their properties?`)) return;
     setBusy(true);
     try {
       await api.deleteManager(m.id);
@@ -48,6 +49,7 @@ function ManagerCard({
     } finally {
       setBusy(false);
       setMenuOpen(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -80,7 +82,7 @@ function ManagerCard({
         <Link href={`/managers/${m.id}`} className="min-w-0 flex-1 hover:opacity-80">
           <h3 className="text-sm font-semibold text-fg truncate">{m.name}</h3>
           <p className="text-[10px] text-fg-faint mt-0.5">
-            {m.property_count} properties · {m.total_units} units
+            {m.property_count} properties · {m.metrics.total_units} units
           </p>
         </Link>
         <div className="flex items-center gap-1.5">
@@ -112,11 +114,11 @@ function ManagerCard({
                   Merge into...
                 </button>
                 <button
-                  onClick={handleDelete}
+                  onClick={() => { setMenuOpen(false); setShowDeleteConfirm(true); }}
                   disabled={busy}
                   className="w-full text-left px-3 py-1.5 text-error hover:bg-surface-sunken"
                 >
-                  {busy ? "Deleting..." : "Delete"}
+                  Delete
                 </button>
               </div>
             )}
@@ -165,20 +167,20 @@ function ManagerCard({
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-center">
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Occ</p>
-            <p className={`text-[11px] font-bold truncate ${m.occupancy_rate < 0.9 ? "text-warn" : "text-fg"}`}>
-              {pct(m.occupancy_rate)}
+            <p className={`text-[11px] font-bold truncate ${m.metrics.occupancy_rate < 0.9 ? "text-warn" : "text-fg"}`}>
+              {pct(m.metrics.occupancy_rate)}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Revenue</p>
             <p className="text-[11px] font-bold text-fg truncate">
-              {fmt$(m.total_actual_rent)}
+              {fmt$(m.metrics.total_actual_rent)}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">LTL</p>
-            <p className={`text-[11px] font-bold truncate ${m.total_loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>
-              {m.total_loss_to_lease > 0 ? fmt$(m.total_loss_to_lease) : "—"}
+            <p className={`text-[11px] font-bold truncate ${m.metrics.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>
+              {m.metrics.loss_to_lease > 0 ? fmt$(m.metrics.loss_to_lease) : "—"}
             </p>
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
@@ -189,8 +191,8 @@ function ManagerCard({
           </div>
           <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
             <p className="text-[9px] text-fg-faint uppercase truncate">Vacant</p>
-            <p className={`text-[11px] font-bold truncate ${m.vacant > 0 ? "text-error" : "text-fg-muted"}`}>
-              {m.vacant > 0 ? m.vacant : "—"}
+            <p className={`text-[11px] font-bold truncate ${m.metrics.vacant > 0 ? "text-error" : "text-fg-muted"}`}>
+              {m.metrics.vacant > 0 ? m.metrics.vacant : "—"}
             </p>
           </div>
         </div>
@@ -198,14 +200,23 @@ function ManagerCard({
         {issueCount > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-border-subtle">
             {m.delinquent_count > 0 && <span className="text-[9px] text-error">{m.delinquent_count} delinquent ({fmt$(m.total_delinquent_balance)})</span>}
-            {m.vacant > 0 && <span className="text-[9px] text-error">{m.vacant} vacant</span>}
-            {m.expiring_leases_90d > 0 && <span className="text-[9px] text-warn">{m.expiring_leases_90d} expiring</span>}
+            {m.metrics.vacant > 0 && <span className="text-[9px] text-error">{m.metrics.vacant} vacant</span>}
+            {m.metrics.expiring_leases_90d > 0 && <span className="text-[9px] text-warn">{m.metrics.expiring_leases_90d} expiring</span>}
             {m.expired_leases > 0 && <span className="text-[9px] text-error">{m.expired_leases} expired</span>}
             {m.below_market_units > 0 && <span className="text-[9px] text-warn">{m.below_market_units} below mkt</span>}
-            {m.open_maintenance > 0 && <span className="text-[9px] text-sky-400">{m.open_maintenance} maint</span>}
+            {m.metrics.open_maintenance > 0 && <span className="text-[9px] text-sky-400">{m.metrics.open_maintenance} maint</span>}
           </div>
         )}
       </Link>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Manager"
+        description={`Delete "${m.name}" and unlink their properties? This action cannot be undone.`}
+        confirmLabel="Delete Manager"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }
@@ -217,16 +228,16 @@ function sortManagers(mgrs: ManagerListItem[], key: SortKey): ManagerListItem[] 
   switch (key) {
     case "issues":
       return copy.sort((a, b) => {
-        const aI = a.vacant + a.open_maintenance + a.expiring_leases_90d + a.expired_leases + a.below_market_units;
-        const bI = b.vacant + b.open_maintenance + b.expiring_leases_90d + b.expired_leases + b.below_market_units;
+        const aI = a.metrics.vacant + a.metrics.open_maintenance + a.metrics.expiring_leases_90d + a.expired_leases + a.below_market_units;
+        const bI = b.metrics.vacant + b.metrics.open_maintenance + b.metrics.expiring_leases_90d + b.expired_leases + b.below_market_units;
         return bI - aI;
       });
     case "revenue":
-      return copy.sort((a, b) => b.total_actual_rent - a.total_actual_rent);
+      return copy.sort((a, b) => b.metrics.total_actual_rent - a.metrics.total_actual_rent);
     case "occupancy":
-      return copy.sort((a, b) => a.occupancy_rate - b.occupancy_rate);
+      return copy.sort((a, b) => a.metrics.occupancy_rate - b.metrics.occupancy_rate);
     case "units":
-      return copy.sort((a, b) => b.total_units - a.total_units);
+      return copy.sort((a, b) => b.metrics.total_units - a.metrics.total_units);
     case "name":
       return copy.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -241,7 +252,7 @@ export function ManagersView() {
     [],
   );
 
-  const activeMgrs = (managers ?? []).filter((m) => m.total_units > 0 || m.property_count > 0);
+  const activeMgrs = (managers ?? []).filter((m) => m.metrics.total_units > 0 || m.property_count > 0);
   const filtered = search
     ? activeMgrs.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
     : activeMgrs;

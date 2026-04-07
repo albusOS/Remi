@@ -7,25 +7,24 @@ from pydantic import BaseModel
 from remi.application.core.models import (
     ActionItem,
     ActionItemStatus,
+    BalanceObservation,
     Document,
     DocumentType,
     Lease,
     LeaseStatus,
     MaintenanceRequest,
     MaintenanceStatus,
+    MeetingBrief,
     Note,
     NoteProvenance,
-    OccupancyStatus,
     Owner,
-    Portfolio,
     Property,
     PropertyManager,
     Tenant,
     TenantStatus,
+    TradeCategory,
     Unit,
-    UnitStatus,
     Vendor,
-    VendorCategory,
 )
 from remi.application.core.protocols import PropertyStore
 from remi.types.result import WriteOutcome, WriteResult
@@ -51,7 +50,6 @@ class InMemoryPropertyStore(PropertyStore):
     def __init__(self) -> None:
         self._owners: dict[str, Owner] = {}
         self._managers: dict[str, PropertyManager] = {}
-        self._portfolios: dict[str, Portfolio] = {}
         self._properties: dict[str, Property] = {}
         self._units: dict[str, Unit] = {}
         self._leases: dict[str, Lease] = {}
@@ -60,7 +58,9 @@ class InMemoryPropertyStore(PropertyStore):
         self._vendors: dict[str, Vendor] = {}
         self._action_items: dict[str, ActionItem] = {}
         self._notes: dict[str, Note] = {}
+        self._meeting_briefs: dict[str, MeetingBrief] = {}
         self._documents: dict[str, Document] = {}
+        self._balance_observations: list[BalanceObservation] = []
 
     # -- Owner --
     async def get_owner(self, owner_id: str) -> Owner | None:
@@ -79,9 +79,6 @@ class InMemoryPropertyStore(PropertyStore):
         self._owners[owner.id] = owner
         return WriteResult(entity=owner, outcome=WriteOutcome.CREATED)
 
-    async def delete_owner(self, owner_id: str) -> bool:
-        return self._owners.pop(owner_id, None) is not None
-
     # -- PropertyManager --
     async def get_manager(self, manager_id: str) -> PropertyManager | None:
         return self._managers.get(manager_id)
@@ -99,34 +96,21 @@ class InMemoryPropertyStore(PropertyStore):
         self._managers[manager.id] = manager
         return WriteResult(entity=manager, outcome=WriteOutcome.CREATED)
 
-    # -- Portfolio --
-    async def get_portfolio(self, portfolio_id: str) -> Portfolio | None:
-        return self._portfolios.get(portfolio_id)
-
-    async def list_portfolios(self, *, manager_id: str | None = None) -> list[Portfolio]:
-        items = list(self._portfolios.values())
-        if manager_id:
-            items = [p for p in items if p.manager_id == manager_id]
-        return items
-
-    async def upsert_portfolio(self, portfolio: Portfolio) -> WriteResult[Portfolio]:
-        existing = self._portfolios.get(portfolio.id)
-        if existing:
-            merged: Portfolio = _merge(existing, portfolio)  # type: ignore[assignment]
-            self._portfolios[portfolio.id] = merged
-            outcome = WriteOutcome.NOOP if merged == existing else WriteOutcome.UPDATED
-            return WriteResult(entity=merged, outcome=outcome)
-        self._portfolios[portfolio.id] = portfolio
-        return WriteResult(entity=portfolio, outcome=WriteOutcome.CREATED)
-
     # -- Property --
     async def get_property(self, property_id: str) -> Property | None:
         return self._properties.get(property_id)
 
-    async def list_properties(self, *, portfolio_id: str | None = None) -> list[Property]:
+    async def list_properties(
+        self,
+        *,
+        manager_id: str | None = None,
+        owner_id: str | None = None,
+    ) -> list[Property]:
         items = list(self._properties.values())
-        if portfolio_id:
-            items = [p for p in items if p.portfolio_id == portfolio_id]
+        if manager_id:
+            items = [p for p in items if p.manager_id == manager_id]
+        if owner_id:
+            items = [p for p in items if p.owner_id == owner_id]
         return items
 
     async def upsert_property(self, prop: Property) -> WriteResult[Property]:
@@ -147,16 +131,10 @@ class InMemoryPropertyStore(PropertyStore):
         self,
         *,
         property_id: str | None = None,
-        status: UnitStatus | None = None,
-        occupancy_status: OccupancyStatus | None = None,
     ) -> list[Unit]:
         items = list(self._units.values())
         if property_id:
             items = [u for u in items if u.property_id == property_id]
-        if status:
-            items = [u for u in items if u.status == status]
-        if occupancy_status:
-            items = [u for u in items if u.occupancy_status == occupancy_status]
         return items
 
     async def upsert_unit(self, unit: Unit) -> WriteResult[Unit]:
@@ -169,11 +147,8 @@ class InMemoryPropertyStore(PropertyStore):
         self._units[unit.id] = unit
         return WriteResult(entity=unit, outcome=WriteOutcome.CREATED)
 
-    async def delete_units_by_property(self, property_id: str) -> int:
-        ids = [u.id for u in self._units.values() if u.property_id == property_id]
-        for uid in ids:
-            del self._units[uid]
-        return len(ids)
+    async def delete_unit(self, unit_id: str) -> bool:
+        return self._units.pop(unit_id, None) is not None
 
     # -- Lease --
     async def get_lease(self, lease_id: str) -> Lease | None:
@@ -208,11 +183,8 @@ class InMemoryPropertyStore(PropertyStore):
         self._leases[lease.id] = lease
         return WriteResult(entity=lease, outcome=WriteOutcome.CREATED)
 
-    async def delete_leases_by_property(self, property_id: str) -> int:
-        ids = [le.id for le in self._leases.values() if le.property_id == property_id]
-        for lid in ids:
-            del self._leases[lid]
-        return len(ids)
+    async def delete_lease(self, lease_id: str) -> bool:
+        return self._leases.pop(lease_id, None) is not None
 
     # -- Tenant --
     async def get_tenant(self, tenant_id: str) -> Tenant | None:
@@ -252,6 +224,7 @@ class InMemoryPropertyStore(PropertyStore):
         *,
         property_id: str | None = None,
         unit_id: str | None = None,
+        manager_id: str | None = None,
         status: MaintenanceStatus | None = None,
     ) -> list[MaintenanceRequest]:
         items = list(self._maintenance.values())
@@ -259,6 +232,11 @@ class InMemoryPropertyStore(PropertyStore):
             items = [mr for mr in items if mr.property_id == property_id]
         if unit_id:
             items = [mr for mr in items if mr.unit_id == unit_id]
+        if manager_id:
+            manager_property_ids = {
+                p.id for p in self._properties.values() if p.manager_id == manager_id
+            }
+            items = [mr for mr in items if mr.property_id in manager_property_ids]
         if status:
             items = [mr for mr in items if mr.status == status]
         return items
@@ -276,17 +254,17 @@ class InMemoryPropertyStore(PropertyStore):
         self._maintenance[request.id] = request
         return WriteResult(entity=request, outcome=WriteOutcome.CREATED)
 
+    async def delete_maintenance_request(self, request_id: str) -> bool:
+        return self._maintenance.pop(request_id, None) is not None
+
     # -- Deletes --
     async def delete_manager(self, manager_id: str) -> bool:
         if manager_id not in self._managers:
             return False
         del self._managers[manager_id]
-        pf_ids = [p.id for p in self._portfolios.values() if p.manager_id == manager_id]
-        for pf_id in pf_ids:
-            del self._portfolios[pf_id]
         for prop in list(self._properties.values()):
-            if prop.portfolio_id in pf_ids:
-                self._properties[prop.id] = prop.model_copy(update={"portfolio_id": ""})
+            if prop.manager_id == manager_id:
+                self._properties[prop.id] = prop.model_copy(update={"manager_id": None})
         return True
 
     async def delete_property(self, property_id: str) -> bool:
@@ -317,7 +295,7 @@ class InMemoryPropertyStore(PropertyStore):
     async def list_vendors(
         self,
         *,
-        category: VendorCategory | None = None,
+        category: TradeCategory | None = None,
         is_internal: bool | None = None,
     ) -> list[Vendor]:
         items = list(self._vendors.values())
@@ -336,9 +314,6 @@ class InMemoryPropertyStore(PropertyStore):
             return WriteResult(entity=merged, outcome=outcome)
         self._vendors[vendor.id] = vendor
         return WriteResult(entity=vendor, outcome=WriteOutcome.CREATED)
-
-    async def delete_vendor(self, vendor_id: str) -> bool:
-        return self._vendors.pop(vendor_id, None) is not None
 
     # -- Action Items --
     async def get_action_item(self, item_id: str) -> ActionItem | None:
@@ -409,6 +384,31 @@ class InMemoryPropertyStore(PropertyStore):
     async def delete_note(self, note_id: str) -> bool:
         return self._notes.pop(note_id, None) is not None
 
+    # -- Meeting Briefs --
+    async def list_meeting_briefs(
+        self,
+        *,
+        manager_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MeetingBrief]:
+        briefs = list(self._meeting_briefs.values())
+        if manager_id:
+            briefs = [b for b in briefs if b.manager_id == manager_id]
+        briefs.sort(key=lambda b: b.generated_at, reverse=True)
+        return briefs[:limit]
+
+    async def upsert_meeting_brief(
+        self,
+        brief: MeetingBrief,
+    ) -> WriteResult[MeetingBrief]:
+        existing = self._meeting_briefs.get(brief.id)
+        if existing:
+            self._meeting_briefs[brief.id] = brief
+            outcome = WriteOutcome.NOOP if brief == existing else WriteOutcome.UPDATED
+            return WriteResult(entity=brief, outcome=outcome)
+        self._meeting_briefs[brief.id] = brief
+        return WriteResult(entity=brief, outcome=WriteOutcome.CREATED)
+
     # -- Document --
     async def get_document(self, doc_id: str) -> Document | None:
         return self._documents.get(doc_id)
@@ -435,6 +435,14 @@ class InMemoryPropertyStore(PropertyStore):
             items = [d for d in items if d.document_type == document_type]
         return items
 
+    async def find_by_content_hash(self, content_hash: str) -> Document | None:
+        if not content_hash:
+            return None
+        for doc in self._documents.values():
+            if doc.content_hash == content_hash:
+                return doc
+        return None
+
     async def upsert_document(self, doc: Document) -> WriteResult[Document]:
         existing = self._documents.get(doc.id)
         if existing:
@@ -447,3 +455,27 @@ class InMemoryPropertyStore(PropertyStore):
 
     async def delete_document(self, doc_id: str) -> bool:
         return self._documents.pop(doc_id, None) is not None
+
+    # -- BalanceObservation ---------------------------------------------------
+
+    async def list_balance_observations(
+        self,
+        *,
+        tenant_id: str | None = None,
+        property_id: str | None = None,
+    ) -> list[BalanceObservation]:
+        items = list(self._balance_observations)
+        if tenant_id:
+            items = [o for o in items if o.tenant_id == tenant_id]
+        if property_id:
+            items = [o for o in items if o.property_id == property_id]
+        items.sort(key=lambda o: o.observed_at, reverse=True)
+        return items
+
+    async def insert_balance_observation(
+        self, obs: BalanceObservation
+    ) -> WriteResult[BalanceObservation]:
+        if any(o.id == obs.id for o in self._balance_observations):
+            return WriteResult(entity=obs, outcome=WriteOutcome.NOOP)
+        self._balance_observations.append(obs)
+        return WriteResult(entity=obs, outcome=WriteOutcome.CREATED)

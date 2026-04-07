@@ -12,7 +12,6 @@ class Severity(StrEnum):
     CRITICAL = "critical"
 
 
-
 class Horizon(StrEnum):
     CURRENT = "current"
     CURRENT_PERIOD = "current_period"

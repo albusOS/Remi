@@ -55,22 +55,34 @@ def _doc_from_row(row: DocumentRow) -> DocumentContent:
         page_count=meta.get("page_count", 0),
         tags=meta.get("tags", []),
         size_bytes=meta.get("size_bytes", 0),
-        metadata={k: v for k, v in meta.items() if k not in {
-            "kind", "chunks", "raw_text", "page_count", "tags", "size_bytes",
-        }},
+        metadata={
+            k: v
+            for k, v in meta.items()
+            if k
+            not in {
+                "kind",
+                "chunks",
+                "raw_text",
+                "page_count",
+                "tags",
+                "size_bytes",
+            }
+        },
     )
 
 
 def _doc_to_row(doc: DocumentContent) -> DocumentRow:
     meta = dict(doc.metadata)
-    meta.update({
-        "kind": doc.kind.value,
-        "chunks": _chunks_to_json(doc.chunks),
-        "raw_text": doc.raw_text,
-        "page_count": doc.page_count,
-        "tags": doc.tags,
-        "size_bytes": doc.size_bytes,
-    })
+    meta.update(
+        {
+            "kind": doc.kind.value,
+            "chunks": _chunks_to_json(doc.chunks),
+            "raw_text": doc.raw_text,
+            "page_count": doc.page_count,
+            "tags": doc.tags,
+            "size_bytes": doc.size_bytes,
+        }
+    )
     return DocumentRow(
         id=doc.id,
         filename=doc.filename,

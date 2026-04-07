@@ -1,6 +1,6 @@
-"""Portfolio search tool — hybrid keyword + semantic search for LLM agents.
+"""Search tool — hybrid keyword + semantic search for LLM agents.
 
-Provides: portfolio_search.
+Provides: entity_search.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ class SearchToolProvider(ToolProvider):
     def register(self, registry: ToolRegistry) -> None:
         search_service = self._search_service
 
-        async def portfolio_search(args: dict[str, Any]) -> Any:
+        async def entity_search(args: dict[str, Any]) -> Any:
             query = args.get("query", "")
             if not query:
                 return {"error": "query is required"}
@@ -34,7 +34,10 @@ class SearchToolProvider(ToolProvider):
             limit = int(args.get("limit", 10))
 
             results = await search_service.search(
-                query, types=types, manager_id=manager_id, limit=limit,
+                query,
+                types=types,
+                manager_id=manager_id,
+                limit=limit,
             )
 
             return [
@@ -50,14 +53,14 @@ class SearchToolProvider(ToolProvider):
             ]
 
         registry.register(
-            "portfolio_search",
-            portfolio_search,
+            "entity_search",
+            entity_search,
             ToolDefinition(
-                name="portfolio_search",
+                name="entity_search",
                 description=(
-                    "Fast portfolio-wide search across managers, properties, tenants, "
-                    "units, and maintenance requests. Combines keyword matching on names "
-                    "with semantic similarity for fuzzy queries. Use this to look up "
+                    "Fast search across managers, properties, tenants, units, and "
+                    "maintenance requests. Combines keyword matching on names with "
+                    "semantic similarity for fuzzy queries. Use this to look up "
                     "entities by name, find properties by address or description, or "
                     "locate tenants. Returns structured results with titles and metadata — "
                     "much faster than scanning all entities manually. For exact data "

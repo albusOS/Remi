@@ -2,7 +2,7 @@
 
 Organized by director capability, not by entity:
 
-    portfolio/       Managers, properties, units, portfolios
+    portfolio/       Managers, properties, units, owners
     operations/      Leases, maintenance, tenants, actions, notes
     intelligence/    Signals, dashboard, search, ontology, knowledge, events
     system/          Agents, documents, reports, usage, realtime

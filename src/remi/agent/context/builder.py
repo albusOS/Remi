@@ -122,12 +122,14 @@ class ContextBuilder:
                 ev = s.evidence or {}
                 if "composition_rule" in ev:
                     sev = s.severity.value if hasattr(s.severity, "value") else str(s.severity)
-                    compounding.append(CompoundingSituation(
-                        name=s.signal_type,
-                        severity=sev,
-                        constituents=ev.get("constituent_types", []),
-                        entity_ids=ev.get("constituent_ids", []),
-                    ))
+                    compounding.append(
+                        CompoundingSituation(
+                            name=s.signal_type,
+                            severity=sev,
+                            constituents=ev.get("constituent_types", []),
+                            entity_ids=ev.get("constituent_ids", []),
+                        )
+                    )
 
             frame.perception = PerceptionSnapshot(
                 active_signals=len(frame.signals),

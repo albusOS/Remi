@@ -45,8 +45,7 @@ def build_memory_store(settings: RemiSettings) -> MemoryStore:
         dsn = settings.state_store.dsn or settings.secrets.database_url
         if not dsn:
             raise ValueError(
-                "memory.backend is 'postgres' but no DATABASE_URL or "
-                "state_store.dsn is configured."
+                "memory.backend is 'postgres' but no DATABASE_URL or state_store.dsn is configured."
             )
         from remi.agent.db.engine import async_session_factory, create_async_engine_from_url
         from remi.agent.graph.adapters.pg_memory import PostgresMemoryStore

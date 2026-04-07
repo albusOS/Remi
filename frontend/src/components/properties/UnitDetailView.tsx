@@ -9,6 +9,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
+import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
 import type {
   PropertyDetail,
   RentRollResponse,
@@ -226,11 +227,11 @@ function LeaseHistoryTab({ unitId, propertyId }: { unitId: string; propertyId: s
 
 /* ---- Maintenance ---- */
 
-function UnitMaintenanceTab({ unitId, propertyId }: { unitId: string; propertyId: string }) {
-  const { data, loading } = useApiQuery(() => api.listMaintenance({ property_id: propertyId }), [propertyId]);
+function UnitMaintenanceTab({ unitId }: { unitId: string }) {
+  const { data, loading } = useApiQuery(() => api.listMaintenance({ unit_id: unitId }), [unitId]);
   if (loading) return <div className="py-12 text-center text-sm text-fg-faint animate-pulse">Loading maintenance...</div>;
 
-  const unitRequests = (data?.requests ?? []).filter((r) => r.unit_id === unitId);
+  const unitRequests = data?.requests ?? [];
   if (unitRequests.length === 0) return <div className="py-12 text-center text-sm text-fg-faint">No maintenance requests for this unit</div>;
 
   const open = unitRequests.filter((r) => r.status === "open" || r.status === "in_progress");
@@ -327,7 +328,7 @@ function UnitActivityTab({ unitId }: { unitId: string }) {
       </div>
       <div className="divide-y divide-border-subtle">
         {data.changesets.map((cs) => (
-          <div key={cs.changeset_id} className="px-5 py-3.5 flex items-start gap-4 group hover:bg-surface-raised/50 transition-colors">
+          <div key={cs.id} className="px-5 py-3.5 flex items-start gap-4 group hover:bg-surface-raised/50 transition-colors">
             <div className="shrink-0 w-2 h-2 rounded-full bg-accent mt-1.5 group-hover:scale-150 transition-transform" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
@@ -336,9 +337,9 @@ function UnitActivityTab({ unitId }: { unitId: string }) {
                 <span className="text-xs text-fg-faint ml-auto shrink-0">{fmtDate(cs.timestamp)}</span>
               </div>
               <div className="flex gap-3 mt-1 text-xs text-fg-muted">
-                {cs.created > 0 && <span className="text-ok">+{cs.created} created</span>}
-                {cs.updated > 0 && <span className="text-warn">{cs.updated} updated</span>}
-                {cs.removed > 0 && <span className="text-error">{cs.removed} removed</span>}
+                {cs.summary.created > 0 && <span className="text-ok">+{cs.summary.created} created</span>}
+                {cs.summary.updated > 0 && <span className="text-warn">{cs.summary.updated} updated</span>}
+                {cs.summary.removed > 0 && <span className="text-error">{cs.summary.removed} removed</span>}
               </div>
             </div>
           </div>
@@ -350,10 +351,26 @@ function UnitActivityTab({ unitId }: { unitId: string }) {
 
 /* ---- Main UnitDetailView ---- */
 
+const MAINT_FIELDS: FieldDef[] = [
+  { name: "title", label: "Title", required: true, placeholder: "Leaky faucet in kitchen" },
+  { name: "description", label: "Description", type: "textarea", placeholder: "Details..." },
+  { name: "category", label: "Category", type: "select", defaultValue: "general", options: [
+    { value: "plumbing", label: "Plumbing" }, { value: "electrical", label: "Electrical" },
+    { value: "hvac", label: "HVAC" }, { value: "appliance", label: "Appliance" },
+    { value: "structural", label: "Structural" }, { value: "general", label: "General" },
+    { value: "other", label: "Other" },
+  ]},
+  { name: "priority", label: "Priority", type: "select", defaultValue: "medium", options: [
+    { value: "low", label: "Low" }, { value: "medium", label: "Medium" },
+    { value: "high", label: "High" }, { value: "emergency", label: "Emergency" },
+  ]},
+];
+
 export function UnitDetailView({ propertyId, unitId }: { propertyId: string; unitId: string }) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [showAddMaint, setShowAddMaint] = useState(false);
 
-  const { data, loading } = useApiQuery<{ property: PropertyDetail; rentRoll: RentRollResponse }>(async () => {
+  const { data, loading, refetch } = useApiQuery<{ property: PropertyDetail; rentRoll: RentRollResponse }>(async () => {
     const [property, rentRoll] = await Promise.all([api.getProperty(propertyId), api.getRentRoll(propertyId)]);
     return { property, rentRoll };
   }, [propertyId]);
@@ -396,15 +413,17 @@ export function UnitDetailView({ propertyId, unitId }: { propertyId: string; uni
           <span className="text-fg-muted">Unit {unitRow.unit_number}</span>
         </div>
 
-        <div className="flex items-center gap-4 mt-3">
-          <div className="w-14 h-14 rounded-2xl bg-surface-sunken border-2 border-border flex items-center justify-center shadow-sm">
-            <span className="text-xl font-bold text-fg font-mono">{unitRow.unit_number}</span>
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-fg tracking-tight">Unit {unitRow.unit_number}</h1>
-            <div className="flex items-center gap-3 mt-0.5">
-              <Badge variant={unitRow.status === "occupied" ? "emerald" : unitRow.status === "vacant" ? "red" : unitRow.status === "maintenance" ? "amber" : "default"}>{unitRow.status}</Badge>
-              <span className="text-sm text-fg-muted">{property.name}</span>
+        <div className="flex items-start justify-between mt-3">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-surface-sunken border-2 border-border flex items-center justify-center shadow-sm">
+              <span className="text-xl font-bold text-fg font-mono">{unitRow.unit_number}</span>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-fg tracking-tight">Unit {unitRow.unit_number}</h1>
+              <div className="flex items-center gap-3 mt-0.5">
+                <Badge variant={unitRow.status === "occupied" ? "emerald" : unitRow.status === "vacant" ? "red" : unitRow.status === "maintenance" ? "amber" : "default"}>{unitRow.status}</Badge>
+                <span className="text-sm text-fg-muted">{property.name}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -436,11 +455,32 @@ export function UnitDetailView({ propertyId, unitId }: { propertyId: string; uni
         ))}
       </div>
 
+      {/* Quick-add bar */}
+      <div className="flex gap-2.5 flex-wrap">
+        <button onClick={() => setShowAddMaint(true)} className="h-9 flex items-center gap-2 px-4 rounded-xl border border-dashed border-border bg-surface hover:border-accent/40 hover:text-accent hover:shadow-md hover:shadow-accent/5 text-xs font-medium text-fg-muted transition-all btn-glow">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          Add Maintenance
+        </button>
+      </div>
+
       {activeTab === "overview" && <OverviewTab row={unitRow} />}
       {activeTab === "leases" && <LeaseHistoryTab unitId={unitId} propertyId={propertyId} />}
-      {activeTab === "maintenance" && <UnitMaintenanceTab unitId={unitId} propertyId={propertyId} />}
+      {activeTab === "maintenance" && <UnitMaintenanceTab unitId={unitId} />}
       {activeTab === "notes" && <UnitNotesTab unitId={unitId} />}
       {activeTab === "activity" && <UnitActivityTab unitId={unitId} />}
+
+      <EntityFormPanel
+        open={showAddMaint}
+        onClose={() => setShowAddMaint(false)}
+        title="Add Maintenance Request"
+        fields={MAINT_FIELDS}
+        submitLabel="Create Request"
+        onSubmit={async (values) => {
+          await api.createMaintenance({ property_id: propertyId, unit_id: unitId, ...values } as Parameters<typeof api.createMaintenance>[0]);
+          refetch();
+        }}
+      />
+
     </PageContainer>
   );
 }

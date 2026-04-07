@@ -43,15 +43,15 @@ class TraceToolProvider(ToolProvider):
                 name="trace_list",
                 description=(
                     "List recent reasoning traces. "
-                    "Each trace captures a full chain of entailment, perception, and reasoning."
+                    "Each trace captures a full chain of perception, tool calls, and reasoning."
                 ),
                 args=[
                     ToolArg(name="limit", description="Max traces to return (default 10)"),
                     ToolArg(
                         name="kind",
                         description=(
-                            "Filter by span kind: entailment, perception, llm_call, "
-                            "tool_call, reasoning"
+                            "Filter by span kind: perception, llm_call, "
+                            "tool_call, reasoning, signal"
                         ),
                     ),
                 ],
@@ -83,9 +83,7 @@ class TraceToolProvider(ToolProvider):
                         "status": s.status.value,
                         "duration_ms": s.duration_ms,
                         "attributes": s.attributes,
-                        "events": [
-                            {"name": e.name, "attributes": e.attributes} for e in s.events
-                        ],
+                        "events": [{"name": e.name, "attributes": e.attributes} for e in s.events],
                     }
                     for s in spans
                 ],
@@ -98,7 +96,7 @@ class TraceToolProvider(ToolProvider):
                 name="trace_show",
                 description=(
                     "Show the full span tree for a reasoning trace. Reveals the chain: "
-                    "entailment → perception → LLM calls → tool calls → reasoning output. "
+                    "perception → LLM calls → tool calls → reasoning output. "
                     "Use this to explain HOW you arrived at a conclusion."
                 ),
                 args=[

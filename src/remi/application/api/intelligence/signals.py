@@ -17,7 +17,7 @@ from remi.application.api.intelligence.signal_schemas import (
     SignalListResponse,
     SignalSummary,
 )
-from remi.application.portfolio import SignalDigest
+from remi.application.views import SignalDigest
 from remi.shell.api.dependencies import Ctr
 from remi.types.errors import NotFoundError
 

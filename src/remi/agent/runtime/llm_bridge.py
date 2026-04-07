@@ -156,19 +156,21 @@ async def stream_llm_response(
     if usage_ledger is not None and usage.total_tokens > 0:
         effective_model = request.model or cfg.model or ""
         cost = estimate_cost(effective_model, usage.prompt_tokens, usage.completion_tokens)
-        usage_ledger.record(UsageRecord(
-            source=UsageSource.AGENT,
-            source_detail=cfg.name or "unknown",
-            provider=cfg.provider or "",
-            model=effective_model,
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            total_tokens=usage.total_tokens,
-            cache_read_tokens=usage.cache_read_tokens,
-            cache_creation_tokens=usage.cache_creation_tokens,
-            estimated_cost_usd=round(cost, 6) if cost is not None else None,
-            trace_id=get_current_trace_id(),
-        ))
+        usage_ledger.record(
+            UsageRecord(
+                source=UsageSource.AGENT,
+                source_detail=cfg.name or "unknown",
+                provider=cfg.provider or "",
+                model=effective_model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                cache_read_tokens=usage.cache_read_tokens,
+                cache_creation_tokens=usage.cache_creation_tokens,
+                estimated_cost_usd=round(cost, 6) if cost is not None else None,
+                trace_id=get_current_trace_id(),
+            )
+        )
 
     content = "".join(content_parts) or None
     return LLMResponse(

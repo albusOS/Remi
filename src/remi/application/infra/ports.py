@@ -101,7 +101,9 @@ class KnowledgeStoreReader(KnowledgeReader):
         limit: int = 20,
     ) -> list[KBEntity]:
         entities = await self._store.find_entities(
-            namespace, entity_type=entity_type, limit=limit,
+            namespace,
+            entity_type=entity_type,
+            limit=limit,
         )
         return [
             KBEntity(
@@ -185,7 +187,9 @@ class AgentVectorSearch(VectorSearch):
         limit: int = 10,
     ) -> list[TextSearchHit]:
         results = await self._vs.metadata_text_search(
-            query, fields=fields, limit=limit,
+            query,
+            fields=fields,
+            limit=limit,
         )
         return [self._to_hit(r) for r in results]
 

@@ -1,14 +1,15 @@
 import type {
   ActionItemResponse,
-  AgentMeta,
   ChangeSetSummary,
   CorrectRowResponse,
+  DashboardOverview,
   EntityNoteResponse,
   ModelsConfig,
   ManagerListItem,
   ManagerNoteResponse,
   ManagerReview,
-  PortfolioOverview,
+  MeetingBriefResponse,
+  MeetingBriefListResponse,
   DelinquencyBoard,
   LeaseCalendar,
   LeaseListResponse,
@@ -20,10 +21,11 @@ import type {
   MaintenanceSummary,
   DocumentMeta,
   SearchResponse,
-  SignalDigest,
-  SignalExplain,
   SignalSummary,
   UploadResult,
+  GraphSnapshot,
+  GraphSubgraph,
+  OperationalGraph,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -46,20 +48,25 @@ function qs(params: Record<string, string | number | undefined | null>): string 
 export const api = {
   // --- Dashboard ---
 
-  dashboardOverview: (managerId?: string) =>
-    get<PortfolioOverview>(`/api/v1/dashboard/overview${qs({ manager_id: managerId })}`),
+  dashboardOverview: (scope?: { manager_id?: string; owner_id?: string }) =>
+    get<DashboardOverview>(`/api/v1/dashboard/overview${qs(scope || {})}`),
 
-  delinquencyBoard: (managerId?: string) =>
-    get<DelinquencyBoard>(`/api/v1/dashboard/delinquency${qs({ manager_id: managerId })}`),
+  delinquencyBoard: (scope?: { manager_id?: string; owner_id?: string }) =>
+    get<DelinquencyBoard>(`/api/v1/dashboard/delinquency${qs(scope || {})}`),
 
-  leasesExpiring: (days = 90, managerId?: string) =>
-    get<LeaseCalendar>(`/api/v1/dashboard/leases/expiring${qs({ days, manager_id: managerId })}`),
+  leasesExpiring: (days = 90, scope?: { manager_id?: string; owner_id?: string }) =>
+    get<LeaseCalendar>(`/api/v1/dashboard/leases/expiring${qs({ days, ...scope })}`),
 
-  vacancyTracker: (managerId?: string) =>
-    get<VacancyTracker>(`/api/v1/dashboard/vacancies${qs({ manager_id: managerId })}`),
+  vacancyTracker: (scope?: { manager_id?: string; owner_id?: string }) =>
+    get<VacancyTracker>(`/api/v1/dashboard/vacancies${qs(scope || {})}`),
 
   needsManager: () =>
     get<NeedsManagerResponse>("/api/v1/dashboard/needs-manager"),
+
+  // --- Owners ---
+
+  listOwners: () =>
+    get<{ id: string; name: string; email: string; property_count: number }[]>("/api/v1/owners"),
 
   // --- Search ---
 
@@ -69,17 +76,26 @@ export const api = {
   // --- Managers ---
 
   listManagers: () =>
-    get<{ managers: ManagerListItem[] }>("/api/v1/managers").then((r) => r.managers),
+    get<{ managers: (Omit<ManagerListItem, "id"> & { manager_id: string })[] }>("/api/v1/managers")
+      .then((r) => r.managers.map(({ manager_id, ...rest }) => ({ id: manager_id, ...rest }))),
 
   getManagerReview: (id: string) =>
     get<ManagerReview>(`/api/v1/managers/${id}/review`),
 
-  // --- Properties ---
+  generateMeetingBrief: async (managerId: string, focus?: string) => {
+    const res = await fetch(`${BASE}/api/v1/managers/${managerId}/meeting-brief`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ focus: focus || null }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<MeetingBriefResponse>;
+  },
 
-  listProperties: (portfolioId?: string) =>
-    get<{ properties: PropertyDetail[] }>(
-      `/api/v1/properties${qs({ portfolio_id: portfolioId })}`
-    ).then((r) => r.properties),
+  listMeetingBriefs: (managerId: string, limit = 10) =>
+    get<MeetingBriefListResponse>(`/api/v1/managers/${managerId}/meeting-briefs?limit=${limit}`),
+
+  // --- Properties ---
 
   getProperty: (id: string) => get<PropertyDetail>(`/api/v1/properties/${id}`),
 
@@ -93,11 +109,11 @@ export const api = {
 
   // --- Maintenance ---
 
-  listMaintenance: (params?: { property_id?: string; status?: string }) =>
+  listMaintenance: (params?: { property_id?: string; unit_id?: string; status?: string }) =>
     get<MaintenanceListResponse>(`/api/v1/maintenance${qs(params || {})}`),
 
-  maintenanceSummary: (propertyId?: string) =>
-    get<MaintenanceSummary>(`/api/v1/maintenance/summary${qs({ property_id: propertyId })}`),
+  maintenanceSummary: (params?: { property_id?: string; unit_id?: string }) =>
+    get<MaintenanceSummary>(`/api/v1/maintenance/summary${qs(params || {})}`),
 
   // --- Documents / Knowledge Base ---
 
@@ -178,35 +194,20 @@ export const api = {
 
   // --- Agents ---
 
-  listAgents: () =>
-    get<{ agents: AgentMeta[] }>("/api/v1/agents").then((r) => r.agents),
-
   listModels: () =>
     get<ModelsConfig>("/api/v1/agents/models"),
 
-  autoAssign: async () => {
-    const res = await fetch(`${BASE}/api/v1/dashboard/auto-assign`, { method: "POST" });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || res.statusText);
-    }
-    return res.json() as Promise<{ assigned: number; unresolved: number; message: string }>;
-  },
+  // --- Manager CRUD ---
 
-  assignProperties: async (managerId: string, propertyIds: string[]) => {
-    const res = await fetch(`${BASE}/api/v1/managers/${managerId}/assign`, {
+  createManager: async (data: { name: string; email?: string; company?: string; phone?: string }) => {
+    const res = await fetch(`${BASE}/api/v1/managers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ property_ids: propertyIds }),
+      body: JSON.stringify(data),
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || res.statusText);
-    }
-    return res.json() as Promise<{ manager_id: string; assigned: number; already_assigned: number; not_found: string[] }>;
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ manager_id: string; name: string }>;
   },
-
-  // --- Manager CRUD ---
 
   updateManager: async (managerId: string, updates: { name?: string; email?: string; company?: string; phone?: string }) => {
     const res = await fetch(`${BASE}/api/v1/managers/${managerId}`, {
@@ -215,7 +216,7 @@ export const api = {
       body: JSON.stringify(updates),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
-    return res.json() as Promise<{ manager_id: string; portfolio_id: string; name: string }>;
+    return res.json() as Promise<{ manager_id: string; name: string }>;
   },
 
   deleteManager: async (managerId: string) => {
@@ -236,7 +237,17 @@ export const api = {
 
   // --- Property CRUD ---
 
-  updateProperty: async (propertyId: string, updates: { name?: string; portfolio_id?: string; street?: string; city?: string; state?: string; zip_code?: string }) => {
+  createProperty: async (data: { name: string; manager_id?: string; street: string; city: string; state: string; zip_code: string; property_type?: string; year_built?: number }) => {
+    const res = await fetch(`${BASE}/api/v1/properties`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ property_id: string; name: string }>;
+  },
+
+  updateProperty: async (propertyId: string, updates: { name?: string; street?: string; city?: string; state?: string; zip_code?: string; manager_id?: string }) => {
     const res = await fetch(`${BASE}/api/v1/properties/${propertyId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -252,12 +263,47 @@ export const api = {
     return res.json() as Promise<{ deleted: boolean }>;
   },
 
+  // --- Lease CRUD ---
+
+  createLease: async (data: { unit_id: string; tenant_id: string; property_id: string; start_date: string; end_date: string; monthly_rent: number; deposit?: number; status?: string }) => {
+    const res = await fetch(`${BASE}/api/v1/leases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ lease_id: string; unit_id: string; tenant_id: string; property_id: string }>;
+  },
+
+  updateLease: async (leaseId: string, updates: { monthly_rent?: number; status?: string; end_date?: string; renewal_status?: string; is_month_to_month?: boolean }) => {
+    const res = await fetch(`${BASE}/api/v1/leases/${leaseId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ id: string; name: string }>;
+  },
+
+  deleteLease: async (leaseId: string) => {
+    const res = await fetch(`${BASE}/api/v1/leases/${leaseId}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ deleted: boolean }>;
+  },
+
   // --- Tenant CRUD ---
 
-  getTenant: (tenantId: string) =>
-    get<{ tenant_id: string; name: string; leases: unknown[] }>(`/api/v1/tenants/${tenantId}`),
+  createTenant: async (data: { name: string; email?: string; phone?: string }) => {
+    const res = await fetch(`${BASE}/api/v1/tenants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ tenant_id: string; name: string }>;
+  },
 
-  updateTenant: async (tenantId: string, updates: { email?: string; phone?: string }) => {
+  updateTenant: async (tenantId: string, updates: { name?: string; email?: string; phone?: string; status?: string }) => {
     const res = await fetch(`${BASE}/api/v1/tenants/${tenantId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -265,6 +311,40 @@ export const api = {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
     return res.json() as Promise<{ id: string; name: string }>;
+  },
+
+  deleteTenant: async (tenantId: string) => {
+    const res = await fetch(`${BASE}/api/v1/tenants/${tenantId}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ deleted: boolean }>;
+  },
+
+  // --- Maintenance CRUD ---
+
+  createMaintenance: async (data: { unit_id: string; property_id: string; title: string; description?: string; category?: string; priority?: string }) => {
+    const res = await fetch(`${BASE}/api/v1/maintenance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ request_id: string; title: string; property_id: string; unit_id: string }>;
+  },
+
+  updateMaintenance: async (requestId: string, updates: { title?: string; description?: string; status?: string; priority?: string; category?: string; vendor?: string; cost?: number }) => {
+    const res = await fetch(`${BASE}/api/v1/maintenance/${requestId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ id: string; name: string }>;
+  },
+
+  deleteMaintenance: async (requestId: string) => {
+    const res = await fetch(`${BASE}/api/v1/maintenance/${requestId}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
+    return res.json() as Promise<{ deleted: boolean }>;
   },
 
   // --- Action Items ---
@@ -370,47 +450,30 @@ export const api = {
     return res.json() as Promise<{ deleted: boolean }>;
   },
 
+  // --- Ontology / Graph Visualization ---
+
+  graphSnapshot: (scope?: { manager_id?: string; owner_id?: string }) =>
+    get<GraphSnapshot>(`/api/v1/ontology/snapshot${qs(scope || {})}`),
+
+  graphSubgraph: (entityId: string, depth = 2) =>
+    get<GraphSubgraph>(`/api/v1/ontology/subgraph/${entityId}${qs({ depth })}`),
+
+  operationalGraph: () =>
+    get<OperationalGraph>("/api/v1/ontology/graph/operational"),
+
   // --- Signals ---
 
   listSignals: (params?: { manager_id?: string; property_id?: string; severity?: string; signal_type?: string }) =>
     get<{ count: number; signals: SignalSummary[] }>(`/api/v1/signals${qs(params || {})}`),
-
-  signalDigest: () =>
-    get<SignalDigest>("/api/v1/signals/digest"),
-
-  getSignal: (signalId: string) =>
-    get<SignalSummary>(`/api/v1/signals/${signalId}`),
-
-  explainSignal: (signalId: string) =>
-    get<SignalExplain>(`/api/v1/signals/${signalId}/explain`),
-
-  signalFeedback: async (signalId: string, outcome: string, notes?: string) => {
-    const res = await fetch(`${BASE}/api/v1/signals/${signalId}/feedback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outcome, notes: notes ?? "" }),
-    });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || res.statusText); }
-    return res.json() as Promise<{ feedback_id: string; signal_id: string; outcome: string }>;
-  },
 
   // --- Events / Audit Trail ---
 
   listEvents: (limit = 20) =>
     get<{ count: number; changesets: ChangeSetSummary[] }>(`/api/v1/events${qs({ limit })}`),
 
-  getEvent: (changesetId: string) =>
-    get<ChangeSetSummary>(`/api/v1/events/${changesetId}`),
-
   entityEvents: (entityId: string, limit = 50) =>
     get<{ entity_id: string; count: number; changesets: ChangeSetSummary[] }>(
       `/api/v1/events/entity/${entityId}${qs({ limit })}`,
     ),
 
-  // --- Usage ---
-
-  usageSummary: () =>
-    get<{ total_cost: number; total_tokens: number; total_calls: number; by_provider: Record<string, unknown> }>(
-      "/api/v1/usage/summary",
-    ),
 };

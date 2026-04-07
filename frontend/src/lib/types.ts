@@ -1,33 +1,35 @@
 // --- Property Managers (director-level) ---
 
-export interface ManagerListItem {
-  id: string;
-  name: string;
-  email: string;
-  company: string | null;
-  portfolio_count: number;
-  property_count: number;
+export interface ManagerMetrics {
   total_units: number;
   occupied: number;
   vacant: number;
   occupancy_rate: number;
   total_actual_rent: number;
-  total_loss_to_lease: number;
-  total_vacancy_loss: number;
+  total_market_rent: number;
+  loss_to_lease: number;
+  vacancy_loss: number;
   open_maintenance: number;
-  emergency_maintenance: number;
   expiring_leases_90d: number;
-  expired_leases: number;
-  below_market_units: number;
+}
+
+export interface ManagerListItem {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  property_count: number;
+  metrics: ManagerMetrics;
   delinquent_count: number;
   total_delinquent_balance: number;
+  expired_leases: number;
+  below_market_units: number;
+  emergency_maintenance: number;
 }
 
 export interface ManagerPropertySummary {
   property_id: string;
   property_name: string;
-  portfolio_id: string;
-  portfolio_name: string;
   total_units: number;
   occupied: number;
   vacant: number;
@@ -58,23 +60,13 @@ export interface ManagerReview {
   name: string;
   email: string;
   company: string | null;
-  portfolio_count: number;
   property_count: number;
-  total_units: number;
-  occupied: number;
-  vacant: number;
-  occupancy_rate: number;
-  total_market_rent: number;
-  total_actual_rent: number;
-  total_loss_to_lease: number;
-  total_vacancy_loss: number;
-  open_maintenance: number;
-  emergency_maintenance: number;
-  expiring_leases_90d: number;
-  expired_leases: number;
-  below_market_units: number;
+  metrics: ManagerMetrics;
   delinquent_count: number;
   total_delinquent_balance: number;
+  expired_leases: number;
+  below_market_units: number;
+  emergency_maintenance: number;
   properties: ManagerPropertySummary[];
   top_issues: ManagerUnitIssue[];
 }
@@ -84,20 +76,27 @@ export interface ManagerReview {
 export interface ManagerOverview {
   manager_id: string;
   manager_name: string;
-  portfolio_count: number;
   property_count: number;
+  metrics: ManagerMetrics;
+}
+
+export interface PropertyOverview {
+  property_id: string;
+  property_name: string;
+  address: string;
+  manager_id: string | null;
+  manager_name: string | null;
   total_units: number;
   occupied: number;
   vacant: number;
   occupancy_rate: number;
-  total_monthly_rent: number;
-  total_market_rent: number;
+  monthly_rent: number;
+  market_rent: number;
   loss_to_lease: number;
+  open_maintenance: number;
 }
 
-export interface PortfolioOverview {
-  total_managers: number;
-  total_portfolios: number;
+export interface DashboardOverview {
   total_properties: number;
   total_units: number;
   occupied: number;
@@ -106,6 +105,8 @@ export interface PortfolioOverview {
   total_monthly_rent: number;
   total_market_rent: number;
   total_loss_to_lease: number;
+  properties: PropertyOverview[];
+  total_managers: number;
   managers: ManagerOverview[];
 }
 
@@ -119,11 +120,10 @@ export interface DelinquentTenant {
   property_name: string;
   unit_id: string | null;
   unit_number: string;
-  balance_owed: number;
-  balance_0_30: number;
-  balance_30_plus: number;
+  balance_owed: number;       // from latest BalanceObservation
+  balance_0_30: number;       // from latest BalanceObservation
+  balance_30_plus: number;    // from latest BalanceObservation
   last_payment_date: string | null;
-  tags: string[];
   delinquency_notes: string | null;
 }
 
@@ -163,11 +163,9 @@ export interface VacantUnit {
   unit_number: string;
   property_id: string;
   property_name: string;
-  occupancy_status: string | null;
-  days_vacant: number | null;
+  occupancy_status: string | null;  // derived from lease history
+  days_vacant: number | null;       // computed from last lease end date
   market_rent: number;
-  listed_on_website: boolean;
-  listed_on_internet: boolean;
 }
 
 export interface VacancyTracker {
@@ -191,36 +189,7 @@ export interface NeedsManagerResponse {
   properties: NeedsManagerProperty[];
 }
 
-// --- Portfolio & Property ---
-
-export interface PortfolioSummary {
-  portfolio_id: string;
-  name: string;
-  manager: string;
-  total_properties: number;
-  total_units: number;
-  occupied_units: number;
-  occupancy_rate: number;
-  monthly_revenue: number;
-  properties: PropertyOverview[];
-}
-
-export interface PortfolioListItem {
-  id: string;
-  name: string;
-  manager: string;
-  property_count: number;
-  description: string;
-}
-
-export interface PropertyOverview {
-  id: string;
-  name: string;
-  type: string;
-  total_units: number;
-  occupied: number;
-  monthly_revenue: number;
-}
+// --- Property ---
 
 export interface PropertyDetail {
   id: string;
@@ -228,8 +197,6 @@ export interface PropertyDetail {
   address: Record<string, string>;
   property_type: string;
   year_built: number;
-  portfolio_id: string | null;
-  portfolio_name: string | null;
   manager_id: string | null;
   manager_name: string | null;
   total_units: number;
@@ -429,6 +396,12 @@ export interface UploadKnowledge {
   review_items: ReviewItem[];
 }
 
+export interface DuplicateInfo {
+  existing_id: string;
+  existing_filename: string;
+  uploaded_at: string;
+}
+
 export interface UploadResult {
   id: string;
   filename: string;
@@ -441,6 +414,7 @@ export interface UploadResult {
   tags: string[];
   size_bytes: number;
   knowledge: UploadKnowledge;
+  duplicate?: DuplicateInfo | null;
 }
 
 export interface CorrectRowResponse {
@@ -504,60 +478,6 @@ export interface ToolCall {
   result?: unknown;
   status: "calling" | "done" | "error";
   duration?: number;
-}
-
-// --- Contract rendering ---
-
-export interface ModuleOutput {
-  app_id: string;
-  run_id: string;
-  module_id: string;
-  status: string;
-  output: unknown;
-  contract: string | null;
-}
-
-export interface DashboardCard {
-  title: string;
-  value: string | number;
-  unit?: string | null;
-  trend?: string | null;
-  trend_direction?: "up" | "down" | "flat" | null;
-  severity?: "info" | "warning" | "critical" | null;
-}
-
-export interface TableColumn {
-  key: string;
-  label: string;
-  data_type: string;
-  sortable: boolean;
-}
-
-export interface TableView {
-  title: string;
-  columns: TableColumn[];
-  rows: Record<string, unknown>[];
-  total_count: number;
-  page: number;
-  page_size: number;
-}
-
-export interface ProfileField {
-  label: string;
-  value: unknown;
-  data_type: string;
-}
-
-export interface ProfileSection {
-  heading: string;
-  fields: ProfileField[];
-}
-
-export interface ProfileView {
-  title: string;
-  entity_type: string;
-  entity_id: string;
-  sections: ProfileSection[];
 }
 
 // --- Action Items ---
@@ -646,30 +566,36 @@ export interface SignalDigest {
   entities: SignalDigestEntity[];
 }
 
-export interface SignalExplain extends SignalSummary {
-  provenance: string;
-  evidence: Record<string, unknown>;
-}
-
 // --- Events / Audit ---
+
+export interface FieldChange {
+  field: string;
+  old_value: unknown;
+  new_value: unknown;
+}
 
 export interface ChangeEvent {
   entity_type: string;
   entity_id: string;
-  action: "created" | "updated" | "removed";
-  changes: Record<string, unknown>;
+  change_type: "created" | "updated" | "removed";
+  source: string;
+  timestamp: string;
+  fields: FieldChange[];
 }
 
 export interface ChangeSetSummary {
-  changeset_id: string;
+  id: string;
   source: string;
+  source_detail: string;
+  adapter_name: string;
   report_type: string | null;
-  document_id: string | null;
+  document_id: string;
   timestamp: string;
-  created: number;
-  updated: number;
-  removed: number;
+  summary: { created: number; updated: number; unchanged: number; removed: number };
+  total_changes: number;
+  is_empty: boolean;
   events: ChangeEvent[];
+  unchanged_ids: string[];
 }
 
 // --- Agents ---
@@ -682,13 +608,117 @@ export interface AgentMeta {
   tags: string[];
 }
 
+// --- Knowledge Graph Visualization ---
+
+export interface GraphNode {
+  id: string;
+  type_name: string;
+  label: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  source_id: string;
+  target_id: string;
+  link_type: string;
+}
+
+export interface GraphSnapshot {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  counts: Record<string, number>;
+  edge_counts: Record<string, number>;
+  total_nodes: number;
+  total_edges: number;
+}
+
+export interface GraphSubgraph {
+  center_id: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface OperationalNode {
+  id: string;
+  kind: "step" | "cause" | "effect" | "policy" | "signal" | "workflow";
+  label: string;
+  process: string;
+  properties: Record<string, unknown>;
+}
+
+export interface OperationalEdge {
+  source_id: string;
+  target_id: string;
+  link_type: string;
+}
+
+export interface OperationalGraph {
+  nodes: OperationalNode[];
+  edges: OperationalEdge[];
+  processes: string[];
+}
+
+// --- Meeting Brief ---
+
+export interface MeetingBriefAction {
+  title: string;
+  description: string;
+  priority: "urgent" | "high" | "medium" | "low";
+  owner: "manager" | "director" | "both";
+  timeframe: string;
+}
+
+export interface MeetingAgendaItem {
+  topic: string;
+  severity: "high" | "medium" | "low";
+  talking_points: string[];
+  questions: string[];
+  suggested_actions: MeetingBriefAction[];
+}
+
+export interface MeetingBrief {
+  manager_name: string;
+  summary: string;
+  agenda: MeetingAgendaItem[];
+  positives: string[];
+  follow_up_date: string;
+}
+
+export interface MeetingBriefAnalysis {
+  themes: {
+    id: string;
+    title: string;
+    severity: string;
+    summary: string;
+    details: string;
+    affected_properties: string[];
+    monthly_impact: number;
+  }[];
+  positive_notes: string[];
+  data_gaps: string[];
+}
+
+export interface MeetingBriefResponse {
+  id: string;
+  manager_id: string;
+  snapshot_hash: string;
+  brief: MeetingBrief;
+  analysis: MeetingBriefAnalysis;
+  focus: string | null;
+  generated_at: string;
+  usage: { prompt_tokens: number; completion_tokens: number };
+}
+
+export interface MeetingBriefListResponse {
+  briefs: MeetingBriefResponse[];
+  total: number;
+  current_snapshot_hash: string | null;
+}
+
 // --- WebSocket ---
 
 export interface WsEvent {
-  event: string;
-  app_id: string;
-  run_id: string;
-  timestamp: string;
-  module_id?: string;
+  type: string;
+  data: Record<string, unknown>;
   [key: string]: unknown;
 }

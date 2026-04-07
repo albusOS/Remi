@@ -20,7 +20,7 @@ export function ManagerFilter({ value, onChange, managers: externalManagers }: P
   }, [externalManagers]);
 
   const raw = externalManagers ?? fetched;
-  const managers = raw.filter((m) => m.total_units > 0 || m.property_count > 0);
+  const managers = raw.filter((m) => m.metrics.total_units > 0 || m.property_count > 0);
 
   return (
     <select
@@ -31,7 +31,7 @@ export function ManagerFilter({ value, onChange, managers: externalManagers }: P
       <option value="">All Managers</option>
       {managers.map((m) => (
         <option key={m.id} value={m.id}>
-          {m.name} ({m.property_count} props, {m.total_units} units)
+          {m.name} ({m.property_count} props, {m.metrics.total_units} units)
         </option>
       ))}
     </select>

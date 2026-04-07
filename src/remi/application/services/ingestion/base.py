@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from remi.application.core.models.enums import ReportType
+
 
 class ReviewKind(StrEnum):
     """Discriminator for human-reviewable items produced during ingestion."""
@@ -19,6 +21,7 @@ class ReviewKind(StrEnum):
     ENTITY_MATCH = "entity_match"
     CLASSIFICATION_UNCERTAIN = "classification_uncertain"
     MANAGER_INFERRED = "manager_inferred"
+    OBSERVATION_CAPTURED = "observation_captured"
 
 
 class ReviewSeverity(StrEnum):
@@ -72,14 +75,17 @@ class IngestionResult:
     """Result of ingesting a document into the knowledge graph."""
 
     document_id: str
-    report_type: str = "unknown"
+    report_type: ReportType = ReportType.UNKNOWN
     entities_created: int = 0
     relationships_created: int = 0
     rows_accepted: int = 0
     rows_rejected: int = 0
     rows_skipped: int = 0
+    observations_captured: int = 0
     validation_warnings: list[RowWarning] = field(default_factory=list)
     persist_errors: list[RowWarning] = field(default_factory=list)
     ambiguous_rows: list[dict[str, Any]] = field(default_factory=list)
+    # Rows with unknown entity types routed to the LLM capture step
+    observation_rows: list[dict[str, Any]] = field(default_factory=list)
     manager_tags_skipped: list[str] = field(default_factory=list)
     review_items: list[ReviewItem] = field(default_factory=list)
