@@ -67,13 +67,13 @@ function groupResults(results: SearchHit[]): [string, SearchHit[]][] {
 }
 
 const NAV_PAGES = [
-  { label: "Home / Dashboard", href: "/", keywords: "home dashboard overview" },
+  { label: "REMI", href: "/", keywords: "home remi ask ai chat agent" },
+  { label: "Portfolio Dashboard", href: "/?tab=portfolio", keywords: "dashboard overview portfolio" },
   { label: "Managers", href: "/managers", keywords: "managers property pm" },
-  { label: "Knowledge Base", href: "/documents", keywords: "documents upload files knowledge" },
+  { label: "Documents", href: "/?tab=documents", keywords: "documents upload files knowledge" },
   { label: "Delinquency", href: "/delinquency", keywords: "delinquent tenants collections owed" },
   { label: "Expiring Leases", href: "/leases", keywords: "leases expiring mtm month" },
   { label: "Vacancies", href: "/vacancies", keywords: "vacant units vacancy" },
-  { label: "Ask REMI", href: "/ask", keywords: "ask ai chat question" },
 ];
 
 
@@ -118,7 +118,7 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
 
   function askRemi() {
     if (!query.trim()) return;
-    navigate(`/ask?q=${encodeURIComponent(query.trim())}`);
+    navigate(`/?q=${encodeURIComponent(query.trim())}`);
   }
 
   const grouped = groupResults(results);

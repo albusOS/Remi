@@ -135,15 +135,20 @@ def load_settings(
         if llm_model:
             llm_data["default_model"] = llm_model
 
-    # 6. Sandbox defaults from env vars
-    _sandbox_env_prefix = "REMI_SANDBOX__"
-    sandbox_overrides: dict[str, Any] = {}
-    for key, value in os.environ.items():
-        if key.startswith(_sandbox_env_prefix) and value:
-            field_name = key[len(_sandbox_env_prefix) :].lower()
-            sandbox_overrides[field_name] = value
-    if sandbox_overrides:
-        data.setdefault("sandbox", {}).update(sandbox_overrides)
+    # 6. Sandbox / API sub-key overrides from env vars
+    #    REMI_SANDBOX__<FIELD>  → settings.sandbox.<field>
+    #    REMI_API__<FIELD>      → settings.api.<field>
+    for env_prefix, settings_key in (
+        ("REMI_SANDBOX__", "sandbox"),
+        ("REMI_API__", "api"),
+    ):
+        overrides: dict[str, Any] = {}
+        for key, value in os.environ.items():
+            if key.startswith(env_prefix) and value:
+                field_name = key[len(env_prefix) :].lower()
+                overrides[field_name] = value
+        if overrides:
+            data.setdefault(settings_key, {}).update(overrides)
 
     # 7. Embeddings defaults from env vars
     emb_provider = os.environ.get("REMI_EMBEDDINGS_PROVIDER")

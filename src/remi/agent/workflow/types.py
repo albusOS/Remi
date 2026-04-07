@@ -26,6 +26,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag
 
 from remi.agent.llm.types import TokenUsage
+from remi.agent.runtime.config import RuntimeConfig
 
 
 # ---------------------------------------------------------------------------
@@ -135,17 +136,34 @@ class GateNode(NodeBase):
     condition: str = ""
 
 
+class AgentStepNode(NodeBase):
+    """Run a full AgentNode (think-act-observe loop) as a workflow step.
+
+    ``agent_name`` resolves to a registered manifest. The workflow engine
+    loads the agent config from YAML and runs the agent loop, producing
+    a ``StepResult`` whose value is the agent's final output.
+
+    This is how workflows compose with agents — an ingestion pipeline
+    can include an agent review step, a research workflow can fan out
+    to specialist agents, etc.
+    """
+
+    kind: Literal["agent"] = "agent"
+    agent_name: str = ""
+    mode: Literal["ask", "agent"] = "agent"
+    input_template: str = "{input}"
+
+
 WorkflowNode = Annotated[
     Annotated[LLMNode, Tag("llm")]
     | Annotated[LLMToolsNode, Tag("llm_tools")]
     | Annotated[TransformNode, Tag("transform")]
     | Annotated[ForEachNode, Tag("for_each")]
-    | Annotated[GateNode, Tag("gate")],
+    | Annotated[GateNode, Tag("gate")]
+    | Annotated[AgentStepNode, Tag("agent")],
     Discriminator(_get_node_kind),
 ]
 
-StepConfig = WorkflowNode
-"""Alias for backward compatibility with engine/steps imports."""
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +191,7 @@ class WorkflowDef(BaseModel):
     defaults: WorkflowDefaults = WorkflowDefaults()
     steps: tuple[WorkflowNode, ...] = ()
     wires: tuple[Wire, ...] = ()
+    runtime: RuntimeConfig = RuntimeConfig()
 
     def step_ids(self) -> frozenset[str]:
         return frozenset(s.id for s in self.steps)
@@ -260,6 +279,7 @@ class StepKind(StrEnum):
     TRANSFORM = "transform"
     FOR_EACH = "for_each"
     GATE = "gate"
+    AGENT = "agent"
 
 
 # ---------------------------------------------------------------------------

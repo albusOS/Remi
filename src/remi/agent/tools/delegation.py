@@ -1,94 +1,141 @@
-"""Agent delegation tool — enables orchestrator agents to invoke specialists.
+"""Agent delegation tool — structured task-based multi-agent coordination.
 
 The ``delegate_to_agent`` tool gives a parent agent the ability to dispatch
-work to any named agent in the workforce. The specialist runs a complete
-agent loop (with its own tools, sandbox session, and iteration budget)
-and returns its output to the parent.
+work to any named agent via the kernel's task supervisor. The specialist
+runs a complete agent loop (with its own tools, sandbox session, and
+iteration budget) under supervised lifecycle management.
 
-This is the core primitive for multi-agent orchestration: the director
-doesn't need to *be* every agent — it invokes them.
+Delegation edges are declared in each agent's YAML manifest under
+``delegates_to:``. The ``Workforce`` model assembles these edges into
+a per-parent allowlist at startup. At execution time the tool reads
+``caller_agent`` from the merged args (injected by the tool executor)
+and resolves the calling agent's allowlist via ``Workforce.get_delegates``.
+
+The tool creates a ``TaskSpec``, submits it to the ``TaskSupervisor``,
+and awaits the ``TaskResult``. This provides:
+  - Per-parent delegation scoping (each agent can only spawn its declared children)
+  - Structured input/output (not raw string passing)
+  - Lifecycle tracking (spawned → running → done/failed/cancelled)
+  - Budget constraints from ``DelegateRef.constraints`` in YAML
+  - Trace correlation (parent_run_id propagation)
+  - Domain event publication (task.spawned, task.completed, task.failed)
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 
+from remi.agent.observe.types import get_current_trace_id
+from remi.agent.tasks import TaskConstraints, TaskSpec, TaskSupervisor
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
+from remi.agent.workforce import Workforce
 
 logger = structlog.get_logger("remi.agent.tools.delegation")
 
 
-class AgentInvoker(Protocol):
-    """Minimal interface for invoking an agent by name."""
-
-    async def ask(
-        self,
-        agent_name: str,
-        question: str,
-        *,
-        mode: str,
-    ) -> tuple[str | None, str]: ...
-
-
 class DelegationToolProvider(ToolProvider):
+    """Registers the ``delegate_to_agent`` tool scoped by the Workforce graph.
+
+    The workforce carries per-parent delegation edges read from YAML.
+    At execution time the tool resolves the caller's allowlist, enforces
+    it, and applies ``DelegateRef.constraints`` as the task budget.
+    """
+
     def __init__(
         self,
-        agent_invoker: AgentInvoker,
-        available_agents: dict[str, str],
+        supervisor: TaskSupervisor,
+        workforce: Workforce,
     ) -> None:
-        self._invoker = agent_invoker
-        self._agents = available_agents
+        self._supervisor = supervisor
+        self._workforce = workforce
 
     def register(self, registry: ToolRegistry) -> None:
-        agents = self._agents
-        _invoker = self._invoker
+        workforce = self._workforce
+        supervisor = self._supervisor
 
         async def delegate_to_agent(args: dict[str, Any]) -> Any:
             agent_name = args.get("agent_name", "")
             task = args.get("task", "")
             context = args.get("context", "")
+            timeout = args.get("timeout")
+            caller = args.get("caller_agent", "")
 
             if not agent_name:
                 return {"error": "agent_name is required"}
             if not task:
                 return {"error": "task is required"}
 
-            if agent_name not in agents:
+            allowed = workforce.get_delegates(caller)
+            if not allowed:
+                all_names = [
+                    name for name, desc in workforce.agents.items()
+                    if desc.audience != "user"
+                ]
+                allowed = {n: "" for n in all_names}
+
+            if agent_name not in allowed:
                 return {
-                    "error": f"Unknown agent '{agent_name}'",
-                    "available_agents": list(agents.keys()),
+                    "error": f"Agent '{caller}' cannot delegate to '{agent_name}'",
+                    "allowed_delegates": list(allowed.keys()),
                 }
 
-            prompt = task
+            delegate_ref = workforce.get_delegate_ref(caller, agent_name)
+            ref_c = delegate_ref.constraints if delegate_ref else None
+
+            constraints = TaskConstraints(
+                timeout_seconds=(
+                    float(timeout) if timeout
+                    else (ref_c.timeout_seconds if ref_c else None)
+                ),
+                max_tool_rounds=ref_c.max_tool_rounds if ref_c else None,
+                max_tokens=ref_c.max_tokens if ref_c else None,
+                allowed_tools=ref_c.allowed_tools if ref_c else None,
+            )
+
+            input_data: dict[str, Any] = {}
             if context:
-                prompt = f"{task}\n\n## Context from parent agent\n{context}"
+                input_data["parent_context"] = context
+
+            spec = TaskSpec(
+                agent_name=agent_name,
+                objective=task,
+                input_data=input_data,
+                constraints=constraints,
+                parent_run_id=get_current_trace_id() or "",
+                metadata={"source": "delegate_to_agent", "caller": caller},
+            )
 
             logger.info(
                 "delegate_to_agent",
+                caller=caller,
                 agent_name=agent_name,
                 task_length=len(task),
                 has_context=bool(context),
+                has_timeout=timeout is not None,
             )
 
-            try:
-                answer, run_id = await _invoker.ask(agent_name, prompt, mode="agent")
-            except Exception as exc:
-                logger.error(
-                    "delegate_to_agent_error",
-                    agent_name=agent_name,
-                    error=str(exc),
-                )
-                return {"error": str(exc), "agent_name": agent_name}
+            result = await supervisor.spawn_and_wait(spec)
+
+            if not result.ok:
+                return {
+                    "error": result.error or "Task failed",
+                    "agent_name": agent_name,
+                    "task_id": result.run_id,
+                }
 
             return {
                 "agent_name": agent_name,
-                "run_id": run_id,
-                "response": answer or "",
+                "run_id": result.run_id,
+                "response": result.output or "",
             }
 
-        agent_descriptions = "\n".join(f"  - **{name}**: {desc}" for name, desc in agents.items())
+        all_agent_descriptions = "\n".join(
+            f"  - **{name}**: {desc.description}"
+            for name, desc in workforce.agents.items()
+            if desc.audience != "user"
+        )
 
         registry.register(
             "delegate_to_agent",
@@ -100,15 +147,12 @@ class DelegationToolProvider(ToolProvider):
                     "The specialist runs autonomously with its own tools and "
                     "returns its output. Use this for tasks that require deep "
                     "analysis, structured research, or specialized workflows.\n\n"
-                    f"Available agents:\n{agent_descriptions}"
+                    f"Available specialist agents:\n{all_agent_descriptions}"
                 ),
                 args=[
                     ToolArg(
                         name="agent_name",
-                        description=(
-                            f"Name of the specialist agent to invoke. "
-                            f"One of: {', '.join(agents.keys())}"
-                        ),
+                        description="Name of the specialist agent to invoke.",
                         required=True,
                     ),
                     ToolArg(
@@ -125,6 +169,13 @@ class DelegationToolProvider(ToolProvider):
                         description=(
                             "Optional context to pass to the specialist: relevant "
                             "data, constraints, or prior findings from your analysis."
+                        ),
+                    ),
+                    ToolArg(
+                        name="timeout",
+                        description=(
+                            "Optional timeout in seconds. The task will be cancelled "
+                            "if it exceeds this duration."
                         ),
                     ),
                 ],

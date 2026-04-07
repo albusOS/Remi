@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,19 +17,20 @@ from pydantic import BaseModel, Field
 
 from remi.agent.llm.types import Message, ToolArg, ToolCallRequest, ToolDefinition
 
-# Re-export so existing `from remi.agent.types import Message` still works
 __all__ = [
     "Message",
     "ToolCallRequest",
     "ToolArg",
     "ToolDefinition",
     "ToolResult",
+    "ToolBinding",
     "ChatSession",
     "AgentEvent",
     "ChatEvent",
     "ChatSessionStore",
     "ToolFn",
     "ToolRegistry",
+    "ToolCatalog",
     "ToolProvider",
 ]
 
@@ -140,12 +142,41 @@ class ToolResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tool registry
+# Tool binding — a fully resolved capability owned by an agent run
 # ---------------------------------------------------------------------------
+
 ToolFn = Callable[[dict[str, Any]], Awaitable[Any]]
 
 
+@dataclass(frozen=True)
+class ToolBinding:
+    """A fully resolved tool capability owned by an agent run.
+
+    Unlike the old ``(list[ToolDefinition], execute_fn)`` tuple where one
+    shared closure dispatched all tools by name, each ``ToolBinding`` is
+    self-contained: its own definition (what the LLM sees), its own
+    execution function (with agent-specific config already baked in),
+    and provenance metadata.
+    """
+
+    definition: ToolDefinition
+    execute: ToolFn
+    source: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Tool registry — capability type catalog
+# ---------------------------------------------------------------------------
+
+
 class ToolRegistry(abc.ABC):
+    """Base registry contract — stores tool implementations by name.
+
+    ``ToolProvider`` implementations call ``register()`` at startup.
+    The workflow engine and legacy paths consume ``get()`` /
+    ``list_definitions()``.
+    """
+
     @abc.abstractmethod
     def register(self, name: str, fn: ToolFn, definition: ToolDefinition) -> None: ...
 
@@ -162,6 +193,53 @@ class ToolRegistry(abc.ABC):
 
     @abc.abstractmethod
     def has(self, name: str) -> bool: ...
+
+
+class ToolCatalog(ToolRegistry):
+    """Extended registry that produces agent-specific ``ToolBinding`` instances.
+
+    ``ToolProviders`` register capability implementations here via the
+    inherited ``register()`` method.  When an agent needs a tool, the
+    catalog's ``resolve()`` method produces a ``ToolBinding`` configured
+    for that specific agent context — description overrides, config
+    merging, and context injection are all handled at resolution time,
+    not at call time.
+    """
+
+    @abc.abstractmethod
+    def resolve(
+        self,
+        name: str,
+        *,
+        agent_config: dict[str, Any] | None = None,
+        agent_description: str | None = None,
+        inject: dict[str, str] | None = None,
+        context_values: dict[str, Any] | None = None,
+    ) -> ToolBinding | None:
+        """Produce an agent-specific binding for a registered tool.
+
+        Parameters
+        ----------
+        name:
+            Registered tool name.
+        agent_config:
+            Per-agent config dict merged into arguments before the base
+            ``ToolFn``.  Comes from ``ToolRef.config``.
+        agent_description:
+            If set, replaces the base ``ToolDefinition.description`` in
+            the returned binding.  Comes from ``ToolRef.description``.
+        inject:
+            Maps argument names to context keys.  Any key present in
+            *context_values* is auto-injected into arguments if not
+            already provided by the caller.  Comes from ``ToolRef.inject``.
+        context_values:
+            Flat dict of runtime context values (e.g. ``sandbox_session_id``)
+            available for injection.
+        """
+        ...
+
+    @abc.abstractmethod
+    def list_names(self) -> list[str]: ...
 
 
 class ToolProvider(abc.ABC):

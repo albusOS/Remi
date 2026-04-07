@@ -3,8 +3,9 @@
 import { useMemo } from "react";
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from "recharts";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface Props {
-  data: Record<string, unknown>[];
+  data: readonly any[];
   dataKey: string;
   color: string;
   label: string;

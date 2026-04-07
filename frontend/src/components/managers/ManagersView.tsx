@@ -1,246 +1,219 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { fmt$, pct } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import type { ManagerListItem } from "@/lib/types";
 
-function ManagerCard({
-  m,
-  allManagers,
-  onRefresh,
-}: {
-  m: ManagerListItem;
-  allManagers: ManagerListItem[];
-  onRefresh: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [mergeTarget, setMergeTarget] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
-
-  const issueCount =
-    m.metrics.vacant + m.metrics.open_maintenance + m.metrics.expiring_leases_90d + m.expired_leases + m.below_market_units + m.delinquent_count;
-  const hasUrgent = m.emergency_maintenance > 0 || m.expired_leases > 0 || m.delinquent_count > 5;
-
-  const handleDelete = async () => {
-    setBusy(true);
-    try {
-      await api.deleteManager(m.id);
-      onRefresh();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setBusy(false);
-      setMenuOpen(false);
-      setShowDeleteConfirm(false);
-    }
-  };
-
-  const handleMerge = async () => {
-    if (!mergeTarget) return;
-    setBusy(true);
-    try {
-      await api.mergeManagers(m.id, mergeTarget);
-      onRefresh();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Merge failed");
-    } finally {
-      setBusy(false);
-      setMergeOpen(false);
-      setMenuOpen(false);
-    }
-  };
-
+function issueCount(m: ManagerListItem): number {
   return (
-    <div
-      className={`relative rounded-xl border p-4 transition-all ${
-        hasUrgent
-          ? "border-error/30 bg-error-soft"
-          : issueCount > 0
-          ? "border-warn/20 bg-warn-soft"
-          : "border-border bg-surface"
-      }`}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <Link href={`/managers/${m.id}`} className="min-w-0 flex-1 hover:opacity-80">
-          <h3 className="text-sm font-semibold text-fg truncate">{m.name}</h3>
-          <p className="text-[10px] text-fg-faint mt-0.5">
-            {m.property_count} properties · {m.metrics.total_units} units
-          </p>
-        </Link>
-        <div className="flex items-center gap-1.5">
-          {issueCount > 0 ? (
-            <Badge variant={hasUrgent ? "red" : "amber"}>{issueCount}</Badge>
-          ) : (
-            <Badge variant="emerald">OK</Badge>
-          )}
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((x) => !x)}
-              className="text-fg-ghost hover:text-fg-muted px-1 py-0.5 rounded text-sm leading-none"
-              title="Actions"
-            >
-              ···
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-6 z-20 w-40 rounded-lg border border-border bg-surface-raised shadow-lg py-1 text-xs">
-                <Link
-                  href={`/managers/${m.id}`}
-                  className="block px-3 py-1.5 text-fg-secondary hover:bg-surface-sunken"
-                >
-                  View / Edit
-                </Link>
-                <button
-                  onClick={() => { setMergeOpen(true); setMenuOpen(false); }}
-                  className="w-full text-left px-3 py-1.5 text-fg-secondary hover:bg-surface-sunken"
-                >
-                  Merge into...
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); setShowDeleteConfirm(true); }}
-                  disabled={busy}
-                  className="w-full text-left px-3 py-1.5 text-error hover:bg-surface-sunken"
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {mergeOpen && (
-        <div className="mb-3 rounded-lg border border-border bg-surface-raised p-3">
-          <p className="text-xs text-fg-secondary mb-2">
-            Merge &quot;{m.name}&quot; into another manager (properties will move, this PM will be deleted):
-          </p>
-          <select
-            value={mergeTarget}
-            onChange={(e) => setMergeTarget(e.target.value)}
-            className="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-fg mb-2"
-          >
-            <option value="">Select target manager...</option>
-            {allManagers
-              .filter((o) => o.id !== m.id)
-              .map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name} ({o.property_count} props)
-                </option>
-              ))}
-          </select>
-          <div className="flex gap-2">
-            <button
-              onClick={handleMerge}
-              disabled={!mergeTarget || busy}
-              className="px-3 py-1 rounded bg-accent text-white text-xs font-medium disabled:opacity-50"
-            >
-              {busy ? "Merging..." : "Merge"}
-            </button>
-            <button
-              onClick={() => setMergeOpen(false)}
-              className="px-3 py-1 rounded border border-border text-xs text-fg-muted"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      <Link href={`/managers/${m.id}`} className="block hover:opacity-90">
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-center">
-          <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
-            <p className="text-[9px] text-fg-faint uppercase truncate">Occ</p>
-            <p className={`text-[11px] font-bold truncate ${m.metrics.occupancy_rate < 0.9 ? "text-warn" : "text-fg"}`}>
-              {pct(m.metrics.occupancy_rate)}
-            </p>
-          </div>
-          <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
-            <p className="text-[9px] text-fg-faint uppercase truncate">Revenue</p>
-            <p className="text-[11px] font-bold text-fg truncate">
-              {fmt$(m.metrics.total_actual_rent)}
-            </p>
-          </div>
-          <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
-            <p className="text-[9px] text-fg-faint uppercase truncate">LTL</p>
-            <p className={`text-[11px] font-bold truncate ${m.metrics.loss_to_lease > 0 ? "text-warn" : "text-fg-muted"}`}>
-              {m.metrics.loss_to_lease > 0 ? fmt$(m.metrics.loss_to_lease) : "—"}
-            </p>
-          </div>
-          <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
-            <p className="text-[9px] text-fg-faint uppercase truncate">Delinq</p>
-            <p className={`text-[11px] font-bold truncate ${m.delinquent_count > 0 ? "text-error" : "text-fg-muted"}`}>
-              {m.delinquent_count > 0 ? m.delinquent_count : "—"}
-            </p>
-          </div>
-          <div className="rounded-lg bg-surface-sunken px-1.5 py-1.5 min-w-0">
-            <p className="text-[9px] text-fg-faint uppercase truncate">Vacant</p>
-            <p className={`text-[11px] font-bold truncate ${m.metrics.vacant > 0 ? "text-error" : "text-fg-muted"}`}>
-              {m.metrics.vacant > 0 ? m.metrics.vacant : "—"}
-            </p>
-          </div>
-        </div>
-
-        {issueCount > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-border-subtle">
-            {m.delinquent_count > 0 && <span className="text-[9px] text-error">{m.delinquent_count} delinquent ({fmt$(m.total_delinquent_balance)})</span>}
-            {m.metrics.vacant > 0 && <span className="text-[9px] text-error">{m.metrics.vacant} vacant</span>}
-            {m.metrics.expiring_leases_90d > 0 && <span className="text-[9px] text-warn">{m.metrics.expiring_leases_90d} expiring</span>}
-            {m.expired_leases > 0 && <span className="text-[9px] text-error">{m.expired_leases} expired</span>}
-            {m.below_market_units > 0 && <span className="text-[9px] text-warn">{m.below_market_units} below mkt</span>}
-            {m.metrics.open_maintenance > 0 && <span className="text-[9px] text-sky-400">{m.metrics.open_maintenance} maint</span>}
-          </div>
-        )}
-      </Link>
-      <ConfirmDialog
-        open={showDeleteConfirm}
-        title="Delete Manager"
-        description={`Delete "${m.name}" and unlink their properties? This action cannot be undone.`}
-        confirmLabel="Delete Manager"
-        variant="danger"
-        onConfirm={handleDelete}
-        onCancel={() => setShowDeleteConfirm(false)}
-      />
-    </div>
+    m.metrics.vacant +
+    m.metrics.open_maintenance +
+    m.metrics.expiring_leases_90d +
+    m.expired_leases +
+    m.below_market_units +
+    m.delinquent_count
   );
 }
 
-type SortKey = "issues" | "revenue" | "occupancy" | "units" | "name";
+function hasUrgent(m: ManagerListItem): boolean {
+  return m.emergency_maintenance > 0 || m.expired_leases > 0 || m.delinquent_count > 5;
+}
+
+function revenuePerUnit(m: ManagerListItem): number {
+  return m.metrics.total_units > 0 ? m.metrics.total_actual_rent / m.metrics.total_units : 0;
+}
+
+type SortKey = "issues" | "revenue" | "occupancy" | "units" | "name" | "rev_per_unit" | "delinquency" | "ltl";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "issues", label: "Most Issues" },
+  { value: "delinquency", label: "Delinquency" },
+  { value: "occupancy", label: "Lowest Occupancy" },
+  { value: "revenue", label: "Revenue" },
+  { value: "rev_per_unit", label: "Rev / Unit" },
+  { value: "ltl", label: "Loss to Lease" },
+  { value: "units", label: "Portfolio Size" },
+  { value: "name", label: "Name" },
+];
 
 function sortManagers(mgrs: ManagerListItem[], key: SortKey): ManagerListItem[] {
   const copy = [...mgrs];
   switch (key) {
     case "issues":
-      return copy.sort((a, b) => {
-        const aI = a.metrics.vacant + a.metrics.open_maintenance + a.metrics.expiring_leases_90d + a.expired_leases + a.below_market_units;
-        const bI = b.metrics.vacant + b.metrics.open_maintenance + b.metrics.expiring_leases_90d + b.expired_leases + b.below_market_units;
-        return bI - aI;
-      });
+      return copy.sort((a, b) => issueCount(b) - issueCount(a) || b.metrics.total_units - a.metrics.total_units);
+    case "delinquency":
+      return copy.sort((a, b) => b.total_delinquent_balance - a.total_delinquent_balance);
     case "revenue":
       return copy.sort((a, b) => b.metrics.total_actual_rent - a.metrics.total_actual_rent);
+    case "rev_per_unit":
+      return copy.sort((a, b) => revenuePerUnit(b) - revenuePerUnit(a));
     case "occupancy":
       return copy.sort((a, b) => a.metrics.occupancy_rate - b.metrics.occupancy_rate);
     case "units":
       return copy.sort((a, b) => b.metrics.total_units - a.metrics.total_units);
+    case "ltl":
+      return copy.sort((a, b) => b.metrics.loss_to_lease - a.metrics.loss_to_lease);
     case "name":
       return copy.sort((a, b) => a.name.localeCompare(b.name));
   }
+}
+
+function OccupancyBar({ rate }: { rate: number }) {
+  const color = rate >= 0.95 ? "bg-ok" : rate >= 0.9 ? "bg-warn" : "bg-error";
+  return (
+    <div className="flex items-center gap-2 min-w-[100px]">
+      <div className="flex-1 h-1.5 rounded-full bg-border-subtle overflow-hidden">
+        <div className={`h-full rounded-full ${color} transition-all duration-500`} style={{ width: `${Math.min(rate * 100, 100)}%` }} />
+      </div>
+      <span className={`text-[11px] font-mono font-semibold w-11 text-right ${rate < 0.9 ? "text-warn" : "text-fg"}`}>
+        {pct(rate)}
+      </span>
+    </div>
+  );
+}
+
+function IssueChips({ m }: { m: ManagerListItem }) {
+  const chips: { label: string; variant: "red" | "amber" | "cyan" }[] = [];
+  if (m.delinquent_count > 0) chips.push({ label: `${m.delinquent_count} delinq`, variant: "red" });
+  if (m.metrics.vacant > 0) chips.push({ label: `${m.metrics.vacant} vacant`, variant: "red" });
+  if (m.expired_leases > 0) chips.push({ label: `${m.expired_leases} expired`, variant: "red" });
+  if (m.metrics.expiring_leases_90d > 0) chips.push({ label: `${m.metrics.expiring_leases_90d} expiring`, variant: "amber" });
+  if (m.below_market_units > 0) chips.push({ label: `${m.below_market_units} ↓mkt`, variant: "amber" });
+  if (m.metrics.open_maintenance > 0) chips.push({ label: `${m.metrics.open_maintenance} maint`, variant: "cyan" });
+
+  if (chips.length === 0) return <Badge variant="emerald">OK</Badge>;
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {chips.slice(0, 4).map((c) => (
+        <Badge key={c.label} variant={c.variant}>{c.label}</Badge>
+      ))}
+      {chips.length > 4 && (
+        <span className="text-[9px] text-fg-faint">+{chips.length - 4}</span>
+      )}
+    </div>
+  );
+}
+
+function AggregateStrip({ managers }: { managers: ManagerListItem[] }) {
+  const totalUnits = managers.reduce((s, m) => s + m.metrics.total_units, 0);
+  const totalOccupied = managers.reduce((s, m) => s + m.metrics.occupied, 0);
+  const totalRevenue = managers.reduce((s, m) => s + m.metrics.total_actual_rent, 0);
+  const totalLTL = managers.reduce((s, m) => s + m.metrics.loss_to_lease, 0);
+  const totalDelinq = managers.reduce((s, m) => s + m.total_delinquent_balance, 0);
+  const totalVacant = managers.reduce((s, m) => s + m.metrics.vacant, 0);
+  const totalIssues = managers.reduce((s, m) => s + issueCount(m), 0);
+  const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
+
+  const stats: { label: string; value: string; alert?: boolean }[] = [
+    { label: "Managers", value: String(managers.length) },
+    { label: "Units", value: totalUnits.toLocaleString() },
+    { label: "Occupancy", value: pct(avgOcc), alert: avgOcc < 0.9 },
+    { label: "Revenue", value: fmt$(totalRevenue) },
+    { label: "LTL", value: fmt$(totalLTL), alert: totalLTL > 0 },
+    { label: "Delinquent", value: fmt$(totalDelinq), alert: totalDelinq > 0 },
+    { label: "Vacant", value: String(totalVacant), alert: totalVacant > 0 },
+    { label: "Issues", value: String(totalIssues), alert: totalIssues > 0 },
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-2 px-1">
+      {stats.map((s) => (
+        <div key={s.label} className="text-center min-w-[60px]">
+          <p className="text-[9px] text-fg-faint uppercase tracking-wider">{s.label}</p>
+          <p className={`text-sm font-bold font-mono tracking-tight ${s.alert ? "text-warn" : "text-fg"}`}>
+            {s.value}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ManagerRow({ m, rank }: { m: ManagerListItem; rank: number }) {
+  const router = useRouter();
+  const urgent = hasUrgent(m);
+  const issues = issueCount(m);
+
+  return (
+    <tr
+      onClick={() => router.push(`/managers/${m.id}`)}
+      className={`group cursor-pointer border-b border-border-subtle transition-colors ${
+        urgent
+          ? "hover:bg-error-soft/50"
+          : issues > 0
+          ? "hover:bg-warn-soft/30"
+          : "hover:bg-surface-raised"
+      }`}
+    >
+      <td className="pl-4 pr-2 py-3 w-8">
+        <span className={`text-[10px] font-mono ${urgent ? "text-error font-bold" : "text-fg-ghost"}`}>
+          {rank}
+        </span>
+      </td>
+      <td className="px-2 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {urgent && <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse shrink-0" />}
+            <Link
+              href={`/managers/${m.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-sm font-medium text-fg group-hover:text-accent transition-colors truncate"
+            >
+              {m.name}
+            </Link>
+          </div>
+          <p className="text-[10px] text-fg-faint mt-0.5">
+            {m.property_count} properties · {m.metrics.total_units} units
+            {m.company ? ` · ${m.company}` : ""}
+          </p>
+        </div>
+      </td>
+      <td className="px-2 py-3 hidden lg:table-cell">
+        <OccupancyBar rate={m.metrics.occupancy_rate} />
+      </td>
+      <td className="px-2 py-3 text-right hidden md:table-cell">
+        <p className="text-xs font-mono font-semibold text-fg">{fmt$(m.metrics.total_actual_rent)}</p>
+        <p className="text-[10px] font-mono text-fg-faint">{fmt$(revenuePerUnit(m))}/u</p>
+      </td>
+      <td className="px-2 py-3 text-right hidden lg:table-cell">
+        <span className={`text-xs font-mono ${m.metrics.loss_to_lease > 0 ? "text-warn font-semibold" : "text-fg-ghost"}`}>
+          {m.metrics.loss_to_lease > 0 ? fmt$(m.metrics.loss_to_lease) : "—"}
+        </span>
+      </td>
+      <td className="px-2 py-3 text-right hidden lg:table-cell">
+        {m.total_delinquent_balance > 0 ? (
+          <div>
+            <p className="text-xs font-mono font-semibold text-error">{fmt$(m.total_delinquent_balance)}</p>
+            <p className="text-[10px] text-fg-faint">{m.delinquent_count} tenants</p>
+          </div>
+        ) : (
+          <span className="text-xs text-fg-ghost">—</span>
+        )}
+      </td>
+      <td className="px-2 py-3 hidden sm:table-cell">
+        <IssueChips m={m} />
+      </td>
+      <td className="pr-4 pl-2 py-3">
+        <Link
+          href={`/?q=${encodeURIComponent(`How is ${m.name} doing?`)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center justify-center w-7 h-7 rounded-lg text-fg-ghost hover:text-accent hover:bg-accent-soft transition-all opacity-0 group-hover:opacity-100"
+          title={`Ask REMI about ${m.name}`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+          </svg>
+        </Link>
+      </td>
+    </tr>
+  );
 }
 
 export function ManagersView() {
@@ -254,52 +227,72 @@ export function ManagersView() {
 
   const activeMgrs = (managers ?? []).filter((m) => m.metrics.total_units > 0 || m.property_count > 0);
   const filtered = search
-    ? activeMgrs.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()))
+    ? activeMgrs.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.company?.toLowerCase().includes(search.toLowerCase()))
     : activeMgrs;
   const sorted = sortManagers(filtered, sortBy);
 
   return (
     <PageContainer wide>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-fg tracking-tight">Property Managers</h1>
-          <p className="text-[11px] text-fg-faint mt-0.5">
-            {activeMgrs.length} managers · Select one to review their portfolio
-          </p>
+      <div className="space-y-1">
+        <h1 className="text-lg font-bold text-fg tracking-tight">Property Managers</h1>
+        <p className="text-[11px] text-fg-faint">
+          Oversee performance, compare metrics, and drill down into any manager&apos;s portfolio.
+        </p>
+      </div>
+
+      {!loading && activeMgrs.length > 0 && (
+        <AggregateStrip managers={activeMgrs} />
+      )}
+
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-xs">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-ghost pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter managers..."
+            className="w-full bg-surface border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs text-fg placeholder-fg-ghost focus:outline-none focus:border-fg-ghost transition-colors"
+          />
         </div>
-        <div className="flex items-center gap-2">
-          {activeMgrs.length > 3 && (
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter managers..."
-              className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary placeholder-fg-ghost focus:outline-none focus:border-fg-ghost w-44"
-            />
-          )}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary focus:outline-none focus:border-fg-ghost"
-          >
-            <option value="issues">Sort: Issues</option>
-            <option value="revenue">Sort: Revenue</option>
-            <option value="occupancy">Sort: Lowest Occ.</option>
-            <option value="units">Sort: Most Units</option>
-            <option value="name">Sort: Name</option>
-          </select>
-        </div>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortKey)}
+          className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-fg-secondary focus:outline-none focus:border-fg-ghost cursor-pointer"
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
 
       {loading && (
-        <div className="text-sm text-fg-faint animate-pulse py-12 text-center">Loading...</div>
+        <div className="text-sm text-fg-faint animate-pulse py-16 text-center">Loading managers...</div>
       )}
 
       {!loading && sorted.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {sorted.map((m) => (
-            <ManagerCard key={m.id} m={m} allManagers={activeMgrs} onRefresh={refetch} />
-          ))}
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border text-[9px] font-semibold text-fg-muted uppercase tracking-wider">
+                <th className="pl-4 pr-2 py-2.5 text-left w-8">#</th>
+                <th className="px-2 py-2.5 text-left">Manager</th>
+                <th className="px-2 py-2.5 text-left hidden lg:table-cell">Occupancy</th>
+                <th className="px-2 py-2.5 text-right hidden md:table-cell">Revenue</th>
+                <th className="px-2 py-2.5 text-right hidden lg:table-cell">LTL</th>
+                <th className="px-2 py-2.5 text-right hidden lg:table-cell">Delinquent</th>
+                <th className="px-2 py-2.5 text-left hidden sm:table-cell">Issues</th>
+                <th className="pr-4 pl-2 py-2.5 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((m, i) => (
+                <ManagerRow key={m.id} m={m} rank={i + 1} />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

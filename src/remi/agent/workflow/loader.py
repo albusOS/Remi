@@ -1,10 +1,15 @@
-"""YAML manifest loader — parses app.yaml into a validated WorkflowDef.
+"""YAML manifest loader — parses app.yaml into validated runtime types.
 
 Supports two manifest kinds:
   - ``kind: Workflow`` — explicit ``depends_on`` per step, parallel by default
   - ``kind: Pipeline`` — steps run sequentially in YAML order
 
 Both produce the same ``WorkflowDef`` for the engine.
+
+Also provides ``load_manifest_runtime`` which parses the ``runtime:``
+stanza from any app.yaml (Agent, Workflow, or Pipeline) into a
+``RuntimeConfig``.  This is the single parsing entry point — both the
+agent runtime and workflow engine use it.
 
 Node parsing uses Pydantic's ``TypeAdapter`` with the ``WorkflowNode``
 discriminated union — YAML dicts are validated directly into typed
@@ -19,6 +24,8 @@ from typing import Any
 import yaml
 from pydantic import TypeAdapter, ValidationError
 
+from remi.agent.runtime.config import RuntimeConfig
+from remi.agent.workflow.registry import get_manifest_path
 from remi.agent.workflow.types import (
     Wire,
     WorkflowDef,
@@ -28,36 +35,52 @@ from remi.agent.workflow.types import (
 
 _node_adapter: TypeAdapter[WorkflowNode] = TypeAdapter(WorkflowNode)
 
-_agents_dir: Path | None = None
+
+# ---------------------------------------------------------------------------
+# Runtime config parsing (shared by agent + workflow loading paths)
+# ---------------------------------------------------------------------------
 
 
-def set_agents_dir(path: Path) -> None:
-    """Configure the directory containing agent YAML manifests.
+def load_manifest_runtime(
+    name: str,
+    *,
+    manifest_path: Path | None = None,
+) -> RuntimeConfig:
+    """Parse the ``runtime:`` stanza from a registered manifest.
 
-    Called once at startup by the composition root (container).
+    Returns ``RuntimeConfig()`` (all defaults) when the stanza is absent,
+    so callers always get a valid object without null checks.
     """
-    global _agents_dir
-    _agents_dir = path
+    path = manifest_path or get_manifest_path(name)
+    if not path.exists():
+        return RuntimeConfig()
+
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    return _parse_runtime(data)
 
 
-def get_agents_dir() -> Path:
-    """Return the configured agents directory, or raise if not set."""
-    if _agents_dir is None:
-        raise RuntimeError(
-            "agents_dir not configured — call set_agents_dir() at startup"
-        )
-    return _agents_dir
+def _parse_runtime(data: dict[str, Any]) -> RuntimeConfig:
+    """Extract and validate the runtime: block from raw YAML."""
+    raw_runtime = data.get("runtime")
+    if not raw_runtime or not isinstance(raw_runtime, dict):
+        return RuntimeConfig()
+    return RuntimeConfig.model_validate(raw_runtime)
 
 
-def load_workflow(name: str, *, agents_dir: Path | None = None) -> WorkflowDef:
-    """Load a workflow definition from ``<agents_dir>/<name>/app.yaml``."""
-    base = agents_dir or _agents_dir
-    if base is None:
-        raise RuntimeError(
-            "agents_dir not configured — call set_agents_dir() at startup "
-            "or pass agents_dir= explicitly"
-        )
-    path = base / name / "app.yaml"
+# ---------------------------------------------------------------------------
+# Workflow loading
+# ---------------------------------------------------------------------------
+
+
+def load_workflow(name: str, *, manifest_path: Path | None = None) -> WorkflowDef:
+    """Load a workflow definition by registered manifest name.
+
+    The manifest must have been registered via ``register_manifest``
+    at startup.  Pass *manifest_path* to override (useful in tests).
+    """
+    path = manifest_path or get_manifest_path(name)
     if not path.exists():
         raise ValueError(f"No workflow config at {path}")
 
@@ -82,12 +105,14 @@ def load_workflow(name: str, *, agents_dir: Path | None = None) -> WorkflowDef:
         steps = _parse_pipeline_steps(raw_steps, name)
 
     wires = _parse_wires(data.get("wires") or [])
+    runtime = _parse_runtime(data)
 
     return WorkflowDef(
         name=name,
         defaults=defaults,
         steps=tuple(steps),
         wires=tuple(wires),
+        runtime=runtime,
     )
 
 

@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
-import { AskView } from "@/components/ask/AskView";
+import { Workspace } from "@/components/workspace/Workspace";
 
 export default function AskPage() {
   return (
     <Suspense>
-      <AskView />
+      <Workspace initialTab="remi" />
     </Suspense>
   );
 }

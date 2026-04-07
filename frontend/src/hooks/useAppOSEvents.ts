@@ -1,16 +1,27 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import type { WsEvent } from "@/lib/types";
+import type { FeedEvent } from "@/lib/types";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/events";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const WS_URL = API_BASE.replace(/^http/, "ws") + "/api/v1/feed/ws";
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
 
-export function useAppOSEvents(onEvent?: (event: WsEvent) => void) {
+/**
+ * Subscribe to the event bus feed via WebSocket.
+ *
+ * Connects to ``WS /api/v1/feed/ws`` and pushes every bus event
+ * matching the requested topic globs to the ``onEvent`` callback.
+ * Today that means ``domain.*`` events (``ingestion.complete``,
+ * ``entity.updated``, etc.).  When multi-agent orchestration lands,
+ * ``agent.*`` lifecycle events will flow here too.
+ *
+ * Returns connection state for the "Live" indicator.
+ */
+export function useAppOSEvents(onEvent?: (event: FeedEvent) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const lastEventRef = useRef<WsEvent | null>(null);
   const callbackRef = useRef(onEvent);
   callbackRef.current = onEvent;
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,24 +60,13 @@ export function useAppOSEvents(onEvent?: (event: WsEvent) => void) {
       reconnectDelay.current = RECONNECT_BASE_MS;
     };
     ws.onmessage = (msg) => {
-      let parsed: Record<string, unknown>;
+      let parsed: FeedEvent;
       try {
         parsed = JSON.parse(msg.data);
       } catch {
-        console.warn("[useAppOSEvents] received malformed JSON from server");
         return;
       }
-      if (parsed.type === "ping") {
-        try {
-          ws.send(JSON.stringify({ type: "pong" }));
-        } catch {
-          // socket closing — onclose will handle reconnect
-        }
-        return;
-      }
-      const event = parsed as unknown as WsEvent;
-      lastEventRef.current = event;
-      callbackRef.current?.(event);
+      callbackRef.current?.(parsed);
     };
     ws.onclose = () => {
       setConnected(false);
@@ -91,5 +91,5 @@ export function useAppOSEvents(onEvent?: (event: WsEvent) => void) {
     };
   }, [connect, clearReconnectTimer, teardownSocket]);
 
-  return { connected, lastEventRef };
+  return { connected };
 }

@@ -6,7 +6,7 @@ Pydantic node models, wire-based data routing, retry policies, output
 schema validation, and structured execution events.
 
 Workflows are loaded from YAML manifests via ``load_workflow(name)``.
-Call ``set_agents_dir(path)`` at startup to configure the manifest root.
+Register manifests at startup with ``register_manifest(name, path)``.
 
 Public API::
 
@@ -14,10 +14,12 @@ Public API::
 """
 
 from remi.agent.workflow.engine import WorkflowRunner
-from remi.agent.workflow.loader import load_workflow, set_agents_dir
+from remi.agent.workflow.loader import load_manifest_runtime, load_workflow
 from remi.agent.workflow.plan import build_execution_plan
+from remi.agent.workflow.registry import all_manifests, get_manifest_path, register_manifest
 from remi.agent.workflow.resolve import evaluate_condition
 from remi.agent.workflow.types import (
+    AgentStepNode,
     BackoffStrategy,
     EventCallback,
     ExecutionPlan,
@@ -35,7 +37,6 @@ from remi.agent.workflow.types import (
     NodeStarted,
     OutputSchemaRegistry,
     RetryPolicy,
-    StepConfig,
     StepKind,
     StepResult,
     StepValue,
@@ -48,6 +49,7 @@ from remi.agent.workflow.types import (
 )
 
 __all__ = [
+    "AgentStepNode",
     "BackoffStrategy",
     "EventCallback",
     "ExecutionPlan",
@@ -65,7 +67,6 @@ __all__ = [
     "NodeStarted",
     "OutputSchemaRegistry",
     "RetryPolicy",
-    "StepConfig",
     "StepKind",
     "StepResult",
     "StepValue",
@@ -76,8 +77,11 @@ __all__ = [
     "WorkflowNode",
     "WorkflowResult",
     "WorkflowRunner",
+    "all_manifests",
     "build_execution_plan",
     "evaluate_condition",
+    "get_manifest_path",
+    "load_manifest_runtime",
     "load_workflow",
-    "set_agents_dir",
+    "register_manifest",
 ]

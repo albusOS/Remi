@@ -28,22 +28,12 @@ class Event:
 
     AGENT_CONFIG_INVALID = "agent_config_invalid"
 
-    # -- Chat / WebSocket ---------------------------------------------------
+    # -- Chat / Sessions ----------------------------------------------------
     CHAT_SEND_ERROR = "chat_send_error"
     CHAT_SEND_CANCELLED = "chat_send_cancelled"
     CHAT_STOP = "chat_stop"
-    NOTIFICATION_SEND_FAILED = "notification_send_failed"
     SESSION_NOT_FOUND = "session_not_found"
     SESSIONS_EVICTED = "sessions_evicted"
-
-    WS_CONNECT = "ws_chat_connect"
-    WS_DISCONNECT = "ws_chat_disconnect"
-    WS_ERROR = "ws_chat_error"
-    WS_EVENTS_CONNECT = "ws_events_connect"
-    WS_EVENTS_DISCONNECT = "ws_events_disconnect"
-    WS_RPC_CANCELLED = "background_rpc_cancelled"
-    WS_RPC_SEND_FAILED = "background_rpc_send_failed"
-    WS_PING_FAILED = "ws_ping_failed"
 
     # -- Graph / Vectors ----------------------------------------------------
     GRAPH_RETRIEVAL_FAILED = "graph_retrieval_failed"

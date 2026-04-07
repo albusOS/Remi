@@ -23,10 +23,16 @@ import json
 import structlog
 
 from remi.agent.config import AgentConfig, PhaseConfig
-from remi.agent.graph.stores import MemoryStore
+from remi.agent.memory import MemoryStore
 from remi.agent.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
+from remi.agent.runtime.conversation.compaction import (
+    CompactionLevel,
+    compact_thread,
+    should_compact,
+    summarize_old_exchanges,
+)
 from remi.agent.runtime.conversation.compression import compress_and_offload
 from remi.agent.runtime.conversation.thread import try_parse_json
 from remi.agent.runtime.deps import OnEventCallback
@@ -58,6 +64,9 @@ def _serialize_result(result: object) -> str | int | float | bool:
     return json.dumps(result, default=str)
 
 
+_TOOL_HEARTBEAT_INTERVAL = 3.0  # seconds between heartbeat ticks
+
+
 async def _execute_tool_call(
     tc: ToolCallRequest,
     iteration: int,
@@ -71,7 +80,23 @@ async def _execute_tool_call(
         "tool_call",
         {"tool": tc.name, "arguments": tc.arguments, "call_id": tc.id},
     )
-    result = await tool_executor.execute(tc, iteration)
+
+    async def _heartbeat() -> None:
+        elapsed = 0.0
+        while True:
+            await asyncio.sleep(_TOOL_HEARTBEAT_INTERVAL)
+            elapsed += _TOOL_HEARTBEAT_INTERVAL
+            await emit(
+                "tool_running",
+                {"tool": tc.name, "call_id": tc.id, "elapsed_s": elapsed},
+            )
+
+    heartbeat_task = asyncio.create_task(_heartbeat())
+    try:
+        result = await tool_executor.execute(tc, iteration)
+    finally:
+        heartbeat_task.cancel()
+
     await emit(
         "tool_result",
         {"tool": tc.name, "call_id": tc.id, "result": _serialize_result(result)},
@@ -140,8 +165,13 @@ async def run_agent_loop(
     usage_ledger: LLMUsageLedger | None = None,
     memory: MemoryStore | None = None,
     memory_namespace: str = "",
+    context_budget: int = 0,
 ) -> tuple[list[Message], TokenUsage]:
     """Execute the think-act-observe loop.
+
+    ``context_budget`` is the model's context window in tokens.  When > 0,
+    the loop checks for compaction before each LLM call and summarizes
+    old exchanges if the thread is approaching the limit.
 
     Returns the updated thread and cumulative token usage.
     """
@@ -220,6 +250,13 @@ async def run_agent_loop(
                 last_assistant_text=last_assistant_text,
             )
             thread.append(Message(role="system", content=scratchpad))
+
+        if context_budget > 0:
+            level = should_compact(thread, context_budget)
+            if level == CompactionLevel.COMPACT:
+                thread = await compact_thread(thread, provider, context_budget)
+            elif level == CompactionLevel.SUMMARIZE:
+                thread = await summarize_old_exchanges(thread, provider, context_budget)
 
         log.debug(
             "iteration_start",

@@ -1,9 +1,13 @@
 """HTTP request tool — read-only access to the REMI API surface.
 
-Constrained to GET requests against the local REMI API. Mutations
-(POST, PATCH, DELETE) are blocked — agents perform writes through
-dedicated workflow tools or the sandbox SDK, both of which have
-explicit, auditable contracts.
+Constrained to GET requests against the configured internal REMI API base URL.
+Mutations (POST, PATCH, DELETE) are blocked — agents perform writes through
+dedicated workflow tools or the sandbox SDK, both of which have explicit,
+auditable contracts.
+
+The allowed host is derived from ``api_base_url`` at construction time so the
+tool works correctly whether the API is on loopback, a Docker network hostname,
+or an internal VPC address.
 """
 
 from __future__ import annotations
@@ -17,8 +21,6 @@ from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 
 logger = structlog.get_logger("remi.agent.tools.http")
 
-_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0"}
-
 
 class HttpToolProvider(ToolProvider):
     def __init__(
@@ -29,9 +31,13 @@ class HttpToolProvider(ToolProvider):
     ) -> None:
         self._base = api_base_url.rstrip("/")
         self._api_path_examples = api_path_examples
+        # Derive the allowed hostname from the configured base URL so this tool
+        # works on any internal address (loopback, Docker network, VPC hostname).
+        self._allowed_host = urlparse(self._base).hostname or "127.0.0.1"
 
     def register(self, registry: ToolRegistry) -> None:
         _base = self._base
+        _allowed_host = self._allowed_host
 
         async def http_request(args: dict[str, Any]) -> Any:
             method = (args.get("method", "GET")).upper()
@@ -41,9 +47,9 @@ class HttpToolProvider(ToolProvider):
             if method != "GET":
                 return {
                     "error": (
-                        f"http_request is read-only (GET). "
-                        f"Use the remi SDK in Python for mutations "
-                        f"(remi.create_action, remi.create_note)."
+                        "http_request is read-only (GET). "
+                        "Use the remi SDK in Python for mutations "
+                        "(remi.create_action, remi.create_note)."
                     ),
                 }
 
@@ -56,10 +62,12 @@ class HttpToolProvider(ToolProvider):
             url = f"{_base}{path}"
 
             parsed = urlparse(url)
-            if parsed.hostname not in _ALLOWED_HOSTS:
+            if parsed.hostname != _allowed_host:
                 return {
-                    "error": f"Requests to {parsed.hostname} are not allowed. "
-                    f"Only local REMI API requests are permitted.",
+                    "error": (
+                        f"Requests to {parsed.hostname} are not allowed. "
+                        f"Only the configured REMI API ({_allowed_host}) is permitted."
+                    ),
                 }
 
             import aiohttp

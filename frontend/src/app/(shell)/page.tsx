@@ -1,7 +1,12 @@
 "use client";
 
-import { Dashboard } from "@/components/dashboard/Dashboard";
+import { Suspense } from "react";
+import { Workspace } from "@/components/workspace/Workspace";
 
 export default function Home() {
-  return <Dashboard />;
+  return (
+    <Suspense>
+      <Workspace />
+    </Suspense>
+  );
 }

@@ -3,6 +3,14 @@
 Each session gets a dedicated temp directory.  Python code runs in a
 **persistent interpreter** (variables survive between calls).  Shell
 commands run in one-shot subprocesses.
+
+TTL reaping
+-----------
+Sessions idle longer than ``session_ttl_seconds`` are automatically
+destroyed by ``reap_expired_sessions()``, which the server lifespan
+calls on a background timer.  Set ``session_ttl_seconds=0`` to disable
+TTL-based cleanup (sessions are only reclaimed by explicit
+``destroy_session`` calls).
 """
 
 from __future__ import annotations
@@ -12,6 +20,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +190,9 @@ class LocalSandbox(Sandbox):
     Python code executes in a **persistent interpreter** per session —
     variables and imports survive between ``exec_python`` calls.  Shell
     commands run in one-shot subprocesses.
+
+    Sessions idle longer than ``session_ttl_seconds`` are reclaimed by
+    ``reap_expired_sessions()``.  Set to ``0`` to disable TTL cleanup.
     """
 
     def __init__(
@@ -189,14 +201,17 @@ class LocalSandbox(Sandbox):
         default_timeout: int = 30,
         max_output_bytes: int = 100_000,
         extra_env: dict[str, str] | None = None,
+        session_ttl_seconds: int = 3600,
     ) -> None:
         self._root = root or _SANDBOX_ROOT
         self._root.mkdir(parents=True, exist_ok=True)
         self._default_timeout = default_timeout
         self._max_output = max_output_bytes
         self._extra_env = extra_env or {}
+        self._session_ttl = session_ttl_seconds
         self._sessions: dict[str, SandboxSession] = {}
         self._session_env: dict[str, dict[str, str]] = {}
+        self._session_last_used: dict[str, datetime] = {}
         self._interpreters: dict[str, _PersistentInterpreter] = {}
         self._session_files: dict[str, str] = {}
         self._session_cwd: dict[str, Path] = {}
@@ -208,6 +223,10 @@ class LocalSandbox(Sandbox):
     def _write_session_files(self, work_dir: Path) -> None:
         for name, content in self._session_files.items():
             (work_dir / name).write_text(content, encoding="utf-8")
+
+    def _touch(self, session_id: str) -> None:
+        """Record that a session was used right now (for TTL tracking)."""
+        self._session_last_used[session_id] = datetime.now(UTC)
 
     async def create_session(
         self,
@@ -224,10 +243,33 @@ class LocalSandbox(Sandbox):
         if extra_env:
             self._session_env[sid] = extra_env
 
+        self._touch(sid)
         self._write_session_files(work_dir)
 
         _log.info("sandbox_session_created", session_id=sid, dir=str(work_dir))
         return session
+
+    async def reap_expired_sessions(self) -> int:
+        """Destroy sessions that have been idle longer than ``session_ttl_seconds``.
+
+        Returns the number of sessions reaped.  Skips cleanup when TTL is
+        disabled (``session_ttl_seconds == 0``).
+        """
+        if not self._session_ttl:
+            return 0
+
+        now = datetime.now(UTC)
+        expired = [
+            sid
+            for sid, last_used in list(self._session_last_used.items())
+            if (now - last_used).total_seconds() > self._session_ttl
+        ]
+
+        for sid in expired:
+            _log.info("sandbox_session_ttl_expired", session_id=sid)
+            await self.destroy_session(sid)
+
+        return len(expired)
 
     def _build_env(self, session_id: str) -> dict[str, str]:
         merged = dict(self._extra_env)
@@ -261,6 +303,7 @@ class LocalSandbox(Sandbox):
 
         result = await interp.execute(code, timeout=timeout_seconds or self._default_timeout)
 
+        self._touch(session_id)
         session.exec_count += 1
         new_files = self._scan_files(work_dir)
         result_files = [f for f in new_files if f not in session.files]
@@ -316,6 +359,7 @@ class LocalSandbox(Sandbox):
             if new_cwd:
                 self._session_cwd[session_id] = Path(new_cwd)
 
+        self._touch(session_id)
         session.exec_count += 1
         new_files = self._scan_files(work_dir)
         result_files = [f for f in new_files if f not in session.files]
@@ -385,6 +429,7 @@ class LocalSandbox(Sandbox):
         session = self._sessions.pop(session_id, None)
         self._session_env.pop(session_id, None)
         self._session_cwd.pop(session_id, None)
+        self._session_last_used.pop(session_id, None)
         if session is not None:
             work_dir = Path(session.working_dir)
             if work_dir.exists():

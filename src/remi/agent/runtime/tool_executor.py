@@ -1,40 +1,54 @@
-"""ToolExecutor — unified tool dispatch with tracing and error handling."""
+"""ToolExecutor — unified tool dispatch with tracing and error handling.
+
+``resolve_agent_tools`` reads the agent's ``ToolRef`` list, resolves each
+through the ``ToolCatalog`` (or falls back to plain ``ToolRegistry``),
+and returns a list of ``ToolBinding`` instances with agent-specific config,
+description overrides, and context injection baked in.
+
+``ToolExecutor`` wraps the bindings with tracing and error handling for
+use in the agent loop.
+"""
 
 from __future__ import annotations
 
 import json
 import traceback as _traceback
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 
-from remi.agent.config import AgentConfig
+from remi.agent.config import AgentConfig, ToolRef
 from remi.agent.llm.types import ToolCallRequest
 from remi.agent.observe.types import SpanKind, Tracer
 from remi.agent.runtime.deps import RuntimeContext
-from remi.agent.types import ToolDefinition, ToolResult
-
-
-class ToolExecuteFn(Protocol):
-    """Typed protocol for the tool execution callback."""
-
-    async def __call__(self, name: str, arguments: dict[str, Any]) -> Any: ...
+from remi.agent.types import ToolBinding, ToolCatalog, ToolDefinition, ToolResult
 
 
 class ToolExecutor:
-    """Resolves, executes, and traces tool calls for an agent run."""
+    """Dispatches tool calls to their ``ToolBinding`` closures with tracing."""
 
     def __init__(
         self,
-        definitions: list[ToolDefinition],
-        execute_fn: ToolExecuteFn | None,
+        bindings: list[ToolBinding],
         tracer: Tracer | None,
         log: structlog.stdlib.BoundLogger,
     ) -> None:
-        self._definitions = definitions
-        self._execute_fn = execute_fn
+        self._bindings: dict[str, ToolBinding] = {
+            b.definition.name: b for b in bindings
+        }
+        self._definitions = [b.definition for b in bindings]
         self._tracer = tracer
         self._log = log
+
+    @classmethod
+    def from_bindings(
+        cls,
+        bindings: list[ToolBinding],
+        tracer: Tracer | None,
+        log: structlog.stdlib.BoundLogger,
+    ) -> ToolExecutor:
+        """Construct from resolved bindings."""
+        return cls(bindings, tracer, log)
 
     @property
     def definitions(self) -> list[ToolDefinition]:
@@ -76,8 +90,9 @@ class ToolExecutor:
 
     async def _run(self, tc: ToolCallRequest) -> Any:
         try:
-            if self._execute_fn is not None:
-                return await self._execute_fn(tc.name, tc.arguments)
+            binding = self._bindings.get(tc.name)
+            if binding is not None:
+                return await binding.execute(tc.arguments)
             return {"error": f"Tool {tc.name} not available"}
         except Exception as exc:
             self._log.error(
@@ -89,60 +104,112 @@ class ToolExecutor:
             return {"error": str(exc), "traceback": _traceback.format_exc()}
 
 
-def build_tool_set(
-    cfg: AgentConfig, context: RuntimeContext, *, mode: str = "agent"
-) -> tuple[list[ToolDefinition], ToolExecuteFn | None]:
-    """Build tool definitions and an executor scoped to declared tools."""
+# ---------------------------------------------------------------------------
+# Resolve agent tools via ToolCatalog (or ToolRegistry fallback)
+# ---------------------------------------------------------------------------
+
+
+def _build_context_values(context: RuntimeContext) -> dict[str, Any]:
+    """Build the flat context-value dict available for ToolRef.inject."""
+    values: dict[str, Any] = {}
+    sid = context.params.sandbox_session_id or context.extras.get("sandbox_session_id")
+    if sid:
+        values["sandbox_session_id"] = sid
+    if context.scope.entity_id:
+        values["scope_entity_id"] = context.scope.entity_id
+    if context.scope.entity_type:
+        values["scope_entity_type"] = context.scope.entity_type
+    if context.scope.tool_scope:
+        values.update(context.scope.tool_scope)
+    return values
+
+
+def resolve_agent_tools(
+    cfg: AgentConfig,
+    context: RuntimeContext,
+    *,
+    mode: str = "agent",
+) -> list[ToolBinding]:
+    """Resolve the agent's declared tools into bound capabilities.
+
+    Each ``ToolRef`` in the agent's mode-specific tool list is resolved
+    through the ``ToolCatalog`` into a self-contained ``ToolBinding``
+    with config, description, and context injection baked in.
+
+    ``caller_agent`` is injected into context values so that tools
+    like ``delegate_to_agent`` can identify the calling agent.
+    """
     registry = context.deps.tool_registry or context.extras.get("tool_registry")
     mode_tools = cfg.tools_for_mode(mode)
     if not registry or not mode_tools:
-        return [], None
+        return []
 
-    tool_names = [t.name for t in mode_tools]
-    definitions = registry.list_definitions(names=tool_names)
-    tool_configs = {t.name: t.config for t in mode_tools}
-    sandbox_session_id = context.params.sandbox_session_id or context.extras.get(
-        "sandbox_session_id"
-    )
+    if not isinstance(registry, ToolCatalog):
+        return _resolve_via_legacy(registry, mode_tools, context, cfg.name)
 
-    async def execute(name: str, arguments: dict[str, Any]) -> Any:
-        entry = registry.get(name)
-        if entry is None:
-            return {"error": f"Tool '{name}' not found"}
-        fn, _ = entry
-        merged = {**tool_configs.get(name, {}), **arguments}
-        if name in ("python", "bash") and sandbox_session_id:
-            merged.setdefault("session_id", sandbox_session_id)
-        return await fn(merged)
+    ctx_values = _build_context_values(context)
+    if cfg.name:
+        ctx_values["caller_agent"] = cfg.name
+    bindings: list[ToolBinding] = []
+    for ref in mode_tools:
+        binding = registry.resolve(
+            ref.name,
+            agent_config=ref.config or None,
+            agent_description=ref.description,
+            inject=ref.inject or None,
+            context_values=ctx_values,
+        )
+        if binding is not None:
+            bindings.append(binding)
+    return bindings
 
-    return definitions, execute
 
-
-def build_tool_set_for_names(
-    tool_names: list[str],
+def _resolve_via_legacy(
+    registry: Any,
+    mode_tools: list[ToolRef],
     context: RuntimeContext,
-) -> tuple[list[ToolDefinition], ToolExecuteFn | None]:
-    """Build a tool set from an explicit list of tool names."""
-    registry = context.deps.tool_registry or context.extras.get("tool_registry")
-    if not registry or not tool_names:
-        return [], None
-
-    definitions = registry.list_definitions(names=tool_names)
-    sandbox_session_id = context.params.sandbox_session_id or context.extras.get(
-        "sandbox_session_id"
-    )
-
-    async def execute(name: str, arguments: dict[str, Any]) -> Any:
-        entry = registry.get(name)
+    agent_name: str = "",
+) -> list[ToolBinding]:
+    """Fallback when registry is a plain ToolRegistry, not a ToolCatalog."""
+    ctx_values = _build_context_values(context)
+    if agent_name:
+        ctx_values["caller_agent"] = agent_name
+    bindings: list[ToolBinding] = []
+    for ref in mode_tools:
+        entry = registry.get(ref.name)
         if entry is None:
-            return {"error": f"Tool '{name}' not found"}
-        fn, _ = entry
-        merged = dict(arguments)
-        if name in ("python", "bash") and sandbox_session_id:
-            merged.setdefault("session_id", sandbox_session_id)
-        return await fn(merged)
+            continue
+        fn, base_def = entry
+        definition = base_def
+        if ref.description:
+            definition = base_def.model_copy(update={"description": ref.description})
 
-    return definitions, execute
+        cfg_dict = ref.config or {}
+        inject_map = ref.inject or {}
+
+        async def bound_execute(
+            args: dict[str, Any],
+            _fn: Any = fn,
+            _cfg: dict[str, Any] = cfg_dict,
+            _inj: dict[str, str] = inject_map,
+            _ctx: dict[str, Any] = ctx_values,
+        ) -> Any:
+            merged = {**_cfg, **args}
+            for arg_name, ctx_key in _inj.items():
+                if arg_name not in merged:
+                    val = _ctx.get(ctx_key)
+                    if val is not None:
+                        merged[arg_name] = val
+            if "caller_agent" in _ctx:
+                merged.setdefault("caller_agent", _ctx["caller_agent"])
+            return await _fn(merged)
+
+        bindings.append(ToolBinding(
+            definition=definition,
+            execute=bound_execute,
+            source=ref.name,
+        ))
+    return bindings
 
 
 def _truncate(value: Any, max_len: int = 500) -> str:

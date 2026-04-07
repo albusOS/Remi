@@ -24,11 +24,6 @@ export function AskView() {
   const lastSendRef = useRef<string | null>(null);
 
   useEffect(() => {
-    api.listModels().then((cfg) => {
-      setProvider(cfg.default_provider);
-      setModel(cfg.default_model);
-    }).catch(() => {});
-
     api.listManagers().then(setManagers).catch(() => {});
   }, []);
 

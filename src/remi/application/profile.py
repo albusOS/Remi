@@ -30,20 +30,6 @@ _RE_METADATA_SKIP_PATTERNS = (
     r"amount\s+owed",
 )
 
-_RE_AVAILABLE_AGENTS = {
-    "researcher": (
-        "Deep statistical analysis engine. Use for: trend analysis, regression, "
-        "clustering, anomaly detection, hypothesis testing, producing research "
-        "reports. Runs Python with pandas/scipy/sklearn and follows a phased "
-        "protocol (LOAD > EXPLORE > HYPOTHESIZE > MODEL > VALIDATE > SYNTHESIZE)."
-    ),
-    "action_planner": (
-        "Action item generator. Use for: analyzing a manager's property data "
-        "and proposing prioritized, concrete action items. Receives a JSON "
-        "payload with manager context and returns structured action plans."
-    ),
-}
-
 _RE_TOOL_HINTS = {
     "semantic_search": (
         "Finds tenants, units, properties, maintenance requests, and individual "
@@ -100,7 +86,6 @@ def build_re_profile() -> DomainProfile:
         empty_state_label="data",
         scope_entity_type="PropertyManager",
         tool_hints=dict(_RE_TOOL_HINTS),
-        available_agents=dict(_RE_AVAILABLE_AGENTS),
         api_path_examples=_RE_API_PATH_EXAMPLES,
         sdk_hint=_RE_SDK_HINT,
         section_labels=_RE_SECTION_LABELS,

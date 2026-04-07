@@ -19,24 +19,23 @@ import structlog
 from remi.agent.config import AgentConfig
 from remi.agent.context.builder import _find_tail_inject_point
 from remi.agent.context.frame import WorldState
-from remi.agent.context.intent import classify_intent
 from remi.agent.context.rendering import (
     extract_signal_references,
     render_domain_context,
 )
 from remi.agent.llm.types import LLMProvider, estimate_cost
+from remi.agent.memory import MemoryStore
+from remi.agent.memory.extraction import extract_episode
 from remi.agent.observe.types import SpanKind, Tracer, get_current_trace_id
 from remi.agent.runtime.base import BaseModule, Message, ModuleOutput
 from remi.agent.runtime.conversation.thread import (
     build_initial_thread,
     format_output,
-    last_assistant_content,
     trim_thread,
 )
 from remi.agent.runtime.deps import OnEventCallback, RuntimeContext, ScopeContext
-from remi.agent.runtime.llm_bridge import OnEventCallback as _OnEvent  # noqa: F811,F401
 from remi.agent.runtime.loop import run_agent_loop
-from remi.agent.runtime.tool_executor import ToolExecutor, build_tool_set
+from remi.agent.runtime.tool_executor import ToolExecutor, resolve_agent_tools
 from remi.agent.workspace import inject_workspace, load_workspace
 from remi.agent.workspace.flush import flush_before_trim
 
@@ -110,7 +109,7 @@ class AgentNode(BaseModule):
                 routing_provider = _resolve_provider(routing_name, context)
             else:
                 routing_provider = provider
-        tool_defs, tool_execute = build_tool_set(cfg, context, mode=mode)
+        bindings = resolve_agent_tools(cfg, context, mode=mode)
         memory = context.deps.memory_store or context.extras.get("memory_store")
         _raw_emit = context.params.on_event or context.extras.get("on_event") or _noop_event
         emit: OnEventCallback = _raw_emit  # type: ignore[assignment]
@@ -129,27 +128,13 @@ class AgentNode(BaseModule):
             world=world,
         )
 
-        injection_phases: set[str] = {"graph", "memory"}
         max_tool_rounds: int | None = None
         user_question = _extract_user_question(thread)
-        intent_result = classify_intent(user_question, cfg.intents)
-        intent_name: str | None = None
-        if intent_result is not None:
-            intent_name, intent_cfg = intent_result
-            injection_phases = set(intent_cfg.context_injection) - {"domain"}
 
-            if intent_name == "conversation":
-                tool_defs, tool_execute = [], None
-                max_tool_rounds = 0
-            else:
-                if intent_cfg.tools:
-                    allowed = set(intent_cfg.tools)
-                    tool_defs = [td for td in tool_defs if td.name in allowed]
-                if intent_cfg.max_tool_rounds is not None:
-                    max_tool_rounds = intent_cfg.max_tool_rounds
-
-            if intent_cfg.max_iterations is not None:
-                cfg = cfg.model_copy(update={"max_iterations": intent_cfg.max_iterations})
+        # Skip expensive graph/memory injection when the agent has no tools
+        # (pure conversation) or the message is trivially short.
+        needs_enrichment = bool(bindings) and _needs_context(user_question)
+        injection_phases: set[str] = {"graph", "memory"} if needs_enrichment else set()
 
         log = logger.bind(
             run_id=context.run_id,
@@ -157,17 +142,15 @@ class AgentNode(BaseModule):
             mode=mode,
             provider=cfg.provider,
             model=cfg.model,
-            intent=intent_name,
         )
         log.info(
             "agent_run_start",
             max_iterations=cfg.max_iterations,
-            tool_count=len(tool_defs),
-            intent=intent_name,
+            tool_count=len(bindings),
             injection_phases=sorted(injection_phases),
         )
 
-        tool_executor = ToolExecutor(tool_defs, tool_execute, tracer, log)
+        tool_executor = ToolExecutor.from_bindings(bindings, tracer, log)
 
         sandbox_for_flush = context.extras.get("sandbox")
         flush_sid = context.params.sandbox_session_id
@@ -213,18 +196,19 @@ class AgentNode(BaseModule):
                 ):
                     pass
 
-            async def _load_memory() -> str | None:
-                if not (needs_memory and memory and cfg.memory.auto_load and cfg.memory.namespace):
+            recall_service = context.deps.recall_service
+            scope_entity_ids = (
+                [context.scope.entity_id] if context.scope.entity_id else None
+            )
+
+            async def _recall_memory() -> str | None:
+                if not (needs_memory and recall_service and cfg.memory.auto_load):
                     return None
-                keys = await memory.list_keys(cfg.memory.namespace)
-                if not keys:
-                    return None
-                entries: list[str] = []
-                for key in keys[:10]:
-                    val = await memory.recall(cfg.memory.namespace, key)
-                    if val is not None:
-                        entries.append(f"- {key}: {val}")
-                return "\n".join(entries) if entries else None
+                entries = await recall_service.recall(
+                    user_question,
+                    entity_ids=scope_entity_ids,
+                )
+                return recall_service.render(entries)
 
             if ctx_builder is not None and needs_graph:
                 frame, memory_text = await asyncio.gather(
@@ -234,19 +218,25 @@ class AgentNode(BaseModule):
                         phases=injection_phases,
                         world=world,
                     ),
-                    _load_memory(),
+                    _recall_memory(),
                 )
                 ctx_builder.inject_into_thread(thread, frame)
             else:
-                memory_text = await _load_memory()
+                memory_text = await _recall_memory()
 
             if memory_text:
                 _insert_before_last_user(
                     thread,
-                    Message(role="system", content=f"Past context:\n{memory_text}"),
+                    Message(role="system", content=memory_text),
                 )
 
             usage_ledger = context.deps.usage_ledger or context.extras.get("usage_ledger")
+
+            try:
+                caps = provider.model_capabilities(cfg.model or "")
+                context_budget = caps.context_window
+            except Exception:
+                context_budget = 0
 
             thread, run_usage = await run_agent_loop(
                 cfg=cfg,
@@ -261,6 +251,7 @@ class AgentNode(BaseModule):
                 usage_ledger=usage_ledger,
                 memory=memory,
                 memory_namespace=cfg.memory.namespace,
+                context_budget=context_budget,
             )
 
             final = format_output(thread, cfg)
@@ -277,7 +268,6 @@ class AgentNode(BaseModule):
             )
 
             done_payload: dict[str, Any] = {
-                "response": last_assistant_content(thread) or "",
                 "usage": run_usage.to_dict(),
                 "model": cfg.model,
                 "provider": cfg.provider,
@@ -285,8 +275,6 @@ class AgentNode(BaseModule):
                 "trace_id": get_current_trace_id(),
                 "cache_hit_ratio": round(cache_ratio, 3),
             }
-            if intent_name:
-                done_payload["intent"] = intent_name
             if cost is not None:
                 done_payload["cost"] = round(cost, 6)
             await emit("done", done_payload)
@@ -294,7 +282,6 @@ class AgentNode(BaseModule):
             log.info(
                 "agent_run_done",
                 latency_ms=latency_ms,
-                intent=intent_name,
                 prompt_tokens=run_usage.prompt_tokens,
                 completion_tokens=run_usage.completion_tokens,
                 total_tokens=run_usage.total_tokens,
@@ -321,10 +308,10 @@ class AgentNode(BaseModule):
                 ):
                     pass
 
-            if memory and cfg.memory.auto_save and cfg.memory.namespace and thread:
-                last = last_assistant_content(thread)
-                if last is not None:
-                    await memory.store(cfg.memory.namespace, context.run_id, last)
+            if memory and cfg.memory.auto_save and thread:
+                asyncio.create_task(
+                    _safe_extract(thread, memory, provider, context.run_id, cfg.name or ""),
+                )
 
             run_metadata: dict[str, Any] = {
                 "model": cfg.model,
@@ -340,6 +327,22 @@ class AgentNode(BaseModule):
                 contract=cfg.output_contract,
                 metadata=run_metadata,
             )
+
+
+async def _safe_extract(
+    thread: list[Message],
+    store: MemoryStore,
+    provider: LLMProvider,
+    run_id: str,
+    agent_name: str,
+) -> None:
+    """Fire-and-forget episode extraction — never raises."""
+    try:
+        await extract_episode(
+            thread, store, provider, run_id=run_id, agent_name=agent_name,
+        )
+    except Exception:
+        logger.warning("episode_extraction_background_failed", run_id=run_id, exc_info=True)
 
 
 def _insert_before_last_user(thread: list[Message], msg: Message) -> None:
@@ -358,6 +361,21 @@ def _extract_user_question(thread: list[Message]) -> str | None:
         if msg.role == "user" and msg.content:
             return str(msg.content)
     return None
+
+
+_TRIVIAL_MAX_WORDS = 6
+
+
+def _needs_context(question: str | None) -> bool:
+    """Cheap gate: skip graph/memory injection for trivially short messages.
+
+    Returns ``False`` for greetings, "thanks", single-word messages, etc.
+    — avoiding KG lookups and memory recall on messages that don't need them.
+    """
+    if not question:
+        return False
+    words = question.split()
+    return len(words) > _TRIVIAL_MAX_WORDS
 
 
 def _resolve_provider(provider_name: str | None, context: RuntimeContext) -> LLMProvider:

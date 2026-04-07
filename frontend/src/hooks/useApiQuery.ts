@@ -1,52 +1,53 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useRef } from "react";
 
+/**
+ * Drop-in replacement backed by TanStack Query.
+ *
+ * Preserves the original `{ data, loading, error, refetch, setData }` shape
+ * so every consumer works without changes, while gaining caching,
+ * deduplication, stale-while-revalidate, and background refetch.
+ */
 export function useApiQuery<T>(
   fetcher: () => Promise<T>,
   deps: ReadonlyArray<unknown> = [],
 ) {
   const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
 
-  useEffect(() => {
-    fetcherRef.current = fetcher;
-  }, [fetcher]);
+  const queryKey = ["api", ...deps];
 
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, isLoading, error, refetch: tqRefetch } = useQuery<T, Error>({
+    queryKey,
+    queryFn: () => fetcherRef.current(),
+  });
+
+  const queryClient = useQueryClient();
 
   const refetch = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    setRefreshKey((k) => k + 1);
-  }, []);
+    tqRefetch();
+  }, [tqRefetch]);
 
-  // Serialize deps to a stable string key to avoid spread in dependency array
-  const depsKey = JSON.stringify(deps);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetcherRef.current()
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setData(null);
-          setError(err instanceof Error ? err : new Error("Request failed"));
+  const setData = useCallback(
+    (updater: T | ((prev: T | null) => T)) => {
+      queryClient.setQueryData<T>(queryKey, (old) => {
+        if (typeof updater === "function") {
+          return (updater as (prev: T | null) => T)(old ?? null);
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        return updater;
       });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queryClient, JSON.stringify(queryKey)],
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey, depsKey]);
-
-  return { data, loading, error, refetch, setData };
+  return {
+    data: data ?? null,
+    loading: isLoading,
+    error: error ?? null,
+    refetch,
+    setData,
+  };
 }

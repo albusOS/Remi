@@ -2,11 +2,10 @@
 
 Where DomainTBox declares "what things mean" (signals, thresholds, policies),
 DomainProfile declares "how to operate on them" — name fields for retrieval,
-parser patterns for ingestion, tool description hints, agent workforce
-manifests, and empty-state labels.
+parser patterns for ingestion, tool description hints, and empty-state labels.
 
 The type lives in ``agent/`` so the agent layer can depend on it.
-The builder lives in the domain layer (e.g. ``domain/profile.py``).
+The builder lives in ``application/profile.py`` (``build_re_profile``).
 The container wires builder → profile → consumers.
 """
 
@@ -40,9 +39,6 @@ class DomainProfile:
 
     tool_hints: dict[str, str] = field(default_factory=dict)
     """Tool-name → supplemental description text appended to the generic description."""
-
-    available_agents: dict[str, str] = field(default_factory=dict)
-    """Agent workforce: name → description for the delegation tool."""
 
     api_path_examples: str = ""
     """Example API paths appended to the http_request tool description."""

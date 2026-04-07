@@ -9,6 +9,9 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
 import { CommandTrigger } from "@/components/ui/CommandMenu";
+import { OccupancyRing } from "./OccupancyRing";
+import { AlertChip } from "./AlertChip";
+import { ManagerCard } from "./ManagerCard";
 import type {
   DashboardOverview,
   ManagerOverview,
@@ -26,132 +29,12 @@ const MANAGER_FIELDS: FieldDef[] = [
   { name: "phone", label: "Phone", placeholder: "(555) 123-4567" },
 ];
 
-function OccupancyRing({ rate, size = 140 }: { rate: number; size?: number }) {
-  const stroke = 10;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const filled = circumference * rate;
-  const color = rate >= 0.95 ? "stroke-ok" : rate >= 0.9 ? "stroke-warn" : "stroke-error";
-
-  return (
-    <div className="relative ring-pulse" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2} cy={size / 2} r={radius}
-          fill="none" stroke="currentColor" strokeWidth={stroke}
-          className="text-border-subtle"
-        />
-        <circle
-          cx={size / 2} cy={size / 2} r={radius}
-          fill="none" strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={`${filled} ${circumference - filled}`}
-          className={`${color} transition-all duration-1000`}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold text-fg tracking-tight">{pct(rate)}</span>
-        <span className="text-[9px] text-fg-faint uppercase tracking-widest">occupied</span>
-      </div>
-    </div>
-  );
-}
-
-function AlertChip({
-  href, count, label, sub, color, pulse,
-}: {
-  href: string; count: number; label: string; sub?: string;
-  color: "error" | "warn" | "orange" | "sky" | "violet"; pulse?: boolean;
-}) {
-  const colors = {
-    error: "border-error/20 bg-error-soft text-error hover:border-error/40 hover:shadow-[0_0_20px_-4px_rgba(201,92,92,0.15)]",
-    warn: "border-warn/20 bg-warn-soft text-warn hover:border-warn/40 hover:shadow-[0_0_20px_-4px_rgba(212,151,78,0.15)]",
-    orange: "border-orange-500/20 bg-orange-500/5 text-orange-400 hover:border-orange-500/40 hover:shadow-[0_0_20px_-4px_rgba(249,115,22,0.15)]",
-    sky: "border-sky-500/20 bg-sky-500/5 text-sky-400 hover:border-sky-500/40 hover:shadow-[0_0_20px_-4px_rgba(14,165,233,0.15)]",
-    violet: "border-violet-500/20 bg-violet-500/5 text-violet-400 hover:border-violet-500/40 hover:shadow-[0_0_20px_-4px_rgba(139,92,246,0.15)]",
-  };
-
-  return (
-    <Link
-      href={href}
-      className={`flex-1 sm:flex-initial shrink-0 min-w-[140px] rounded-2xl border px-5 py-3.5 transition-all group card-hover ${colors[color]}`}
-    >
-      <div className="flex items-center gap-2">
-        {pulse && (
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-current" />
-          </span>
-        )}
-        <span className="text-2xl font-bold leading-none tracking-tight">{count}</span>
-      </div>
-      <p className="text-[11px] opacity-80 mt-1 font-medium">{label}</p>
-      {sub && <p className="text-[9px] opacity-50">{sub}</p>}
-    </Link>
-  );
-}
-
 function StatRow({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-border-subtle last:border-0">
       <span className="text-xs text-fg-muted">{label}</span>
       <span className={`text-sm font-semibold font-mono tracking-tight ${alert ? "text-warn" : "text-fg"}`}>{value}</span>
     </div>
-  );
-}
-
-function ManagerCard({ mgr, properties }: { mgr: ManagerOverview; properties: PropertyOverview[] }) {
-  const m = mgr.metrics;
-  const occColor = m.occupancy_rate >= 0.95 ? "text-ok" : m.occupancy_rate >= 0.9 ? "text-warn" : "text-error";
-
-  return (
-    <Link
-      href={`/managers/${mgr.manager_id}`}
-      className="rounded-2xl border border-border bg-surface p-5 card-hover group transition-all hover:border-accent/20"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-accent/10 flex items-center justify-center shrink-0 group-hover:bg-accent/20 transition-colors">
-            <span className="text-sm font-bold text-accent">{mgr.manager_name.charAt(0)}</span>
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-fg truncate group-hover:text-accent transition-colors">{mgr.manager_name}</p>
-            <p className="text-[10px] text-fg-faint">{mgr.property_count} {mgr.property_count === 1 ? "property" : "properties"}</p>
-          </div>
-        </div>
-        <svg className="w-4 h-4 text-fg-ghost group-hover:text-accent group-hover:translate-x-0.5 transition-all shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 text-center">
-        <div>
-          <p className="text-lg font-bold text-fg tracking-tight">{m.total_units}</p>
-          <p className="text-[9px] text-fg-faint uppercase tracking-widest">units</p>
-        </div>
-        <div>
-          <p className={`text-lg font-bold tracking-tight ${occColor}`}>{pct(m.occupancy_rate)}</p>
-          <p className="text-[9px] text-fg-faint uppercase tracking-widest">occupied</p>
-        </div>
-        <div>
-          <p className="text-lg font-bold text-fg tracking-tight">{fmt$(m.total_actual_rent)}</p>
-          <p className="text-[9px] text-fg-faint uppercase tracking-widest">rent</p>
-        </div>
-      </div>
-
-      {(m.loss_to_lease > 0 || m.open_maintenance > 0 || m.expiring_leases_90d > 0) && (
-        <div className="flex gap-3 mt-3 pt-3 border-t border-border-subtle flex-wrap">
-          {m.loss_to_lease > 0 && (
-            <span className="text-[10px] text-warn">{fmt$(m.loss_to_lease)} LTL</span>
-          )}
-          {m.open_maintenance > 0 && (
-            <span className="text-[10px] text-sky-400">{m.open_maintenance} maint</span>
-          )}
-          {m.expiring_leases_90d > 0 && (
-            <span className="text-[10px] text-fg-muted">{m.expiring_leases_90d} expiring</span>
-          )}
-        </div>
-      )}
-    </Link>
   );
 }
 
@@ -345,7 +228,6 @@ export function Dashboard() {
         <CommandTrigger onClick={openCommandMenu} prominent />
       </div>
 
-      {/* Alerts */}
       {alerts.length > 0 && (
         <div className="flex gap-3 flex-wrap sm:flex-nowrap sm:overflow-x-auto pb-1 stagger scrollbar-none">
           {alerts.map((a) => (
@@ -354,7 +236,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Health overview — occupancy hero + financials */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 anim-fade-up" style={{ animationDelay: "100ms" }}>
         <div className="rounded-2xl border border-border bg-surface p-6 flex flex-col items-center justify-center card-hover relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent pointer-events-none" />
@@ -415,9 +296,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Visual breakdown cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 anim-fade-up" style={{ animationDelay: "200ms" }}>
-        {/* Unit composition bar */}
         {totalUnits > 0 && (() => {
           const vacant = totalUnits - totalOccupied;
           const notice = vacancies?.total_notice ?? 0;
@@ -460,7 +339,6 @@ export function Dashboard() {
           );
         })()}
 
-        {/* Lease expiry horizon */}
         {leases && leases.leases.length > 0 && (() => {
           const b30 = leases.leases.filter((l) => !l.is_month_to_month && l.days_left <= 30).length;
           const b60 = leases.leases.filter((l) => !l.is_month_to_month && l.days_left > 30 && l.days_left <= 60).length;
@@ -504,7 +382,6 @@ export function Dashboard() {
           );
         })()}
 
-        {/* Delinquency snapshot */}
         {delinquency && delinquency.total_delinquent > 0 && (() => {
           const total0_30 = delinquency.tenants.reduce((s, t) => s + t.balance_0_30, 0);
           const total30p = delinquency.tenants.reduce((s, t) => s + t.balance_30_plus, 0);
@@ -539,7 +416,6 @@ export function Dashboard() {
           );
         })()}
 
-        {/* Maintenance card */}
         {totalOpenMaint > 0 && (
           <Link href="/properties" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
             <div className="flex items-center justify-between mb-4">
@@ -569,7 +445,6 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Manager cards — primary organizational view */}
       {activeMgrs.length > 0 && (
         <div className="anim-fade-up" style={{ animationDelay: "250ms" }}>
           <div className="flex items-center justify-between mb-3">
@@ -596,7 +471,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Unassigned properties — shown separately when they exist */}
       {unassignedProps.length > 0 && (
         <div className="rounded-2xl border border-dashed border-border bg-surface/60 anim-fade-up" style={{ animationDelay: "300ms" }}>
           <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
@@ -634,7 +508,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Add manager button (when no managers exist yet) */}
       {activeMgrs.length === 0 && (
         <div className="flex gap-3 anim-fade-up" style={{ animationDelay: "250ms" }}>
           <button

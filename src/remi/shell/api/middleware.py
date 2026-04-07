@@ -49,13 +49,11 @@ class RequestIDMiddleware:
             await self.app(scope, receive, send_with_id)
         finally:
             duration_ms = round((time.monotonic() - t0) * 1000)
-            path = scope.get("path", "")
-            if not path.startswith("/ws/"):
-                _logger.info(
-                    "http_request",
-                    method=scope.get("method", ""),
-                    path=path,
-                    status=status_code,
-                    duration_ms=duration_ms,
-                )
+            _logger.info(
+                "http_request",
+                method=scope.get("method", ""),
+                path=scope.get("path", ""),
+                status=status_code,
+                duration_ms=duration_ms,
+            )
             structlog.contextvars.unbind_contextvars("request_id")

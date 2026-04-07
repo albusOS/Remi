@@ -11,7 +11,7 @@ from remi.application.core.events import (
     ChangeType,
     FieldChange,
 )
-from remi.application.infra.stores.events import InMemoryEventStore
+from remi.application.stores.events import InMemoryEventStore
 
 
 def _balance_event(entity_id: str = "tenant-carlos") -> ChangeEvent:

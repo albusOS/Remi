@@ -1,12 +1,14 @@
-"""Graph package — world model, memory store, DTOs, and retrieval utilities.
+"""Graph package — world model, entity store, DTOs, and retrieval.
+
+Agent memory has moved to ``remi.agent.memory``.
 
 Public imports::
 
-    from remi.agent.graph import WorldModel, MemoryStore, KnowledgeLink, ...
+    from remi.agent.graph import WorldModel, EntityStore, ...
 """
 
-from remi.agent.graph.factory import build_memory_store
-from remi.agent.graph.stores import MemoryStore, WorldModel
+from remi.agent.graph.factory import build_entity_store
+from remi.agent.graph.stores import EntityStore, WorldModel
 from remi.agent.graph.types import (
     AggregateResult,
     GraphLink,
@@ -14,7 +16,6 @@ from remi.agent.graph.types import (
     KnowledgeLink,
     KnowledgeProvenance,
     LinkTypeDef,
-    MemoryEntry,
     ObjectTypeDef,
     PropertyDef,
     TimelineEvent,
@@ -22,16 +23,15 @@ from remi.agent.graph.types import (
 
 __all__ = [
     "AggregateResult",
+    "EntityStore",
     "GraphLink",
     "GraphObject",
     "KnowledgeLink",
     "KnowledgeProvenance",
     "LinkTypeDef",
-    "MemoryEntry",
-    "MemoryStore",
     "ObjectTypeDef",
     "PropertyDef",
     "TimelineEvent",
     "WorldModel",
-    "build_memory_store",
+    "build_entity_store",
 ]

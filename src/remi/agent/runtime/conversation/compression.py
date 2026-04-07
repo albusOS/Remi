@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from remi.agent.graph.stores import MemoryStore
+from remi.agent.memory import MemoryStore
 
 _TOKEN_THRESHOLD = 500
 _OFFLOAD_THRESHOLD = 1500
@@ -87,7 +87,7 @@ async def compress_and_offload(
         return _summarize_structured(tool_name, result, serialized)
 
     offload_key = f"tool:{call_id}"
-    await memory.store(namespace, offload_key, serialized, ttl=3600)
+    await memory.write(namespace, offload_key, serialized, ttl=3600)
 
     summary = _summarize_structured(tool_name, result, serialized)
     summary["_offloaded"] = True

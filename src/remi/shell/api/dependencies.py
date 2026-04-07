@@ -1,23 +1,16 @@
-"""FastAPI dependency injection — Annotated type aliases.
+"""FastAPI dependency injection — re-exports from application layer.
 
-One real function: ``get_container`` pulls the Container off ``request.app.state``.
-Everything else is an ``Annotated`` alias so routers declare narrow types
-without 27 wrapper functions.
+The canonical ``Ctr`` type alias and ``get_container`` function live in
+``remi.application.dependencies``.  This module re-exports them so that
+any shell-layer code (or tests) that imported from the old location
+continues to work.
 
-Override ``get_container`` in tests to swap the whole dependency tree.
+New code should import from ``remi.application.dependencies`` directly.
 """
 
-from __future__ import annotations
+from remi.application.dependencies import Ctr, get_container
 
-from typing import Annotated
-
-from fastapi import Depends, Request
-
-from remi.shell.config.container import Container
-
-
-def get_container(request: Request) -> Container:
-    return request.app.state.container  # type: ignore[no-any-return]
-
-
-Ctr = Annotated[Container, Depends(get_container)]
+__all__ = [
+    "Ctr",
+    "get_container",
+]

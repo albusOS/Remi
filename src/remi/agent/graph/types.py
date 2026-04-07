@@ -98,14 +98,6 @@ class ObjectTypeDef(BaseModel, frozen=True):
         return tuple(p for p in self.properties if p.required)
 
 
-class MemoryEntry(BaseModel, frozen=True):
-    namespace: str
-    key: str
-    value: str
-    created_at: datetime | None = None
-    metadata: dict[str, str] = Field(default_factory=dict)
-
-
 # ---------------------------------------------------------------------------
 # Typed return models for WorldModel port methods
 # ---------------------------------------------------------------------------

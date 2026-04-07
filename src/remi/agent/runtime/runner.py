@@ -1,43 +1,40 @@
-"""ChatAgentService — run agents in single-shot or multi-turn chat.
+"""AgentRuntime — run named agents in single-shot or multi-turn chat.
 
-Supports two execution modes:
+Lean invocation facade. Loads agent configs from YAML manifests, builds
+runtime contexts, and delegates execution to ``AgentNode``. Session
+state management lives in ``AgentSessions`` — this module only invokes.
 
-  Single-node (kind: Agent, single module):
-    ``ask`` / ``run_chat_agent`` run one AgentNode directly.
-
-  Graph (kind: Agent, multiple modules + edges):
-    ``ask`` walks the module graph in topological order.  Each module's
-    ``ModuleOutput.value`` is forwarded to downstream modules as their
-    ``input``.  The final node's output is returned as the answer.
-
-    Module kinds supported in YAML:
-      - ``input``  — InputModule, pass-through entry point
-      - ``agent``  — AgentNode, full LLM loop
+The old ``_run_graph`` (multi-module DAG inside app.yaml) is gone.
+Multi-step orchestration belongs in the workflow engine, which now
+supports ``kind: agent`` steps natively.
 """
 
 from __future__ import annotations
 
 import json
-from collections import defaultdict, deque
 from typing import Any, Literal, Protocol
 
 import structlog
 import yaml
 
 from remi.agent.context.builder import ContextBuilder
-from remi.agent.graph.stores import MemoryStore
 from remi.agent.llm.factory import LLMProviderFactory
+from remi.agent.memory import MemoryStore
+from remi.agent.memory.recall import MemoryRecallService
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
-from remi.agent.runtime.base import InputModule, Message, ModuleOutput
+from remi.agent.runtime.base import ModuleOutput
+from remi.agent.runtime.config import RuntimeConfig
 from remi.agent.runtime.deps import RunDeps, RunParams, RuntimeContext, ScopeContext
 from remi.agent.runtime.node import AgentNode
 from remi.agent.runtime.retry import RetryPolicy
+from remi.agent.runtime.sessions import AgentSessions
 from remi.agent.sandbox.types import Sandbox
 from remi.agent.signals import DomainTBox
-from remi.agent.types import ChatSession, ChatSessionStore, ToolRegistry
+from remi.agent.types import ChatSessionStore
 from remi.agent.types import Message as ChatMessage
-from remi.agent.workflow.loader import get_agents_dir
+from remi.agent.types import ToolRegistry
+from remi.agent.workflow.registry import get_manifest_path
 from remi.types.errors import SessionNotFoundError
 from remi.types.ids import new_run_id
 
@@ -52,8 +49,12 @@ class EventCallback(Protocol):
     ) -> None: ...
 
 
-class ChatAgentService:
-    """Runs any named agent for single-shot /ask and multi-turn chat."""
+class AgentRuntime:
+    """Runs any named agent — stateless or session-aware.
+
+    ``ask()`` is the single entry point.  Pass ``session_id`` for
+    session-aware multi-turn; omit it for stateless single-shot.
+    """
 
     def __init__(
         self,
@@ -69,6 +70,7 @@ class ChatAgentService:
         default_model: str,
         context_builder: ContextBuilder | None = None,
         usage_ledger: LLMUsageLedger | None = None,
+        recall_service: MemoryRecallService | None = None,
     ) -> None:
         self._provider_factory = provider_factory
         self._tool_registry = tool_registry
@@ -76,134 +78,199 @@ class ChatAgentService:
         self._domain_tbox = domain_tbox
         self._memory_store = memory_store
         self._tracer = tracer
-        self._chat_session_store = chat_session_store
         self._retry = retry_policy
         self._default_provider = default_provider
         self._default_model = default_model
         self._context_builder = context_builder
         self._usage_ledger = usage_ledger
+        self._recall_service = recall_service
 
-    def _load_app_yaml(self, agent_name: str) -> dict[str, Any]:
-        """Load and return the raw app.yaml for an agent."""
-        app_path = get_agents_dir() / agent_name / "app.yaml"
+        self.sessions = AgentSessions(chat_session_store)
+
+    def get_runtime_config(self, agent_name: str) -> RuntimeConfig:
+        """Return the ``RuntimeConfig`` for a registered agent manifest."""
+        from remi.agent.workflow.loader import load_manifest_runtime
+
+        return load_manifest_runtime(agent_name)
+
+    # -- Public API --------------------------------------------------------
+
+    async def ask(
+        self,
+        agent_name: str,
+        question: str,
+        *,
+        session_id: str | None = None,
+        mode: Literal["ask", "agent"] = "agent",
+        on_event: EventCallback | None = None,
+    ) -> tuple[str | None, str]:
+        """Run an agent. Returns ``(answer, run_id)``.
+
+        When *session_id* is provided the session thread is loaded,
+        the question appended, and the reply persisted — multi-turn.
+        When omitted the agent runs stateless with an ephemeral sandbox.
+        """
+        if session_id is not None:
+            return await self._ask_session(
+                session_id, question, mode=mode, on_event=on_event,
+            )
+        return await self._ask_stateless(
+            agent_name, question, mode=mode, on_event=on_event,
+        )
+
+    async def run_chat_agent(
+        self,
+        agent_name: str,
+        thread: list[Any],
+        on_event: EventCallback | None = None,
+        *,
+        sandbox_session_id: str | None = None,
+        mode: Literal["ask", "agent"] = "agent",
+        provider: str | None = None,
+        model: str | None = None,
+        scope: ScopeContext | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> str:
+        """Low-level: execute an agent over an explicit message thread."""
+        config_dict, _runtime_cfg = self._load_agent_config(agent_name)
+        config_dict["name"] = agent_name
+        run_id = new_run_id()
+
+        log = logger.bind(run_id=run_id, agent=agent_name, mode=mode)
+        log.info("agent_run_start", thread_length=len(thread), provider=provider, model=model)
+
+        sid = sandbox_session_id or f"chat-{run_id}"
+        await self._ensure_sandbox_session(sid, mode=mode)
+
+        params = RunParams(
+            mode=mode,
+            sandbox_session_id=sid,
+            on_event=on_event,
+            provider_name=provider,
+            model_name=model,
+        )
+        ctx = self._build_context(run_id=run_id, params=params, scope=scope, extra=extra)
+
+        thread_msgs: list[dict[str, Any]] = []
+        for msg in thread:
+            if isinstance(msg, ChatMessage):
+                thread_msgs.append(msg.model_dump())
+            elif isinstance(msg, dict):
+                thread_msgs.append(msg)
+            else:
+                thread_msgs.append({"role": "user", "content": str(msg)})
+
+        node = AgentNode(config=config_dict)
+        output: ModuleOutput = await self._retry.execute(
+            node.run,
+            {"thread": thread_msgs},
+            ctx,
+        )
+
+        answer = _extract_answer(output.value) or ""
+        log.info(
+            "agent_run_done",
+            answer_length=len(answer),
+            usage=output.metadata.get("usage"),
+            cost=output.metadata.get("cost"),
+        )
+        return answer
+
+    # -- Private paths -----------------------------------------------------
+
+    async def _ask_stateless(
+        self,
+        agent_name: str,
+        question: str,
+        *,
+        mode: Literal["ask", "agent"],
+        on_event: EventCallback | None,
+    ) -> tuple[str | None, str]:
+        """Ephemeral single-shot — sandbox created and destroyed per call."""
+        run_id = new_run_id()
+        log = logger.bind(run_id=run_id, agent=agent_name, mode=mode)
+        log.info("ask_start", question_length=len(question))
+
+        sandbox_sid = f"ask-{run_id}"
+        await self._ensure_sandbox_session(sandbox_sid, mode=mode)
+
+        params = RunParams(mode=mode, sandbox_session_id=sandbox_sid, on_event=on_event)
+        ctx = self._build_context(run_id=run_id, params=params)
+
+        try:
+            config_dict, _runtime_cfg = self._load_agent_config(agent_name)
+            config_dict["name"] = agent_name
+            node = AgentNode(config=config_dict)
+            output = await self._retry.execute(node.run, {"input": question}, ctx)
+
+            answer = _extract_answer(output.value)
+            log.info(
+                "ask_done",
+                answer_length=len(answer) if answer else 0,
+                usage=output.metadata.get("usage"),
+                cost=output.metadata.get("cost"),
+            )
+            return (answer, run_id)
+        finally:
+            await self._sandbox.destroy_session(sandbox_sid)
+
+    async def _ask_session(
+        self,
+        session_id: str,
+        question: str,
+        *,
+        mode: Literal["ask", "agent"],
+        on_event: EventCallback | None,
+    ) -> tuple[str | None, str]:
+        """Session-aware multi-turn — loads thread, persists reply."""
+        session = await self.sessions.get(session_id)
+        if session is None:
+            raise SessionNotFoundError(session_id)
+
+        await self.sessions.append_message(
+            session_id,
+            ChatMessage(role="user", content=question),
+        )
+        refreshed = await self.sessions.get(session_id)
+        thread = list(refreshed.thread) if refreshed else []
+
+        answer = await self.run_chat_agent(
+            session.agent,
+            thread,
+            on_event,
+            sandbox_session_id=session.sandbox_session_id,
+            mode=mode,
+            provider=session.provider,
+            model=session.model,
+        )
+
+        await self.sessions.append_message(
+            session_id,
+            ChatMessage(role="assistant", content=answer),
+        )
+        run_id = new_run_id()
+        return (answer, run_id)
+
+    # -- Internal helpers --------------------------------------------------
+
+    def _load_agent_config(
+        self,
+        agent_name: str,
+    ) -> tuple[dict[str, Any], RuntimeConfig]:
+        """Load agent module config and runtime topology from app.yaml."""
+        app_path = get_manifest_path(agent_name)
         if not app_path.exists():
             raise ValueError(f"Unknown agent: {agent_name!r} (looked in {app_path})")
-        with open(app_path) as f:
-            return yaml.safe_load(f)  # type: ignore[no-any-return]
+        from remi.agent.workflow.loader import load_manifest_runtime
 
-    def _load_agent_config(self, agent_name: str) -> dict[str, Any]:
-        """Load the first agent module config — used by run_chat_agent (single-node path)."""
-        data = self._load_app_yaml(agent_name)
+        runtime_cfg = load_manifest_runtime(agent_name, manifest_path=app_path)
+        with open(app_path) as f:
+            data: dict[str, Any] = yaml.safe_load(f)
         for module in data.get("modules", []):
             if module.get("kind") == "agent":
                 cfg: dict[str, Any] = module.get("config", {})
-                return cfg
-        raise ValueError(f"No agent module found in application/agents/{agent_name}/app.yaml")
-
-    def _is_graph(self, data: dict[str, Any]) -> bool:
-        """True when the YAML declares more than one module (i.e. a graph)."""
-        return len(data.get("modules", [])) > 1
-
-    def _topo_order(
-        self,
-        modules: list[dict[str, Any]],
-        edges: list[dict[str, Any]],
-    ) -> list[str]:
-        """Return module ids in topological execution order via Kahn's algorithm."""
-        in_degree: dict[str, int] = {m["id"]: 0 for m in modules}
-        adjacency: dict[str, list[str]] = defaultdict(list)
-        for edge in edges:
-            src, dst = edge["from"], edge["to"]
-            adjacency[src].append(dst)
-            in_degree[dst] = in_degree.get(dst, 0) + 1
-
-        queue: deque[str] = deque(mid for mid, deg in in_degree.items() if deg == 0)
-        order: list[str] = []
-        while queue:
-            node_id = queue.popleft()
-            order.append(node_id)
-            for downstream in adjacency[node_id]:
-                in_degree[downstream] -= 1
-                if in_degree[downstream] == 0:
-                    queue.append(downstream)
-
-        if len(order) != len(modules):
-            raise ValueError("Cycle detected in agent graph")
-        return order
-
-    async def _run_graph(
-        self,
-        agent_name: str,
-        data: dict[str, Any],
-        initial_input: str,
-        context: RuntimeContext,
-    ) -> ModuleOutput:
-        """Execute the module graph in topological order.
-
-        Each module receives the accumulated outputs of all its upstream
-        predecessors merged into its ``inputs`` dict under the key ``input``.
-        The last module's ``ModuleOutput`` is returned.
-        """
-        modules_by_id: dict[str, dict[str, Any]] = {m["id"]: m for m in data.get("modules", [])}
-        edges: list[dict[str, Any]] = data.get("edges", [])
-        order = self._topo_order(list(modules_by_id.values()), edges)
-
-        # predecessors[node_id] = list of node_ids whose output feeds it
-        predecessors: dict[str, list[str]] = defaultdict(list)
-        for edge in edges:
-            predecessors[edge["to"]].append(edge["from"])
-
-        outputs: dict[str, ModuleOutput] = {}
-        last_output: ModuleOutput = ModuleOutput(value=initial_input)
-
-        for module_id in order:
-            module_def = modules_by_id[module_id]
-            kind = module_def.get("kind", "agent")
-            cfg = module_def.get("config", {})
-            cfg["name"] = module_id
-
-            # Build inputs: merge all upstream outputs
-            if predecessors[module_id]:
-                # Use the last predecessor's value as primary input; attach
-                # all predecessor outputs as context under their ids.
-                upstream_values = {
-                    pred_id: outputs[pred_id].value
-                    for pred_id in predecessors[module_id]
-                    if pred_id in outputs
-                }
-                primary_pred = predecessors[module_id][-1]
-                primary_value = outputs[primary_pred].value
-                node_inputs: dict[str, Any] = {
-                    "input": primary_value,
-                    "context": upstream_values,
-                }
-            else:
-                node_inputs = {"input": initial_input}
-
-            if kind == "input":
-                module = InputModule(config=cfg)
-                last_output = await module.run(node_inputs, context)
-            elif kind == "agent":
-                module_node = AgentNode(config=cfg)
-                last_output = await self._retry.execute(module_node.run, node_inputs, context)
-            else:
-                logger.warning(
-                    "unknown_module_kind",
-                    kind=kind,
-                    module_id=module_id,
-                    agent=agent_name,
-                )
-                last_output = ModuleOutput(value=node_inputs.get("input"))
-
-            outputs[module_id] = last_output
-            logger.info(
-                "graph_module_done",
-                agent=agent_name,
-                module_id=module_id,
-                kind=kind,
-            )
-
-        return last_output
+                return cfg, runtime_cfg
+        raise ValueError(f"No agent module found in {app_path}")
 
     def _build_context(
         self,
@@ -219,6 +286,7 @@ class ChatAgentService:
             tracer=self._tracer,
             usage_ledger=self._usage_ledger,
             memory_store=self._memory_store,
+            recall_service=self._recall_service,
             domain_tbox=self._domain_tbox,
             context_builder=self._context_builder,
             default_provider=self._default_provider,
@@ -242,187 +310,12 @@ class ChatAgentService:
         *,
         mode: Literal["ask", "agent"] = "agent",
     ) -> None:
-        """Create sandbox session if it doesn't exist yet."""
         session = await self._sandbox.get_session(session_id)
         if session is None:
             await self._sandbox.create_session(
                 session_id,
                 extra_env={"REMI_MODE": mode},
             )
-
-    async def ask(
-        self,
-        agent_name: str,
-        question: str,
-        *,
-        mode: Literal["ask", "agent"] = "agent",
-        on_event: EventCallback | None = None,
-    ) -> tuple[str | None, str]:
-        """Single-shot agent invocation. Returns (answer, run_id).
-
-        Automatically selects graph execution when the YAML declares multiple
-        modules + edges, otherwise runs a single AgentNode.
-        """
-        data = self._load_app_yaml(agent_name)
-        run_id = new_run_id()
-
-        log = logger.bind(run_id=run_id, agent=agent_name, mode=mode, method="ask")
-        log.info("ask_start", question_length=len(question), graph=self._is_graph(data))
-
-        session_id = f"ask-{run_id}"
-        await self._ensure_sandbox_session(session_id, mode=mode)
-
-        params = RunParams(mode=mode, sandbox_session_id=session_id, on_event=on_event)
-        ctx = self._build_context(run_id=run_id, params=params)
-
-        try:
-            if self._is_graph(data):
-                output = await self._run_graph(agent_name, data, question, ctx)
-            else:
-                config_dict = self._load_agent_config(agent_name)
-                config_dict["name"] = agent_name
-                node = AgentNode(config=config_dict)
-                output = await self._retry.execute(node.run, {"input": question}, ctx)
-
-            answer = _extract_answer(output.value)
-            log.info(
-                "ask_done",
-                answer_length=len(answer) if answer else 0,
-                usage=output.metadata.get("usage"),
-                cost=output.metadata.get("cost"),
-            )
-            return (answer, run_id)
-        finally:
-            await self._sandbox.destroy_session(session_id)
-
-    async def run_chat_agent(
-        self,
-        agent_name: str,
-        thread: list[Any],
-        on_event: EventCallback | None = None,
-        *,
-        sandbox_session_id: str | None = None,
-        mode: Literal["ask", "agent"] = "agent",
-        provider: str | None = None,
-        model: str | None = None,
-        scope: ScopeContext | None = None,
-        extra: dict[str, Any] | None = None,
-    ) -> str:
-        """Multi-turn agent execution over a message thread."""
-        config_dict = self._load_agent_config(agent_name)
-        config_dict["name"] = agent_name
-        run_id = new_run_id()
-
-        log = logger.bind(run_id=run_id, agent=agent_name, mode=mode, method="chat")
-        log.info("chat_run_start", thread_length=len(thread), provider=provider, model=model)
-
-        session_id = sandbox_session_id or f"chat-{run_id}"
-        await self._ensure_sandbox_session(session_id, mode=mode)
-
-        params = RunParams(
-            mode=mode,
-            sandbox_session_id=session_id,
-            on_event=on_event,
-            provider_name=provider,
-            model_name=model,
-        )
-        ctx = self._build_context(run_id=run_id, params=params, scope=scope, extra=extra)
-
-        thread_msgs: list[dict[str, Any]] = []
-        for msg in thread:
-            if isinstance(msg, Message):
-                thread_msgs.append(msg.model_dump())
-            elif isinstance(msg, dict):
-                thread_msgs.append(msg)
-            else:
-                thread_msgs.append({"role": "user", "content": str(msg)})
-
-        node = AgentNode(config=config_dict)
-        output: ModuleOutput = await self._retry.execute(
-            node.run,
-            {"thread": thread_msgs},
-            ctx,
-        )
-
-        answer = _extract_answer(output.value) or ""
-        log.info(
-            "chat_run_done",
-            answer_length=len(answer),
-            iterations=output.metadata.get("iterations"),
-            usage=output.metadata.get("usage"),
-            cost=output.metadata.get("cost"),
-        )
-        return answer
-
-    async def chat(
-        self,
-        session_id: str,
-        question: str,
-        *,
-        mode: Literal["ask", "agent"] = "agent",
-        on_event: EventCallback | None = None,
-    ) -> str:
-        """Session-aware multi-turn chat.
-
-        Loads the session from the store, appends the user message, runs
-        the agent over the full thread, appends the assistant reply, and
-        returns the answer.  Raises ``SessionNotFoundError`` if the
-        session has been evicted or never existed.
-        """
-        session = await self._chat_session_store.get(session_id)
-        if session is None:
-            raise SessionNotFoundError(session_id)
-
-        await self._chat_session_store.append_message(
-            session_id,
-            ChatMessage(role="user", content=question),
-        )
-        refreshed = await self._chat_session_store.get(session_id)
-        thread = list(refreshed.thread) if refreshed else []
-
-        answer = await self.run_chat_agent(
-            session.agent,
-            thread,
-            on_event,
-            sandbox_session_id=session.sandbox_session_id,
-            mode=mode,
-            provider=session.provider,
-            model=session.model,
-        )
-
-        await self._chat_session_store.append_message(
-            session_id,
-            ChatMessage(role="assistant", content=answer),
-        )
-        return answer
-
-    # -- Session CRUD (delegates to the store) --------------------------------
-
-    async def create_session(
-        self,
-        agent: str,
-        *,
-        provider: str | None = None,
-        model: str | None = None,
-    ) -> ChatSession:
-        """Create a new chat session for the given agent."""
-        return await self._chat_session_store.create(
-            agent,
-            provider=provider,
-            model=model,
-        )
-
-    async def get_session(self, session_id: str) -> ChatSession | None:
-        """Return a session by id, or None if expired / missing."""
-        return await self._chat_session_store.get(session_id)
-
-    async def list_sessions(self) -> list[ChatSession]:
-        """Return all live sessions, sorted by most-recently-updated."""
-        return await self._chat_session_store.list_sessions()
-
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session. Returns True if it existed."""
-        return await self._chat_session_store.delete(session_id)
 
 
 def _extract_answer(output: Any) -> str | None:

@@ -44,12 +44,16 @@ class DocumentRow(SQLModel, table=True):
 
 class MemoryEntryRow(SQLModel, table=True):
     __tablename__ = "memory_entries"
-    __table_args__ = (sa.Index("ix_memory_ns_key", "namespace", "key"),)
+    __table_args__ = (
+        sa.Index("ix_memory_ns_key", "namespace", "key"),
+        sa.Index("ix_memory_importance", "namespace", "importance"),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     namespace: str
     key: str
     value: str = ""
+    importance: int = 1
     ttl_seconds: int | None = None
     created_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)
     updated_at: datetime = Field(default_factory=_utcnow, sa_type=_TZDateTime)

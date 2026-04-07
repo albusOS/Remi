@@ -16,7 +16,7 @@ Features:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Protocol
 
 import structlog
 
@@ -36,6 +36,7 @@ from remi.agent.workflow.steps import (
     run_transform_step,
 )
 from remi.agent.workflow.types import (
+    AgentStepNode,
     EventCallback,
     ForEachNode,
     GateNode,
@@ -100,6 +101,24 @@ def _emit(callback: EventCallback | None, event: NodeEvent) -> None:
 # ---------------------------------------------------------------------------
 
 
+class AgentStepExecutor(Protocol):
+    """Minimal protocol for running a named agent from a workflow step.
+
+    Implemented by ``AgentRuntime`` — the workflow engine doesn't know
+    about sessions, sandbox lifecycle, or chat threads. It only needs
+    to invoke an agent by name and get back an answer.
+    """
+
+    async def ask(
+        self,
+        agent_name: str,
+        question: str,
+        *,
+        session_id: str | None = None,
+        mode: str = "agent",
+    ) -> tuple[str | None, str]: ...
+
+
 class WorkflowRunner:
     """Executes workflow DAGs with parallel scheduling."""
 
@@ -110,12 +129,18 @@ class WorkflowRunner:
         default_model: str,
         tool_registry: ToolRegistry,
         usage_ledger: LLMUsageLedger | None = None,
+        agent_executor: AgentStepExecutor | None = None,
     ) -> None:
         self._factory = provider_factory
         self._default_provider = default_provider
         self._default_model = default_model
         self._usage_ledger = usage_ledger
         self._tool_registry = tool_registry
+        self._agent_executor = agent_executor
+
+    def set_agent_executor(self, executor: AgentStepExecutor) -> None:
+        """Late-bind the agent executor (breaks the circular dep with AgentRuntime)."""
+        self._agent_executor = executor
 
     async def run(
         self,
@@ -238,6 +263,7 @@ class WorkflowRunner:
                     tool_registry=self._tool_registry,
                     workflow_name=workflow.name,
                     on_event=on_event,
+                    agent_executor=self._agent_executor,
                 )
 
             step_results[step_id] = sr
@@ -311,6 +337,7 @@ async def _dispatch_with_retry(
     tool_registry: ToolRegistry,
     workflow_name: str,
     on_event: EventCallback | None,
+    agent_executor: AgentStepExecutor | None = None,
 ) -> StepResult:
     """Dispatch a node with optional retry policy."""
     policy = node.retry
@@ -332,6 +359,7 @@ async def _dispatch_with_retry(
                 output_schemas=output_schemas,
                 tool_registry=tool_registry,
                 workflow_name=workflow_name,
+                agent_executor=agent_executor,
             )
         except Exception as exc:
             if policy and attempt < max_attempts:
@@ -361,6 +389,51 @@ async def _dispatch_with_retry(
 
 
 # ---------------------------------------------------------------------------
+# Tool resolution for llm_tools steps
+# ---------------------------------------------------------------------------
+
+
+def _resolve_tools_for_step(
+    node: LLMToolsNode,
+    tool_definitions: list[ToolDefinition] | None,
+    tool_execute: ToolExecuteFn | None,
+    tool_registry: ToolRegistry,
+) -> tuple[list[ToolDefinition], ToolExecuteFn]:
+    """Resolve tool definitions and executor for an llm_tools step.
+
+    If the caller supplied ``tool_execute``, filter definitions by the
+    step's declared tool names and use the caller's executor. Otherwise,
+    auto-build both from the shared ``ToolRegistry`` using flat name
+    lookups (workflow steps don't carry per-tool ``ToolRef`` config).
+    """
+    step_tool_names = list(node.tools)
+
+    if tool_execute is not None:
+        if step_tool_names and tool_definitions:
+            filtered = [td for td in tool_definitions if td.name in set(step_tool_names)]
+        else:
+            filtered = tool_definitions or []
+        return filtered, tool_execute
+
+    if step_tool_names and tool_registry is not None:
+        resolved_defs = tool_registry.list_definitions(names=step_tool_names)
+        if resolved_defs:
+            async def _registry_execute(name: str, arguments: dict[str, Any]) -> Any:
+                entry = tool_registry.get(name)
+                if entry is None:
+                    return {"error": f"Tool '{name}' not found in registry"}
+                fn, _ = entry
+                return await fn(arguments)
+
+            return resolved_defs, _registry_execute
+
+    raise ValueError(
+        f"Node '{node.id}' is llm_tools but no tool_execute was provided "
+        f"and tools {step_tool_names!r} could not be resolved from the registry"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Step dispatch
 # ---------------------------------------------------------------------------
 
@@ -380,6 +453,7 @@ async def _dispatch_step(
     output_schemas: OutputSchemaRegistry,
     tool_registry: ToolRegistry,
     workflow_name: str,
+    agent_executor: AgentStepExecutor | None = None,
 ) -> StepResult:
     """Route a node to its executor based on kind."""
 
@@ -397,13 +471,9 @@ async def _dispatch_step(
         )
 
     if isinstance(node, LLMToolsNode):
-        if tool_execute is None:
-            raise ValueError(f"Node '{node.id}' is llm_tools but no tool_execute was provided")
-        step_tool_names = set(node.tools)
-        if step_tool_names and tool_definitions:
-            filtered_defs = [td for td in tool_definitions if td.name in step_tool_names]
-        else:
-            filtered_defs = tool_definitions or []
+        resolved_defs, resolved_execute = _resolve_tools_for_step(
+            node, tool_definitions, tool_execute, tool_registry,
+        )
 
         return await run_llm_tools_step(
             node,
@@ -413,8 +483,8 @@ async def _dispatch_step(
             defaults,
             provider_factory,
             usage_ledger,
-            filtered_defs,
-            tool_execute,
+            resolved_defs,
+            resolved_execute,
             output_schemas,
             workflow_name=workflow_name,
         )
@@ -428,4 +498,52 @@ async def _dispatch_step(
     if isinstance(node, GateNode):
         return await run_gate_step(node, step_outputs)
 
+    if isinstance(node, AgentStepNode):
+        return await _run_agent_step(node, workflow_input, step_outputs, agent_executor)
+
     raise ValueError(f"Unknown node type: {type(node).__name__}")
+
+
+async def _run_agent_step(
+    node: AgentStepNode,
+    workflow_input: str,
+    step_outputs: dict[str, StepValue],
+    agent_executor: AgentStepExecutor | None,
+) -> StepResult:
+    """Execute a full AgentNode loop as a workflow step."""
+    if agent_executor is None:
+        raise RuntimeError(
+            f"Workflow step '{node.id}' is kind: agent but no agent_executor "
+            f"was provided to WorkflowRunner. Call set_agent_executor() or "
+            f"pass agent_executor at construction time."
+        )
+
+    from remi.agent.workflow.resolve import resolve_template
+
+    prompt = resolve_template(node.input_template, workflow_input, step_outputs)
+
+    _log.info(
+        "agent_step_start",
+        step_id=node.id,
+        agent_name=node.agent_name,
+        prompt_length=len(prompt),
+    )
+
+    answer, run_id = await agent_executor.ask(
+        node.agent_name,
+        prompt,
+        mode=node.mode,
+    )
+
+    _log.info(
+        "agent_step_done",
+        step_id=node.id,
+        agent_name=node.agent_name,
+        run_id=run_id,
+        answer_length=len(answer) if answer else 0,
+    )
+
+    return StepResult(
+        step_id=node.id,
+        value=answer or "",
+    )

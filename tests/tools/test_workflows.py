@@ -21,7 +21,7 @@ from remi.application.core.models import (
     TenantStatus,
     Unit,
 )
-from remi.application.infra.stores.mem import InMemoryPropertyStore
+from remi.application.stores.mem import InMemoryPropertyStore
 from remi.application.tools.workflows import WorkflowToolProvider
 from remi.application.views import DashboardResolver, ManagerResolver
 

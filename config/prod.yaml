@@ -18,3 +18,12 @@ api:
   host: 0.0.0.0
   port: 8000
   cors_origins: []
+  # Override via REMI_API__INTERNAL_API_URL when API and sandbox run in
+  # separate containers (e.g. Docker Compose, Kubernetes, App Platform).
+  # internal_api_url: http://api:8000
+
+sandbox:
+  # Use 'docker' in containerised production, 'local' for single-server.
+  # Override via REMI_SANDBOX__BACKEND environment variable.
+  backend: local
+  session_ttl_seconds: 3600

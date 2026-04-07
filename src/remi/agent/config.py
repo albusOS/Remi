@@ -4,39 +4,38 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolRef(BaseModel):
-    """Reference to a tool available to this agent, with optional overrides."""
+    """Reference to a tool available to this agent, with optional overrides.
+
+    ``config`` is merged into the tool arguments at resolution time — this
+    is how the same tool name gets agent-specific behavior.  ``description``
+    replaces the base tool description so the LLM sees an agent-tailored
+    version.  ``inject`` maps argument names to well-known runtime context
+    keys (e.g. ``sandbox_session_id``) that are auto-filled if not provided
+    by the LLM.
+
+    Example YAML::
+
+        tools:
+          - name: python
+            description: "Persistent Python session with remi SDK."
+            config:
+              timeout: 120
+            inject:
+              session_id: sandbox_session_id
+          - name: semantic_search
+            config:
+              default_limit: 20
+              entity_types: [Unit, Lease]
+    """
 
     name: str
     description: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
-
-
-class IntentConfig(BaseModel):
-    """Execution profile for a classified user intent.
-
-    Declared in agent YAML under ``intents:``. The intent classifier
-    selects one before the agent loop starts, narrowing tools, iterations,
-    and context injection to what that intent actually needs.
-
-    ``max_tool_rounds`` caps how many loop iterations may include tool
-    calls.  After the budget is spent the LLM gets one more call with
-    tools disabled so it always produces a text response.
-    ``max_iterations`` is retained as an optional hard safety ceiling.
-    """
-
-    description: str = ""
-    examples: list[str] = Field(default_factory=list)
-    keywords: list[str] = Field(default_factory=list)
-    tools: list[str] = Field(default_factory=list)
-    max_tool_rounds: int | None = None
-    max_iterations: int | None = None
-    context_injection: list[str] = Field(
-        default_factory=lambda: ["signals", "domain", "graph", "memory"],
-    )
+    inject: dict[str, str] = Field(default_factory=dict)
 
 
 class PhaseConfig(BaseModel):
@@ -55,6 +54,51 @@ class PhaseConfig(BaseModel):
     max_iterations: int = 5
     nudge: str = ""
     tools: list[str] = Field(default_factory=list)
+
+
+class DelegationConstraints(BaseModel):
+    """Resource budget for a delegation edge, declared in YAML.
+
+    Maps 1:1 with ``TaskConstraints`` fields but lives in the config
+    layer (Pydantic) rather than the task layer (dataclass). Use
+    ``to_task_constraints()`` to bridge when creating a ``TaskSpec``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    timeout_seconds: float | None = None
+    max_tool_rounds: int | None = None
+    max_tokens: int | None = None
+    allowed_tools: list[str] | None = None
+
+
+class DelegateRef(BaseModel):
+    """Declarative delegation edge — this agent can spawn the target.
+
+    Declared in agent YAML under ``delegates_to:``. The ``Workforce``
+    model assembles these edges into a per-parent delegation graph
+    that the delegation tool enforces at runtime and a canvas UI
+    can render and edit.
+
+    Example YAML::
+
+        delegates_to:
+          - agent: researcher
+            description: "Deep statistical analysis and reports"
+            constraints:
+              timeout_seconds: 300
+              max_tool_rounds: 20
+          - agent: action_planner
+            description: "Draft action items from manager review data"
+            constraints:
+              timeout_seconds: 30
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    agent: str
+    description: str = ""
+    constraints: DelegationConstraints = Field(default_factory=DelegationConstraints)
 
 
 class MemoryConfig(BaseModel):
@@ -105,6 +149,9 @@ class AgentConfig(BaseModel):
     ask_tools: list[ToolRef] = Field(default_factory=list)
     agent_tools: list[ToolRef] = Field(default_factory=list)
 
+    # Delegation graph — which agents this one can spawn
+    delegates_to: list[DelegateRef] = Field(default_factory=list)
+
     # Memory
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
@@ -115,9 +162,6 @@ class AgentConfig(BaseModel):
     max_history_turns: int = 10
     stop_when: str = "no_tool_calls"
     compact_tbox: bool = False
-
-    # Intent-based routing
-    intents: dict[str, IntentConfig] = Field(default_factory=dict)
 
     # Phase-gated execution (researcher)
     phases: list[PhaseConfig] = Field(default_factory=list)
@@ -180,15 +224,16 @@ class AgentConfig(BaseModel):
         ask_tools = cls._parse_tool_list(data.get("ask_tools", []))
         agent_tools = cls._parse_tool_list(data.get("agent_tools", []))
 
+        raw_delegates = data.get("delegates_to", [])
+        delegates: list[DelegateRef] = []
+        for d in raw_delegates:
+            if isinstance(d, str):
+                delegates.append(DelegateRef(agent=d))
+            elif isinstance(d, dict):
+                delegates.append(DelegateRef(**d))
+
         raw_memory = data.get("memory", {})
         memory = MemoryConfig(**raw_memory) if isinstance(raw_memory, dict) else MemoryConfig()
-
-        raw_intents = data.get("intents", {})
-        intents: dict[str, IntentConfig] = {}
-        if isinstance(raw_intents, dict):
-            for intent_name, intent_data in raw_intents.items():
-                if isinstance(intent_data, dict):
-                    intents[intent_name] = IntentConfig(**intent_data)
 
         raw_phases = data.get("phases", [])
         phases: list[PhaseConfig] = []
@@ -216,8 +261,8 @@ class AgentConfig(BaseModel):
             tools=tools,
             ask_tools=ask_tools,
             agent_tools=agent_tools,
+            delegates_to=delegates,
             memory=memory,
-            intents=intents,
             phases=phases,
             max_iterations=data.get("max_iterations", 10),
             ask_max_iterations=data.get("ask_max_iterations"),

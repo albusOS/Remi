@@ -9,19 +9,16 @@ Internal intermediaries are local variables.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import cast
-
 from remi.agent.context import build_context_builder
 from remi.agent.documents import ContentStore
-from remi.agent.graph import (
-    MemoryStore,
-    build_memory_store,
-)
+from remi.agent.events import DomainEvent, EventBuffer, EventBus, build_event_bus
+from remi.agent.graph import build_entity_store
 from remi.agent.llm import LLMProviderFactory, build_provider_factory
+from remi.agent.memory import MemoryStore, build_memory_store
+from remi.agent.memory.recall import MemoryRecallService
 from remi.agent.observe import LLMUsageLedger, Tracer, TraceStore, build_trace_store
 from remi.agent.profile import DomainProfile
-from remi.agent.runtime import ChatAgentService, RetryPolicy
+from remi.agent.runtime import AgentRuntime, RetryPolicy
 from remi.agent.sandbox import Sandbox, build_sandbox
 from remi.agent.sessions import build_chat_session_store
 from remi.agent.signals import (
@@ -30,48 +27,50 @@ from remi.agent.signals import (
     load_domain_yaml,
     set_domain_yaml_path,
 )
+from remi.agent.tasks import TaskSupervisor, build_task_pool
 from remi.agent.tools import (
-    AgentInvoker,
     AnalysisToolProvider,
     DelegationToolProvider,
+    GraphToolProvider,
     HttpToolProvider,
-    InMemoryToolRegistry,
+    InMemoryToolCatalog,
     MemoryToolProvider,
     TraceToolProvider,
     VectorToolProvider,
 )
+from remi.agent.tools.actions import ActionToolProvider
+from remi.agent.tools.assertions import AssertionToolProvider
+from remi.agent.tools.documents import DocumentToolProvider
+from remi.agent.tools.search import SearchToolProvider
+from remi.agent.tools.workflows import WorkflowToolProvider
 from remi.agent.types import ChatSessionStore, ToolArg, ToolProvider, ToolRegistry
 from remi.agent.vectors import Embedder, VectorStore, build_embedder, build_vector_store
-from remi.agent.workflow import WorkflowRunner, set_agents_dir
+from remi.agent.workflow import WorkflowRunner
+from remi.agent.workforce import Workforce
 from remi.application.core import EventStore, PropertyStore
-from remi.application.infra.graph import build_re_world_model
-from remi.application.infra.ports import AgentVectorSearch
-from remi.application.infra.stores import (
-    InMemoryEventStore,
-    StoreSuite,
-    build_store_suite,
-)
-from remi.application.profile import build_re_profile
-from remi.application.services.auto_assign import AutoAssignService
-from remi.application.services.ingestion.pipeline import DocumentIngestService
-from remi.application.services.ingestion.service import IngestionService
-from remi.application.services.search import SearchService
-from remi.application.tools import (
-    ActionToolProvider,
-    AssertionToolProvider,
-    DocumentToolProvider,
-    SearchToolProvider,
-    SubAgentInvoker,
-    WorkflowToolProvider,
-)
-from remi.application.views import (
+from remi.application.ingestion import DocumentIngestService
+from remi.application.intelligence import (
     DashboardResolver,
+    SearchService,
+)
+from remi.application.operations import (
     LeaseResolver,
     MaintenanceResolver,
+)
+from remi.application.portfolio import (
+    AutoAssignService,
     ManagerResolver,
     PropertyResolver,
     RentRollResolver,
 )
+from remi.application.profile import build_re_profile
+from remi.application.stores import (
+    InMemoryEventStore,
+    StoreSuite,
+    build_store_suite,
+)
+from remi.application.stores.indexer import AgentVectorSearch
+from remi.application.stores.world import build_re_world_model
 from remi.shell.config.settings import RemiSettings
 
 
@@ -90,18 +89,29 @@ class Container:
     def __init__(self, settings: RemiSettings | None = None) -> None:
         self.settings = settings or RemiSettings()
 
-        # -- Configure agent paths (before any agent/ factories run) -----------
-        from remi.types.paths import AGENTS_DIR, DOMAIN_YAML_PATH
+        # -- Register capabilities (before any agent/ factories run) ------------
+        from remi.shell.config.capabilities import ensure_capabilities_registered
+        from remi.types.paths import DOMAIN_YAML_PATH
 
-        set_agents_dir(AGENTS_DIR)
+        ensure_capabilities_registered()
         set_domain_yaml_path(DOMAIN_YAML_PATH)
 
         # -- Domain profile (operational config for agent layer) ---------------
         profile: DomainProfile = build_re_profile()
 
+        # -- Event bus + buffer (kernel infrastructure) -------------------------
+        self.event_bus: EventBus = build_event_bus(self.settings.event_bus)
+        self.event_buffer: EventBuffer = EventBuffer(capacity=8192)
+
+        async def _buffer_sink(event: DomainEvent) -> None:
+            await self.event_buffer.append(event)
+
+        self.event_bus.subscribe("*", _buffer_sink)
+
         # -- Core infrastructure (all via factories) ---------------------------
         memory_store: MemoryStore = build_memory_store(self.settings)
-        self.tool_registry: ToolRegistry = InMemoryToolRegistry()
+        recall_service = MemoryRecallService(memory_store)
+        self.tool_registry: ToolRegistry = InMemoryToolCatalog()
         self.provider_factory: LLMProviderFactory = build_provider_factory(
             self.settings.secrets,
         )
@@ -124,12 +134,7 @@ class Container:
         mutable_tbox = MutableTBox(self.domain_tbox)
 
         # -- Sandbox -----------------------------------------------------------
-        from remi.application.sdk import __file__ as _sdk_path
-
-        self.sandbox: Sandbox = build_sandbox(
-            self.settings,
-            session_files={"remi.py": Path(_sdk_path).read_text("utf-8")},
-        )
+        self.sandbox: Sandbox = build_sandbox(self.settings)
 
         # -- Vectors -----------------------------------------------------------
         self.vector_store: VectorStore = build_vector_store(self.settings)
@@ -148,10 +153,6 @@ class Container:
             default_model=self.settings.llm.default_model,
             usage_ledger=self.usage_ledger,
             tool_registry=self.tool_registry,
-        )
-        ingestion_service = IngestionService(
-            property_store=self.property_store,
-            workflow_runner=self.workflow_runner,
         )
         self.property_resolver = PropertyResolver(property_store=self.property_store)
         self.lease_resolver = LeaseResolver(property_store=self.property_store)
@@ -172,13 +173,20 @@ class Container:
         # -- Document ingestion ------------------------------------------------
         self.document_ingest = DocumentIngestService(
             content_store=self.content_store,
-            ingestion_service=ingestion_service,
+            property_store=self.property_store,
+            workflow_runner=self.workflow_runner,
             metadata_skip_patterns=profile.metadata_skip_patterns,
             section_labels=profile.section_labels,
         )
 
+        # -- World model + entity store -----------------------------------------
+        from remi.agent.graph.stores import WorldModel
+
+        self.world_model: WorldModel = build_re_world_model(self.property_store)
+        entity_store = build_entity_store()
+
         # -- Tool providers (phase 1 — before chat_agent exists) ---------------
-        _api_base = f"http://127.0.0.1:{self.settings.api.port}"
+        _api_base = self.settings.api.resolved_internal_url()
         p = profile
         scope_args = _build_scope_filter_args(p) if p.scope_entity_type else []
 
@@ -194,6 +202,7 @@ class Container:
                 scope_filter_args=scope_args,
             ),
             TraceToolProvider(self.trace_store),
+            GraphToolProvider(entity_store, self.world_model),
             DocumentToolProvider(
                 self.content_store,
                 self.property_store,
@@ -206,11 +215,6 @@ class Container:
         for provider in phase1_providers:
             provider.register(self.tool_registry)
 
-        # -- World model -------------------------------------------------------
-        from remi.agent.graph.stores import WorldModel
-
-        self.world_model: WorldModel = build_re_world_model(self.property_store)
-
         # -- Chat agent --------------------------------------------------------
         context_builder = build_context_builder(
             domain=mutable_tbox,
@@ -220,7 +224,7 @@ class Container:
             name_fields=profile.name_fields,
             empty_state_label=profile.empty_state_label,
         )
-        self.chat_agent = ChatAgentService(
+        self.chat_agent = AgentRuntime(
             provider_factory=self.provider_factory,
             tool_registry=self.tool_registry,
             sandbox=self.sandbox,
@@ -236,7 +240,22 @@ class Container:
             default_model=self.settings.llm.default_model,
             context_builder=context_builder,
             usage_ledger=self.usage_ledger,
+            recall_service=recall_service,
         )
+
+        # -- Wire workflow engine ↔ agent runtime (bidirectional) --------------
+        self.workflow_runner.set_agent_executor(self.chat_agent)
+
+        # -- Task supervisor (kernel multi-agent coordination) -----------------
+        task_pool = build_task_pool(self.settings.task_queue)
+        self.task_supervisor = TaskSupervisor(
+            executor=self.chat_agent,  # type: ignore[arg-type]
+            event_bus=self.event_bus,
+            pool=task_pool,
+        )
+
+        # -- Workforce (agent topology from manifests) -------------------------
+        self.workforce = Workforce.from_registry()
 
         # -- Tool providers (phase 2 — after chat_agent exists) ----------------
         phase2_providers: list[ToolProvider] = [
@@ -244,13 +263,17 @@ class Container:
                 self.property_store,
                 self.manager_resolver,
                 self.dashboard_resolver,
-                sub_agent=cast(SubAgentInvoker, self.chat_agent),
+                supervisor=self.task_supervisor,
             ),
             DelegationToolProvider(
-                cast(AgentInvoker, self.chat_agent),
-                profile.available_agents or {},
+                self.task_supervisor,
+                workforce=self.workforce,
             ),
-            AssertionToolProvider(self.property_store, event_store=self.event_store),
+            AssertionToolProvider(
+                self.property_store,
+                event_store=self.event_store,
+                event_bus=self.event_bus,
+            ),
         ]
         for provider in phase2_providers:
             provider.register(self.tool_registry)

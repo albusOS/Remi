@@ -53,7 +53,35 @@ class Sandbox(abc.ABC):
     Each session gets its own working directory. Code runs in an isolated
     process (subprocess or container) with restricted access: no host
     filesystem outside the sandbox dir, resource limits enforced.
+
+    Lifecycle
+    ---------
+    Sessions must be explicitly destroyed via ``destroy_session`` when the
+    owning agent turn ends. Backends may also enforce a TTL
+    (``session_ttl_seconds``) to reclaim idle sessions and prevent disk/memory
+    leaks on long-running servers.
+
+    Files
+    -----
+    ``set_session_files`` registers a mapping of filename → content that is
+    written into every new session's working directory at creation time. The
+    container uses this to inject the ``remi.py`` SDK.
     """
+
+    def set_session_files(self, files: dict[str, str]) -> None:  # noqa: B027
+        """Register files to inject into every new session's working directory.
+
+        Default implementation is a no-op; backends that support pre-seeded
+        files should override this.
+        """
+
+    @abc.abstractmethod
+    async def reap_expired_sessions(self) -> int:
+        """Destroy sessions whose TTL has elapsed.
+
+        Returns the number of sessions reaped. Called periodically by the
+        server lifespan; backends that do not support TTL should return 0.
+        """
 
     @abc.abstractmethod
     async def create_session(

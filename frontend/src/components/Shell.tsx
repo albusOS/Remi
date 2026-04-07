@@ -2,51 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppOSEvents } from "@/hooks/useAppOSEvents";
 import { CommandMenu, useCommandMenu } from "@/components/ui/CommandMenu";
-
-const NAV_PRIMARY = [
-  {
-    href: "/",
-    label: "Home",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-      </svg>
-    ),
-  },
-  {
-    href: "/managers",
-    label: "Managers",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/documents",
-    label: "Knowledge Base",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-      </svg>
-    ),
-  },
-];
-
-const NAV_SECONDARY = [
-  {
-    href: "/ask",
-    label: "Ask REMI",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-      </svg>
-    ),
-  },
-];
+import type { FeedEvent } from "@/lib/types";
 
 function NavLink({
   href, label, icon, active, onClick,
@@ -86,14 +46,60 @@ function HamburgerButton({ open, onClick }: { open: boolean; onClick: () => void
   );
 }
 
+const NAV_ITEMS = [
+  {
+    href: "/",
+    label: "REMI",
+    icon: (
+      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/managers",
+    label: "Managers",
+    icon: (
+      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/documents",
+    label: "Documents",
+    icon: (
+      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+      </svg>
+    ),
+  },
+];
+
+const INVALIDATION_MAP: Record<string, string[][]> = {
+  "ingestion.complete": [["api", "documents"], ["api", "dashboard"], ["api", "properties"], ["api", "managers"]],
+  "assertion.created": [["api", "events"], ["api", "properties"], ["api", "managers"]],
+};
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { connected } = useAppOSEvents();
+  const queryClient = useQueryClient();
+
+  const onEvent = useCallback((event: FeedEvent) => {
+    const keys = INVALIDATION_MAP[event.topic];
+    if (keys) {
+      for (const key of keys) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    }
+  }, [queryClient]);
+
+  const { connected } = useAppOSEvents(onEvent);
   const [mobileOpen, setMobileOpen] = useState(false);
   const cmd = useCommandMenu();
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/";
+    if (href === "/") return pathname === "/" || pathname === "/ask";
     if (href === "/managers")
       return pathname.startsWith("/managers") || pathname.startsWith("/properties");
     return pathname.startsWith(href);
@@ -115,7 +121,6 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      {/* Search trigger in sidebar */}
       <div className="px-2 pt-2">
         <button
           onClick={() => { closeMobile(); cmd.setOpen(true); }}
@@ -130,13 +135,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
-        {NAV_PRIMARY.map((item) => (
-          <NavLink key={item.href} {...item} active={isActive(item.href)} onClick={closeMobile} />
-        ))}
-      </div>
-
-      <div className="px-2 pb-2 space-y-0.5 border-t border-border-subtle pt-2">
-        {NAV_SECONDARY.map((item) => (
+        {NAV_ITEMS.map((item) => (
           <NavLink key={item.href} {...item} active={isActive(item.href)} onClick={closeMobile} />
         ))}
       </div>
@@ -152,12 +151,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="h-screen flex overflow-hidden">
-      {/* Desktop sidebar */}
       <nav className="hidden md:flex w-52 shrink-0 border-r border-border bg-surface-raised flex-col">
         {sidebar}
       </nav>
 
-      {/* Mobile overlay + sidebar */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-fg/20 drawer-overlay" onClick={closeMobile} />
@@ -167,9 +164,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* Mobile top bar */}
         <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border-subtle bg-surface">
           <HamburgerButton open={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)} />
           <div className="flex items-center gap-2 min-w-0">

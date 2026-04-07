@@ -1,4 +1,6 @@
 services:
+
+  # ── Postgres ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16
     ports:
@@ -9,7 +11,32 @@ services:
       POSTGRES_PASSWORD: remi
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── API (production) ──────────────────────────────────────────────────────
+  # Profiles: prod
+  #
+  # The API runs a single uvicorn worker.  For multi-worker setups use
+  # gunicorn + uvicorn workers behind a load balancer and set
+  # REMI_API__INTERNAL_API_URL to the internal service address so the
+  # sandbox SDK can reach any worker.
   api:
     build:
       context: .
@@ -20,14 +47,60 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://remi:remi@postgres:5432/remi
+      # Use Docker-based sandbox when running in containers.
       REMI_SANDBOX__BACKEND: docker
+      # The sandbox containers reach the API via the internal Docker network.
+      REMI_API__INTERNAL_API_URL: http://api:8000
     volumes:
+      # Docker-outside-of-Docker: gives the API the ability to spawn
+      # sandbox containers on the host.  Remove this volume and set
+      # REMI_SANDBOX__BACKEND=local to fall back to the subprocess sandbox.
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     profiles:
       - prod
 
+  # ── Frontend (production) ────────────────────────────────────────────────
+  # Profiles: prod
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    image: remi-frontend:latest
+    environment:
+      NEXT_PUBLIC_API_URL: ""
+    depends_on:
+      - api
+    profiles:
+      - prod
+
+  # ── Nginx reverse proxy ─────────────────────────────────────────────────
+  # Profiles: prod
+  #
+  # Single origin for frontend + API.  In production, add TLS termination
+  # via certbot sidecar or an upstream load balancer.
+  nginx:
+    image: nginx:1-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - frontend
+    profiles:
+      - prod
+
+  # ── Sandbox image build helper ────────────────────────────────────────────
+  # Profiles: build
+  #
+  # Not a running service — used only to build and tag the sandbox image
+  # so the API can spawn it via Docker.
+  #   docker compose --profile build build sandbox
   sandbox:
     build:
       context: sandbox
@@ -38,3 +111,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

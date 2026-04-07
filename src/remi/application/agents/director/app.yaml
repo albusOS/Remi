@@ -15,6 +15,17 @@ metadata:
   chat: true
   primary: true
 
+runtime:
+  placement: inline
+  isolation: sandbox
+  durability: ephemeral
+  resources:
+    timeout_seconds: 180
+    max_tool_rounds: 4
+  scaling:
+    max_concurrency: 4
+    queue_priority: high
+
 modules:
   - id: director
     kind: agent
@@ -37,11 +48,27 @@ modules:
 
         ## How you work
 
-        1. **Understand** — What does the user need? If ambiguous, ask.
+        1. **Clarify first, execute second** — Before running any analysis,
+           ask yourself: *do I know exactly what the user wants?*
+           If the request is vague (e.g. "how's the portfolio?", "check on
+           Jake", "anything weird?"), ask ONE focused clarifying question
+           before calling tools. A 10-second clarification saves minutes of
+           wasted compute and a more useful answer.
         2. **Execute** — Use the right tool for the job (see below).
-        3. **Synthesize** — Connect findings into actionable insight.
-           Don't dump raw data — interpret it.
+           Match effort to scope: simple lookups need 1-2 calls, not 8.
+        3. **Synthesize** — Interpret findings, don't dump raw data.
+           Be concise. Bullet points over paragraphs. Numbers over adjectives.
         4. **Lead** — Surface problems the user didn't ask about.
+
+        ## Response style
+
+        - **Short questions get short answers.** If the user asks one thing,
+          answer one thing. Don't volunteer a full portfolio deep-dive when
+          they asked about one manager.
+        - **Long analysis gets structure.** Use headers and bullets.
+        - Never say "I don't have access" — you have the full platform.
+        - Be direct about problems — truth over diplomacy.
+        - When code fails, read the error, fix it, retry once. Don't spiral.
 
         ## Tool selection (fastest first)
 
@@ -76,14 +103,23 @@ modules:
 
         - Prefer workflow tools over `python` — they're faster and more reliable
         - Every claim must cite specific data you retrieved
-        - Never say "I don't have access" — you have the full platform
-        - Be direct about problems — truth over diplomacy
-        - For simple questions be concise; for complex ones be thorough
-        - When code fails, read the error, fix it, retry
+        - Match depth to scope: don't run 8 tool calls to answer a 1-call question
+        - When code fails, read the error, fix it, retry once then move on
 
       input_template: "{input}"
       output_contract: conversation
       response_format: text
+
+      delegates_to:
+        - agent: researcher
+          description: "Deep statistical analysis, cross-property correlations, and structured research reports"
+          constraints:
+            timeout_seconds: 300
+            max_tool_rounds: 20
+        - agent: action_planner
+          description: "Draft prioritized action items from manager review data"
+          constraints:
+            timeout_seconds: 30
 
       tools:
         # Portfolio-wide (instant)
@@ -96,7 +132,17 @@ modules:
         - name: lease_risk_review
         # Analysis (persistent Python + shell)
         - name: python
+          description: >
+            Persistent Python session with remi SDK. Variables and DataFrames
+            survive between calls. pandas, numpy, scipy, matplotlib, statsmodels,
+            and scikit-learn available. Use `import remi` for the data SDK.
+          config:
+            timeout: 120
+          inject:
+            session_id: sandbox_session_id
         - name: bash
+          inject:
+            session_id: sandbox_session_id
         # Delegation
         - name: delegate_to_agent
         # Workflow actions
@@ -116,100 +162,6 @@ modules:
         # Memory
         - name: memory_store
         - name: memory_recall
-
-      intents:
-        conversation:
-          description: "General conversation, clarification, or greeting"
-          keywords: [hi, hello, hey, thanks, thank you, bye, what can you do]
-          tools: []
-          max_tool_rounds: 0
-          max_iterations: 2
-          context_injection: []
-
-        lookup:
-          description: "Simple entity lookup or single-manager question"
-          keywords: []
-          tools:
-            - portfolio_health
-            - portfolio_comparison
-            - manager_review
-            - delinquency_review
-            - lease_risk_review
-            - entity_search
-            - onto_search
-          max_tool_rounds: 3
-          max_iterations: 6
-          context_injection: [signals]
-
-        analysis:
-          description: "Multi-step analysis, comparison, reporting, or action"
-          keywords:
-            - compare
-            - analyze
-            - analysis
-            - rank
-            - breakdown
-            - summarize
-            - overview
-            - assess
-            - evaluate
-            - review
-            - underperforming
-            - top
-            - worst
-            - best
-            - audit
-            - report
-            - trend
-            - export
-            - investigate
-            - comprehensive
-            - detailed analysis
-          tools:
-            - portfolio_health
-            - portfolio_comparison
-            - portfolio_trends
-            - manager_review
-            - delinquency_review
-            - lease_risk_review
-            - python
-            - bash
-            - delegate_to_agent
-            - draft_action_plan
-            - approve_action_plan
-            - entity_search
-            - onto_signals
-            - onto_search
-            - onto_aggregate
-            - memory_store
-            - memory_recall
-          max_tool_rounds: 6
-          max_iterations: 12
-          context_injection: [signals]
-
-        action:
-          description: "Creating records, action items, notes, or mutations"
-          keywords:
-            - create action
-            - draft plan
-            - action plan
-            - action item
-            - follow-up
-            - follow up
-            - approve plan
-            - assign
-          tools:
-            - python
-            - draft_action_plan
-            - approve_action_plan
-            - entity_search
-            - manager_review
-            - python
-            - onto_search
-            - memory_store
-          max_tool_rounds: 4
-          max_iterations: 8
-          context_injection: [signals]
 
       memory:
         namespace: remi-director

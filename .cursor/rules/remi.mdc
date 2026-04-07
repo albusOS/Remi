@@ -172,13 +172,24 @@ src/remi/
     llm/              LLM provider ports + adapters
     vectors/          Embedding ports + adapters
     sandbox/          Code execution ports + adapters
+    events/           Typed event bus — the OS-level pub-sub nervous system
+    memory/           First-class agent memory — read/write with namespaces
     observe/          Structured logging, tracing
     signals/          Signal types, TBox, stores, producers (agent infra)
     graph/            Knowledge graph types, bridge, retriever
     documents/        Document types, stores, parsers
     db/               Database engine + tables
     runtime/          Execution loop, tool dispatch, streaming
+      runner.py       AgentRuntime — ask(), chat(), run_chat_agent()
+      sessions.py     AgentSessions — session CRUD (create, get, list, delete)
+      node.py         AgentNode — the think-act-observe loop
       conversation/   Thread management, compression (internal)
+    tasks/            Supervised multi-agent delegation:
+      spec.py         TaskSpec — typed work order with constraints
+      task.py         Task — lifecycle state machine (pending→running→done)
+      result.py       TaskResult — structured output from delegation
+      supervisor.py   TaskSupervisor — schedules, enforces, publishes
+      pool.py         TaskPool — bounded concurrency + cancellation
     context/          Perception, context builder, intent
     pipeline/         Generic YAML-driven LLM pipeline executor
     sessions/         Chat session persistence + in-memory adapter
@@ -194,25 +205,21 @@ src/remi/
       maintenance.py  Maintenance list and summary
       dashboard.py    Composite dashboard views
       rent_roll.py    Detailed rent-roll assembly
-      signals.py      Signal digest and grouping
       _models.py      Read-model types (Pydantic)
     services/         Orchestration pipelines (writes + async work):
-      ingestion/      Rule-based + LLM ingestion (rules.py, pipeline.py,
-                      service.py, persist.py, managers.py)
+      ingestion/      YAML-workflow-driven report ingestion (pipeline.py,
+                      service.py, transforms.py, persisters.py, rules.py)
       auto_assign.py  KB-tag-based property-to-manager assignment
-      embedding/      Vector indexing pipeline
-      seeding/        Batch report loading (ReportLoader)
       search.py       RE-aware hybrid search
-    infra/            Port implementations: stores (mem, pg), graph,
-                      ports (agent ↔ application bridges)
+    stores/           Port implementations: mem, pg, world model, indexer
     tools/            Agent tool registrations
     agents/           RE agent YAML manifests
-    realtime/         WebSocket event broadcasting (connection_manager)
+    events/           Event feed projections: HTTP poll + WebSocket push
     api/              HTTP delivery — vertical slices:
       portfolio/      managers, properties, units, portfolios
       operations/     leases, maintenance, tenants, actions, notes
       intelligence/   signals, dashboard, search, ontology, knowledge, events
-      system/         agents, documents, seed, usage, realtime
+      system/         agents, documents, seed, usage
     cli/              CLI delivery — vertical slices:
       portfolio/      managers, property, units, portfolios, rent_roll
       operations/     leases, maintenance, tenants
@@ -245,6 +252,87 @@ the reverse. `shell/` imports from both. `types/` imports nothing.
 - *Conversational agents* run inside the REMI process. They call application
   services through `application/tools/`. Their tool registry is
   `application/tools/__init__.py`.
+
+## Task System — Supervised Multi-Agent Delegation
+
+`agent/tasks/` is the kernel primitive for multi-agent coordination.
+A **task** is a unit of delegated work with a lifecycle, managed by a
+**supervisor** that schedules into a bounded **pool**.
+
+### How it works
+
+1. Parent agent calls `delegate_to_agent` tool.
+2. Tool creates a `TaskSpec` (agent name, objective, constraints,
+   parent_run_id) and submits it to `TaskSupervisor.spawn_and_wait()`.
+3. Supervisor creates a `Task` (pending), submits to `TaskPool`.
+4. Pool acquires a concurrency slot, runs the agent via `AgentExecutor.ask()`.
+5. Task transitions: `pending → running → done|failed|cancelled`.
+6. Supervisor publishes lifecycle events: `task.spawned`, `task.completed`,
+   `task.failed`, `task.cancelled` to the `EventBus`.
+7. `TaskResult` (structured output, usage, run_id) is returned to the
+   parent agent.
+
+### Key types
+
+- `TaskSpec` — work order: agent_name, objective, input_data, constraints
+- `TaskConstraints` — budget: timeout_seconds, max_tool_rounds, max_tokens
+- `Task` — state machine with lifecycle tracking
+- `TaskResult` — structured output with ok/error/data/usage
+- `TaskSupervisor` — scheduler: spawn, cancel, list, shutdown
+- `TaskPool` — bounded concurrency with backpressure
+- `AgentExecutor` — protocol for running a named agent (implemented by
+  `AgentRuntime`)
+
+### Rules
+
+- **Always delegate via TaskSupervisor** — never call `AgentRuntime.ask()`
+  directly from a tool. The supervisor provides lifecycle tracking, budget
+  enforcement, and event publication.
+- **TaskSpec, not strings** — pass structured `input_data` to specialists,
+  not raw context strings concatenated to the prompt.
+- **Tasks are always parent-spawned** — no autonomous agent spawning.
+  The supervisor pattern, not swarm.
+- **Tasks are in-memory** — same as EventBus. Protocol-first; swap for
+  Redis/Postgres later without changing consumers.
+
+## Workflow Engine — Unified Execution
+
+The `WorkflowRunner` (`agent/workflow/engine.py`) is the single DAG
+scheduler for all multi-step execution. It supports these step kinds:
+
+| Kind | What it does |
+|------|-------------|
+| `llm` | Single LLM call with template interpolation |
+| `llm_tools` | LLM call with tool access (multi-round) |
+| `transform` | Deterministic tool call — no LLM |
+| `for_each` | Fan-out: run a tool over each item in a list |
+| `gate` | Conditional branch — enables/disables downstream steps |
+| `agent` | **Full agent loop** — runs a named agent via `AgentRuntime.ask()` |
+
+### `kind: agent` — agents as workflow steps
+
+An `AgentStepNode` runs a complete think-act-observe agent loop as a
+single step in a workflow DAG. This is how agents compose with each
+other and with non-agent steps:
+
+- **Agent as router**: an agent step classifies input, its output feeds
+  a `gate` that branches the DAG.
+- **Agent as specialist**: a workflow fans out to multiple agent steps
+  (via `for_each` or parallel `depends_on`) and aggregates results.
+- **Agent + LLM hybrid**: some steps are cheap LLM calls, some are
+  full agent loops with tool access.
+
+The `AgentStepExecutor` protocol (implemented by `AgentRuntime`) is
+injected into the workflow engine at startup via `set_agent_executor()`.
+
+### Rules
+
+- **`_run_graph` is dead** — do not recreate in-process module chains.
+  All multi-step orchestration goes through `WorkflowRunner`.
+- **Workflows are declarative** — defined in YAML (`kind: Workflow` or
+  `kind: Pipeline`), not assembled in Python.
+- **Agent steps are just steps** — they participate in the DAG like
+  any other node: dependencies, wires, gates, retries all apply.
 
 ## Repository Protocols
 
@@ -279,9 +367,9 @@ Port interfaces for storage live in `application/core/protocols.py` as
 
 Each module owns the factory for the thing it defines:
 
-- `application/infra/graph/world.py` -> `build_re_world_model()`
+- `application/stores/world.py` -> `build_re_world_model()`
 - `agent/context/builder.py` -> `build_context_builder()`
-- `application/infra/stores/factory.py` -> `build_store_suite()`
+- `application/stores/factory.py` -> `build_store_suite()`
 - `agent/llm/factory.py` -> `build_provider_factory()`
 - `agent/vectors/embedder.py` -> `build_embedder()`
 - `agent/sandbox/factory.py` -> `build_sandbox()`
@@ -312,14 +400,332 @@ Both tiers converge at `resolve_and_persist` for the same persistence path.
   "Auto Loan", etc.) are not properties.
 - **Normalize addresses** — strip "DO NOT USE" prefixes before slugifying.
 
-## Real-Time Communication
+## Event Architecture — Three Distinct Channels
 
-- **Agent chat** uses the REST streaming endpoint
-  `POST /api/v1/agents/{name}/ask` — NDJSON events (`delta`, `tool_call`,
-  `tool_result`, `done`). No WebSocket chat.
-- **Lifecycle events** (ingestion complete) use
-  `ws://host/ws/events` — a broadcast pub-sub channel.
-- `application/realtime/` exports only `connection_manager`.
+The system has three event channels. Do not conflate them.
+
+### 1. Domain Events (world-state transitions)
+
+- **EventBus** (`agent/events/`) is the OS-level typed pub-sub primitive.
+  A protocol (`EventBus` ABC) with an in-memory implementation —
+  swappable for Redis pub/sub or NATS without changing application code.
+- Producers publish `DomainEvent` envelopes with dot-namespaced topics
+  (e.g. `ingestion.complete`, `assertion.created`, `entity.updated`).
+- Subscribers register with exact or glob patterns (`"ingestion.*"`).
+- **EventBuffer** (`agent/events/buffer.py`) is a bounded ring buffer
+  subscribed to the bus. Provides cursor-based reads for the HTTP
+  polling endpoint. Swappable for Redis Streams.
+- **No single-process assumptions.** `EventBus` and `EventBuffer` are
+  protocols. Swap implementations in `container.py`, nothing else changes.
+
+### 2. Domain Event Projections (delivery to frontends)
+
+- **HTTP polling** — `GET /api/v1/feed?after={cursor}&types=ingestion.*`
+  returns domain events since the cursor. For programmatic consumers,
+  CLI, webhooks, or any client that prefers pull.
+- **WebSocket push** — `WS /api/v1/feed/ws?types=ingestion.*` pushes
+  domain events in real time. Each connection subscribes to the bus for
+  its lifetime. Used by the frontend for query invalidation.
+- Both live in `application/events/` (`api.py` + `ws.py`).
+- **Frontend** receives typed `FeedEvent` payloads on the WebSocket and
+  invalidates TanStack Query caches via a topic→queryKey map in `Shell.tsx`.
+
+### 3. Agent Chat Telemetry (ephemeral per-session)
+
+- `POST /api/v1/agents/{name}/ask` returns an NDJSON `StreamingResponse`.
+- Events: `delta`, `tool_call`, `tool_running`, `tool_result`, `phase`,
+  `done`, `error`.
+- These are execution trace events — they describe what the agent is
+  doing right now during a specific run. Ephemeral, per-session, only
+  consumed by the active chat UI.
+- **This does NOT flow through the EventBus.** It uses an `asyncio.Queue`
+  piped into the streaming response.
+
+### What NOT to do
+
+- Do not publish agent telemetry (`delta`, `tool_call`) to the EventBus.
+- Do not create module-level singletons for WebSocket management.
+- Do not create `application/realtime/` — it was deleted. The event
+  feed lives in `application/events/`.
+
+## Agent Memory — Three-Layer System
+
+Memory is a first-class OS primitive in `agent/memory/`.  Three
+layers work together: explicit tools for agent-driven read/write,
+automatic post-run extraction, and ranked recall at session start.
+
+### Two tools (agent-driven)
+
+- **`memory_write`** — the agent stores a finding, correction, plan, or
+  reference fact.  Entries are keyed, namespaced, and optionally tagged
+  with `entity_ids` for retrieval filtering.
+- **`memory_read`** — the agent queries for relevant memories by text,
+  entity, or tag.  It decides *when* to recall and *what* to ask for.
+
+### Post-run episode extraction (automatic)
+
+When an agent run completes, `extract_episode` (`memory/extraction.py`)
+uses a cheap LLM call to distill the conversation into structured
+observations.  Each observation is classified into a namespace, assigned
+an importance level (routine/notable/critical), and written to the store.
+This replaces the old "dump last assistant message" auto-save.
+
+### Ranked recall at session start (automatic)
+
+`MemoryRecallService` (`memory/recall.py`) searches across all namespaces,
+ranks results by importance and recency, and renders them into a system
+message injected before the user's question.  Replaces the naive
+"list first 10 keys" pattern.
+
+### Four namespaces
+
+| Namespace | What it holds | Lifecycle |
+|-----------|--------------|-----------|
+| `episodic` | Session observations, findings | Routine: 14d, Notable: 90d, Critical: permanent |
+| `feedback` | User corrections, mistakes to avoid | Long-lived (notable/critical) |
+| `reference` | Curated knowledge, stable facts | Stable (reference/critical) |
+| `plan` | Current objectives and approach | Working memory |
+
+### Importance levels
+
+| Level | Value | Default TTL | Use |
+|-------|-------|-------------|-----|
+| ROUTINE | 1 | 14 days | Session records, routine observations |
+| NOTABLE | 2 | 90 days | Useful findings, patterns worth recalling |
+| CRITICAL | 3 | No expiry | User corrections, critical learnings |
+
+### Architecture
+
+- **`MemoryStore`** is a protocol in `agent/memory/store.py` — backends
+  are `InMemoryMemoryStore` (dev) and `PostgresMemoryStore` (prod).
+- **`MemoryRecallService`** wraps `MemoryStore` with cross-namespace
+  retrieval, ranking, and token budgeting.  Injected via `RunDeps`.
+- **`extract_episode`** is called fire-and-forget after agent runs.
+  It does not block the response path.
+- The `agent/workspace/` layer (PLAN.md, CONTEXT.md in the sandbox)
+  remains for flush-before-trim and sandbox file access — it is the
+  working scratchpad, not the long-term memory.
+- Memory does **not** live in `agent/graph/`.  The graph package owns
+  `WorldModel` and `EntityStore` — memory is a separate concern.
+
+### What NOT to do
+
+- Do not store raw conversation transcripts as memory.  The extraction
+  step distills conversations into structured observations.
+- Do not put `MemoryStore` back in `agent/graph/` — it was moved out
+  deliberately to establish memory as its own primitive.
+- Do not bypass the `MemoryRecallService` — use it for all pre-run
+  memory injection rather than querying `MemoryStore` directly.
+
+## Context Compression — Multi-Stage Compaction
+
+Long agent sessions are managed by a three-stage compaction system
+in `agent/runtime/conversation/compaction.py`:
+
+1. **Tool result compression** (`compression.py`) — per-tool-call,
+   large results are summarized and optionally offloaded to memory.
+2. **Exchange summarization** — when the thread reaches 70% of the
+   context budget, old exchanges are batched and summarized by a
+   cheap LLM call.  Recent exchanges are preserved intact.
+3. **Aggressive compaction** — at 88% of the budget, everything
+   except the system prefix and last 3 exchanges is collapsed
+   into a single session briefing.
+
+The loop calls `should_compact(thread, context_budget)` before each
+LLM call.  `context_budget` is derived from the provider's
+`model_capabilities(model).context_window`.
+
+## Runtime Configuration — Topology Is Settings, Not Architecture
+
+The agent kernel is **deployment-topology-agnostic**. The same agent
+code runs as a single process (dev), API + workers (medium scale),
+or per-agent containers (enterprise) — controlled entirely by
+configuration.
+
+### Two configuration surfaces
+
+1. **Global settings** (`config/*.yaml`, env vars) — select backends
+   for infrastructure primitives:
+   - `event_bus.backend: memory | redis` — how events flow
+   - `task_queue.backend: local | redis` — where tasks execute
+   - `sandbox.backend: local | docker` — how code runs
+
+2. **Per-agent/workflow runtime** (`app.yaml` `runtime:` section) —
+   declare how each agent runs:
+   ```yaml
+   runtime:
+     placement: inline | worker | container
+     isolation: none | sandbox | container
+     durability: ephemeral | checkpoint | durable
+     resources:
+       timeout_seconds: 120
+       max_memory_mb: 2048
+       max_tool_rounds: 20
+       max_tokens: 200000
+     scaling:
+       max_concurrency: 2
+       queue_priority: normal | high | critical
+   ```
+
+### Placement rules
+
+- **`inline`** — same process as the API. Required for streaming chat
+  (director) where delta events pipe directly into the NDJSON response.
+- **`worker`** — dispatched to a task queue, executed by `remi worker`.
+  Use for background agents (researcher, ingestion) that don't stream
+  to the user.
+- **`container`** — each run gets its own isolated container. Use when
+  you need hard resource limits or full network isolation.
+
+### What YAML controls vs what settings control
+
+**YAML** (`app.yaml` `runtime:`) says *what this agent needs* —
+resource budgets, isolation, durability. These travel with the agent
+definition and are portable across deployments.
+
+**Settings** (`config/*.yaml`) say *what backends are available* —
+Redis URL, task queue config, sandbox engine. These are environment-
+specific and change per deployment.
+
+The container reads both and wires the right combination.
+
+### Key types
+
+- `RuntimeConfig` (`agent/runtime/config.py`) — Pydantic model for
+  the `runtime:` YAML section. Parsed from manifests, consumed by
+  the supervisor and container.
+- `TaskPool` (`agent/tasks/pool.py`) — ABC for task execution backends.
+  `LocalTaskPool` (asyncio) is the default. Protocol-ready for Redis.
+- `EventBus` (`agent/events/bus.py`) — ABC for event pub/sub.
+  `InMemoryEventBus` is the default. Protocol-ready for Redis/NATS.
+- `AgentExecutor` (`agent/tasks/supervisor.py`) — protocol for running
+  a named agent. `AgentRuntime` is the local impl. Protocol-ready for
+  a future `RemoteAgentExecutor` HTTP client.
+
+### How runtime config flows
+
+1. **Parsing**: `load_manifest_runtime(name)` in `agent/workflow/loader.py`
+   reads the `runtime:` block from any registered manifest and returns
+   a `RuntimeConfig`. Both agent and workflow loading paths use it.
+2. **Workflows**: `load_workflow()` attaches the parsed `RuntimeConfig`
+   to `WorkflowDef.runtime`. The engine can read resource budgets.
+3. **Agents**: `AgentRuntime._load_agent_config()` returns both the
+   module config dict and the `RuntimeConfig`. `get_runtime_config(name)`
+   exposes it publicly.
+4. **Delegation**: When `delegate_to_agent` creates a `TaskSpec`, it
+   resolves the caller's `delegates_to` edges via `Workforce.get_delegates()`
+   and reads `DelegateRef.constraints` for the target agent. Caller-provided
+   timeout overrides the YAML-declared value. The caller agent name is
+   injected as `caller_agent` in the tool's merged args by the tool executor.
+5. **`to_task_constraints()`** bridges `RuntimeConfig.resources` to
+   `TaskConstraints` fields (`timeout_seconds`, `max_tool_rounds`,
+   `max_tokens`).
+
+### Rules
+
+- **Never hardcode topology in Python.** If you're writing
+  `asyncio.create_task` in a new module, you're probably bypassing the
+  pool. Use `TaskSupervisor` or `TaskPool` instead.
+- **Defaults are always single-process.** Omitting `runtime:` from a
+  YAML gives you `inline` placement, `sandbox` isolation, `ephemeral`
+  durability. Dev works with zero configuration.
+- **Settings override YAML when they conflict.** If `task_queue.backend`
+  is `local`, all agents run inline regardless of their `placement`
+  setting. The backend constrains what's possible.
+
+## Agent Composition Model — Workforce, Tools, and Delegation
+
+The YAML manifest is the intermediate representation for a visual
+canvas. Three concepts compose into agent networks:
+
+### Tools as per-agent capabilities
+
+Tools are registered globally in the `ToolRegistry`, but each agent
+scopes and configures them independently via `tools:` in YAML:
+
+```yaml
+tools:
+  - name: python
+    config:
+      timeout_seconds: 60
+      max_output_bytes: 200000
+  - name: semantic_search
+    config:
+      default_limit: 20
+```
+
+`config:` is merged into tool arguments at call time. Same tool name,
+different behavior per agent. This is how the researcher's `python`
+gets more timeout than the director's.
+
+### Declarative delegation graph
+
+Each agent declares who it can delegate to via `delegates_to:`:
+
+```yaml
+delegates_to:
+  - agent: researcher
+    description: "Deep statistical analysis"
+    constraints:
+      timeout_seconds: 300
+      max_tool_rounds: 20
+  - agent: action_planner
+    description: "Draft action items"
+    constraints:
+      timeout_seconds: 30
+```
+
+`delegates_to:` in YAML is the **single source of truth** for delegation
+edges. There is no `DomainProfile.available_agents` — that was deleted.
+At runtime `DelegationToolProvider` receives the `Workforce` and calls
+`workforce.get_delegates(caller_agent)` to enforce per-parent scoping.
+`DelegateRef.constraints` supplies the task budget; no re-reading of
+the manifest is needed. The canvas renders these edges as connections
+between agent nodes.
+
+### Workforce — the network read model
+
+`Workforce` (`agent/workforce.py`) assembles the complete agent
+topology from individual manifests at startup via
+`Workforce.from_registry()` (reads all manifests registered by
+`capabilities.py`):
+
+- `workforce.delegation_graph` — adjacency list of who delegates to whom
+- `workforce.tool_surface` — which tools each agent has
+- `workforce.get_delegates(name)` — `{child: description}` for one parent
+- `workforce.get_delegate_ref(parent, child)` — the full `DelegateRef`
+  with constraints
+
+The workforce is a **read model**, not a store. It is computed from
+YAML manifests and consumed by the delegation tool, observability
+dashboards, and (eventually) the canvas UI.
+
+### Manifest kinds
+
+| `kind` | What it describes | Declared in |
+|--------|------------------|-------------|
+| `Agent` | Think-act-observe loop with tools, intents, memory | `app.yaml` under `modules:` |
+| `Workflow` | DAG of steps with explicit `depends_on` | `app.yaml` under `steps:` + `wires:` |
+| `Pipeline` | Sequential steps (implicit deps) | `app.yaml` under `steps:` |
+
+A future `kind: Workforce` manifest will declare an entire network
+in one file — multiple agents, their edges, shared tool configs, and
+global runtime defaults. Today the workforce is assembled from
+individual manifests.
+
+### What NOT to do
+
+- Do not hardcode delegation edges in Python. Declare them in YAML
+  via `delegates_to:`.
+- Do not add `available_agents` to `DomainProfile`. It was deleted —
+  the Workforce model is the authority for agent topology.
+- Do not create per-agent `ToolRegistry` instances. Use the global
+  registry with per-agent `config:` overrides in YAML.
+- Do not put agent composition logic in `container.py`. The container
+  wires infrastructure; the workforce assembles agent topology from
+  manifests.
+- **Every app.yaml should have a `runtime:` stanza.** Even if all values
+  are defaults. It makes the execution topology self-documenting.
 
 ## Key Constraints
 
@@ -345,3 +751,6 @@ These systems were removed as compensatory complexity. Do not recreate them:
   in-memory stores for faster development cycles.
 - **Timeline recorder** (`TimelineRecorder`, `KnowledgeGraphTimelineRecorder`) —
   dead abstraction that was never properly wired.
+- **Realtime module** (`application/realtime/`) — hand-rolled WebSocket
+  `ConnectionManager` singleton with custom ping/pong. Replaced by
+  `application/events/ws.py` which subscribes to the `EventBus` properly.

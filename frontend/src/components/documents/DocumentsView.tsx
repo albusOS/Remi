@@ -6,65 +6,16 @@ import { Badge } from "@/components/ui/Badge";
 import { Empty } from "@/components/ui/Empty";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { UploadPanel } from "@/components/documents/UploadPanel";
+import { DocumentDetailPanel } from "@/components/documents/DocumentDetailPanel";
+import { SignalsPanel } from "@/components/documents/SignalsPanel";
+import { ActivityPanel } from "@/components/documents/ActivityPanel";
+import { FileIcon, KIND_LABELS, KIND_COLORS, formatBytes, formatDate } from "@/components/documents/DocumentHelpers";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import type { DocumentMeta, DocumentKind, ManagerListItem, SignalSummary } from "@/lib/types";
-
-const KIND_LABELS: Record<DocumentKind, string> = {
-  tabular: "Report",
-  text: "Document",
-  image: "Image",
-};
-
-const KIND_COLORS: Record<DocumentKind, "blue" | "emerald" | "amber"> = {
-  tabular: "blue",
-  text: "emerald",
-  image: "amber",
-};
-
-function FileIcon({ kind, className = "w-5 h-5" }: { kind: DocumentKind; className?: string }) {
-  if (kind === "image") {
-    return (
-      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
-      </svg>
-    );
-  }
-  if (kind === "text") {
-    return (
-      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-      </svg>
-    );
-  }
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v.375" />
-    </svg>
-  );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
 
 type DetailDoc = DocumentMeta & { preview: Record<string, unknown>[] };
 
 type Tab = "documents" | "signals" | "activity";
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "bg-error text-error-fg",
-  high: "bg-warning text-warning-fg",
-  medium: "bg-amber-100 text-amber-800",
-  low: "bg-surface-sunken text-fg-muted",
-};
 
 export function DocumentsView() {
   const [documents, setDocuments] = useState<DocumentMeta[]>([]);
@@ -186,6 +137,13 @@ export function DocumentsView() {
     }
   };
 
+  const closeDetail = () => {
+    setSelected(null);
+    setDetail(null);
+    setRows([]);
+    setChunks([]);
+  };
+
   const kindCounts = documents.reduce<Record<string, number>>((acc, d) => {
     acc[d.kind] = (acc[d.kind] || 0) + 1;
     return acc;
@@ -199,7 +157,6 @@ export function DocumentsView() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="shrink-0 border-b border-border-subtle px-4 sm:px-6 py-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -248,7 +205,6 @@ export function DocumentsView() {
           />
         )}
 
-        {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-border-subtle -mb-3 -mx-4 sm:-mx-6 px-4 sm:px-6 overflow-x-auto">
           {tabs.map((tab) => (
             <button
@@ -275,10 +231,8 @@ export function DocumentsView() {
         </div>
       )}
 
-      {/* Documents tab */}
       {activeTab === "documents" && (
         <>
-          {/* Search + Filters */}
           <div className="shrink-0 px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2 border-b border-border-subtle">
             <div className="relative flex-1 min-w-[180px] max-w-md">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-ghost" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -328,9 +282,7 @@ export function DocumentsView() {
             )}
           </div>
 
-          {/* Content */}
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            {/* Document grid */}
             <div className={`flex-1 overflow-y-auto p-4 ${detail ? "hidden lg:block" : ""}`}>
               {loading && <div className="p-8 text-center text-xs text-fg-faint animate-pulse">Loading...</div>}
 
@@ -401,143 +353,19 @@ export function DocumentsView() {
               </div>
             </div>
 
-            {/* Detail panel */}
             {detail && (
-              <div className="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-l border-border flex flex-col overflow-hidden">
-                <div className="shrink-0 px-4 sm:px-5 py-4 border-b border-border-subtle">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setSelected(null); setDetail(null); setRows([]); setChunks([]); }}
-                      className="lg:hidden shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-fg-muted hover:text-fg hover:bg-surface-sunken transition-colors"
-                      aria-label="Back to documents"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                      </svg>
-                    </button>
-                    <FileIcon kind={detail.kind} className="w-4 h-4 text-fg-muted shrink-0" />
-                    <h2 className="text-sm font-bold text-fg truncate">{detail.filename}</h2>
-                  </div>
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    <Badge variant={KIND_COLORS[detail.kind]}>{KIND_LABELS[detail.kind]}</Badge>
-                    {detail.kind === "tabular" && detail.report_type !== "unknown" && (
-                      <Badge variant="blue">{detail.report_type.replace(/_/g, " ")}</Badge>
-                    )}
-                    {detail.size_bytes > 0 && (
-                      <span className="text-[10px] text-fg-faint">{formatBytes(detail.size_bytes)}</span>
-                    )}
-                    <span className="text-[10px] text-fg-faint">{formatDate(detail.uploaded_at)}</span>
-                  </div>
-
-                  {/* Tags with inline edit */}
-                  <div className="mt-2">
-                    {editingTags ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={editTagValue}
-                          onChange={(e) => setEditTagValue(e.target.value)}
-                          placeholder="tag1, tag2, tag3"
-                          className="flex-1 bg-surface border border-border rounded px-2 py-1 text-[10px] text-fg focus:outline-none focus:border-accent/40"
-                          onKeyDown={(e) => { if (e.key === "Enter") handleSaveTags(); if (e.key === "Escape") setEditingTags(false); }}
-                          autoFocus
-                        />
-                        <button onClick={handleSaveTags} className="text-[10px] text-accent hover:underline">Save</button>
-                        <button onClick={() => setEditingTags(false)} className="text-[10px] text-fg-faint hover:text-fg-secondary">Cancel</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {detail.tags.length > 0 ? (
-                          detail.tags.map((t) => (
-                            <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-surface-sunken text-fg-faint">{t}</span>
-                          ))
-                        ) : (
-                          <span className="text-[9px] text-fg-ghost">No tags</span>
-                        )}
-                        <button
-                          onClick={() => { setEditTagValue(detail.tags.join(", ")); setEditingTags(true); }}
-                          className="text-[9px] text-accent/70 hover:text-accent ml-1"
-                        >
-                          edit
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-auto">
-                  {detail.kind === "tabular" && rows.length > 0 && (
-                    <table className="w-full text-[11px]">
-                      <thead className="sticky top-0 bg-surface z-10">
-                        <tr>
-                          <th className="text-left px-3 py-2 text-fg-faint font-mono border-b border-border-subtle">#</th>
-                          {detail.columns.map((c) => (
-                            <th key={c} className="text-left px-3 py-2 text-fg-faint font-mono border-b border-border-subtle whitespace-nowrap">{c}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row, i) => (
-                          <tr key={i} className="hover:bg-surface-raised transition-colors">
-                            <td className="px-3 py-1.5 text-fg-ghost border-b border-border-subtle">{i + 1}</td>
-                            {detail.columns.map((c) => (
-                              <td key={c} className="px-3 py-1.5 text-fg-secondary border-b border-border-subtle max-w-[200px] truncate">
-                                {row[c] != null ? String(row[c]) : <span className="text-fg-ghost">&mdash;</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-
-                  {detail.kind === "text" && chunks.length > 0 && (
-                    <div className="p-4 space-y-3">
-                      {chunks.map((chunk) => (
-                        <div key={chunk.index} className="rounded-lg border border-border-subtle p-3">
-                          {chunk.page != null && (
-                            <p className="text-[9px] text-fg-ghost uppercase tracking-wide font-medium mb-1.5">
-                              Page {chunk.page + 1}
-                            </p>
-                          )}
-                          <p className="text-xs text-fg-secondary leading-relaxed whitespace-pre-wrap">
-                            {chunk.text}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {detail.kind === "image" && (
-                    <div className="flex items-center justify-center h-full p-8">
-                      <div className="text-center">
-                        <FileIcon kind="image" className="w-12 h-12 text-fg-ghost mx-auto mb-3" />
-                        <p className="text-xs text-fg-faint">Image preview not available</p>
-                        <p className="text-[10px] text-fg-ghost mt-1">{detail.filename}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {detail.kind === "tabular" && rows.length === 0 && (
-                    <div className="p-8 text-center text-xs text-fg-faint">No rows</div>
-                  )}
-                  {detail.kind === "text" && chunks.length === 0 && (
-                    <div className="p-8 text-center text-xs text-fg-faint">No text content extracted</div>
-                  )}
-                </div>
-
-                <div className="shrink-0 px-4 sm:px-5 py-3 border-t border-border-subtle">
-                  <a
-                    href={`/ask?q=${encodeURIComponent(`Tell me about the document "${detail.filename}"`)}`}
-                    className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg border border-border text-xs text-fg-muted hover:text-fg-secondary hover:border-fg-faint transition-all"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                    </svg>
-                    Ask REMI about this document
-                  </a>
-                </div>
-              </div>
+              <DocumentDetailPanel
+                detail={detail}
+                rows={rows}
+                chunks={chunks}
+                editingTags={editingTags}
+                editTagValue={editTagValue}
+                onEditTagValueChange={setEditTagValue}
+                onStartEditTags={() => { setEditTagValue(detail.tags.join(", ")); setEditingTags(true); }}
+                onSaveTags={handleSaveTags}
+                onCancelEditTags={() => setEditingTags(false)}
+                onClose={closeDetail}
+              />
             )}
 
             {!detail && !loading && documents.length > 0 && (
@@ -549,84 +377,13 @@ export function DocumentsView() {
         </>
       )}
 
-      {/* Signals tab */}
       {activeTab === "signals" && (
-        <div className="flex-1 overflow-y-auto p-6">
-          {signalsLoading && <div className="p-8 text-center text-xs text-fg-faint animate-pulse">Loading signals...</div>}
-          {!signalsLoading && signals.length === 0 && (
-            <div className="flex items-center justify-center h-64">
-              <Empty
-                title="No signals detected"
-                description="Signals appear when REMI detects notable situations in your portfolio data"
-              />
-            </div>
-          )}
-          {!signalsLoading && signals.length > 0 && (
-            <div className="space-y-3 max-w-4xl">
-              {signals.map((sig) => (
-                <div key={sig.signal_id} className="rounded-xl border border-border p-4 hover:bg-surface-raised transition-colors">
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-0.5 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${SEVERITY_COLORS[sig.severity] ?? SEVERITY_COLORS.low}`}>
-                      {sig.severity}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-fg">{sig.description}</p>
-                      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-fg-faint">
-                        <span>{sig.signal_type.replace(/_/g, " ")}</span>
-                        <span>&middot;</span>
-                        <span>{sig.entity_name}</span>
-                        <span>&middot;</span>
-                        <span>{formatDate(sig.detected_at)}</span>
-                      </div>
-                    </div>
-                    <a
-                      href={`/ask?q=${encodeURIComponent(`Explain the ${sig.signal_type.replace(/_/g, " ")} signal for ${sig.entity_name}`)}`}
-                      className="shrink-0 text-[10px] text-accent/70 hover:text-accent"
-                    >
-                      Ask REMI
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <SignalsPanel signals={signals} loading={signalsLoading} />
       )}
 
-      {/* Activity tab */}
       {activeTab === "activity" && (
-        <div className="flex-1 overflow-y-auto p-6">
-          {eventsLoading && <div className="p-8 text-center text-xs text-fg-faint animate-pulse">Loading activity...</div>}
-          {!eventsLoading && events.length === 0 && (
-            <div className="flex items-center justify-center h-64">
-              <Empty title="No activity yet" description="Events will appear as data is ingested and entities change" />
-            </div>
-          )}
-          {!eventsLoading && events.length > 0 && (
-            <div className="space-y-2 max-w-4xl">
-              {events.map((evt, i) => (
-                <div key={(evt.id as string) ?? i} className="rounded-lg border border-border-subtle p-3 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-fg">
-                      {String(evt.source ?? "")}
-                      {evt.report_type ? <span className="text-fg-faint ml-2">{String(evt.report_type).replace(/_/g, " ")}</span> : null}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1 text-[10px] text-fg-faint">
-                      {(evt.created as number) > 0 && <span className="text-ok">+{evt.created as number} created</span>}
-                      {(evt.updated as number) > 0 && <span className="text-accent">{evt.updated as number} updated</span>}
-                      {(evt.removed as number) > 0 && <span className="text-error">{evt.removed as number} removed</span>}
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-fg-ghost shrink-0">
-                    {evt.timestamp ? formatDate(evt.timestamp as string) : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ActivityPanel events={events} loading={eventsLoading} />
       )}
-
     </div>
   );
 }

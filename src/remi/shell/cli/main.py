@@ -1,8 +1,14 @@
-"""CLI entrypoint — ``remi serve``."""
+"""CLI entrypoint — ``remi serve`` plus auto-discovered capability subcommands."""
 
 from __future__ import annotations
 
 import typer
+
+from remi.shell.config.capabilities import (
+    all_capabilities,
+    ensure_capabilities_registered,
+    resolve_cli_group,
+)
 
 cli = typer.Typer(
     name="remi",
@@ -27,5 +33,12 @@ def serve(
         reload=reload,
     )
 
+
+ensure_capabilities_registered()
+
+for _cap in all_capabilities().values():
+    _group = resolve_cli_group(_cap)
+    if _group is not None:
+        cli.add_typer(_group, name=_cap.name)
 
 app = cli

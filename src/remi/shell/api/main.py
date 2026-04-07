@@ -14,57 +14,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from remi.agent.observe import Event, configure_logging
-from remi.application.api.intelligence import (
-    dashboard_router,
-    events_router,
-    knowledge_router,
-    ontology_router,
-    search_router,
-)
-from remi.application.api.operations import (
-    actions_router,
-    leases_router,
-    maintenance_router,
-    notes_router,
-    tenants_router,
-)
-from remi.application.api.portfolio import (
-    managers_router,
-    owners_router,
-    properties_router,
-    units_router,
-)
-from remi.application.api.system import (
-    agents_router,
-    documents_router,
-    realtime_router,
-    usage_router,
-)
 from remi.shell.api.error_handler import install_error_handlers
 from remi.shell.api.middleware import RequestIDMiddleware
-from remi.shell.config.container import Container
+from remi.shell.config.capabilities import (
+    all_capabilities,
+    ensure_capabilities_registered,
+    resolve_routers,
+)
 from remi.shell.config.settings import RemiSettings, load_settings
 
 
 def _attach_routers(application: FastAPI) -> None:
-    application.include_router(managers_router, prefix="/api/v1")
-    application.include_router(owners_router, prefix="/api/v1")
-    application.include_router(properties_router, prefix="/api/v1")
-    application.include_router(leases_router, prefix="/api/v1")
-    application.include_router(maintenance_router, prefix="/api/v1")
-    application.include_router(agents_router, prefix="/api/v1")
-    application.include_router(documents_router, prefix="/api/v1")
-    application.include_router(events_router, prefix="/api/v1")
-    application.include_router(dashboard_router, prefix="/api/v1")
-    application.include_router(tenants_router, prefix="/api/v1")
-    application.include_router(units_router, prefix="/api/v1")
-    application.include_router(ontology_router, prefix="/api/v1")
-    application.include_router(search_router, prefix="/api/v1")
-    application.include_router(actions_router, prefix="/api/v1")
-    application.include_router(notes_router, prefix="/api/v1")
-    application.include_router(usage_router, prefix="/api/v1")
-    application.include_router(knowledge_router, prefix="/api/v1")
-    application.include_router(realtime_router)
+    """Mount all routers from registered capabilities."""
+    for cap in all_capabilities().values():
+        routers = resolve_routers(cap)
+        for router in routers:
+            if cap.api_prefix:
+                application.include_router(router, prefix=cap.api_prefix)
+            else:
+                application.include_router(router)
 
 
 def _add_cors(application: FastAPI, settings: RemiSettings) -> None:
@@ -83,7 +51,11 @@ def _add_cors(application: FastAPI, settings: RemiSettings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    import asyncio
+
     import structlog
+
+    from remi.shell.config.container import Container
 
     settings: RemiSettings = app.state.settings
     configure_logging(level=settings.logging.level, format=settings.logging.format)
@@ -101,11 +73,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment,
     )
 
+    _reap_interval = 300
+
+    async def _reap_loop() -> None:
+        while True:
+            await asyncio.sleep(_reap_interval)
+            try:
+                reaped = await container.sandbox.reap_expired_sessions()
+                if reaped:
+                    log.info("sandbox_sessions_reaped", count=reaped)
+            except Exception:
+                log.warning("sandbox_reap_error", exc_info=True)
+
+    reap_task = asyncio.create_task(_reap_loop())
+
     yield
+
+    reap_task.cancel()
     log.info(Event.SERVER_SHUTDOWN)
 
 
 def create_app() -> FastAPI:
+    ensure_capabilities_registered()
+
     settings = load_settings()
     application = FastAPI(
         title="REMI",
@@ -132,14 +122,11 @@ def _attach_health(application: FastAPI) -> None:
 
     @application.get("/health", tags=["ops"])
     async def health() -> dict[str, Any]:
-        container: Container | None = getattr(application.state, "container", None)
+        container = getattr(application.state, "container", None)
         trace_count = 0
-        span_count = 0
         if container is not None:
-            store = container.trace_store
-            if hasattr(store, "_by_trace") and hasattr(store, "_spans"):
-                trace_count = len(store._by_trace)
-                span_count = len(store._spans)
+            traces = await container.trace_store.list_traces(limit=1000)
+            trace_count = len(traces)
         uptime_s = round(_time.time() - _boot_time)
 
         llm_calls = 0
@@ -156,7 +143,6 @@ def _attach_health(application: FastAPI) -> None:
             "version": application.version,
             "uptime_s": uptime_s,
             "traces": trace_count,
-            "spans": span_count,
             "llm_calls": llm_calls,
             "llm_total_tokens": llm_total_tokens,
             "llm_cost_usd": llm_cost_usd,
