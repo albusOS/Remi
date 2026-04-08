@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from remi.agent.signals import DomainTBox, load_domain_yaml, set_domain_yaml_path
+from remi.agent.signals import DomainSchema, load_domain_yaml, set_domain_yaml_path
 from remi.application.core.models import (
     Address,
     Property,
@@ -24,9 +24,9 @@ def _configure_agent_paths() -> None:
 
 
 @pytest.fixture
-def domain_tbox() -> DomainTBox:
+def domain_schema() -> DomainSchema:
     raw = load_domain_yaml()
-    return DomainTBox.from_yaml(raw)
+    return DomainSchema.from_yaml(raw)
 
 
 @pytest.fixture

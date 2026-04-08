@@ -7,7 +7,7 @@ from remi.agent.context.frame import ContextFrame, WorldState
 from remi.agent.context.rendering import render_domain_context, render_graph_context
 from remi.agent.graph.retrieval.retriever import ResolvedEntity
 from remi.agent.graph.types import KnowledgeLink
-from remi.agent.signals import DomainTBox, load_domain_yaml
+from remi.agent.signals import DomainSchema, load_domain_yaml
 from remi.agent.types import Message
 from remi.types.text import estimate_tokens, truncate_to_tokens
 
@@ -28,7 +28,7 @@ def test_truncate_to_tokens_no_op() -> None:
 def test_truncate_to_tokens_cuts() -> None:
     long = "Line one\nLine two\nLine three\nLine four\n" * 100
     result = truncate_to_tokens(long, 50)
-    assert estimate_tokens(result) <= 55  # rough, not exact
+    assert estimate_tokens(result) <= 55
     assert len(result) < len(long)
 
 
@@ -122,20 +122,37 @@ def test_render_graph_context_respects_max_tokens() -> None:
     frame = ContextFrame(entities=entities)
 
     result = render_graph_context(frame, max_entities=20, max_tokens=300)
-    assert estimate_tokens(result) <= 350  # some slack for the footer
+    assert estimate_tokens(result) <= 350
 
 
-# -- render_domain_context includes compositions ------------------------------
+# -- render_domain_context with schema ----------------------------------------
 
 
-def test_render_domain_context_includes_compositions() -> None:
-    domain = DomainTBox.from_yaml(load_domain_yaml())
+def test_render_domain_context_includes_entity_types() -> None:
+    domain = DomainSchema.from_yaml(load_domain_yaml())
     result = render_domain_context(domain)
 
-    assert "Composition rules" in result or "Composition signals" in result
-    assert "DelinquencyLeaseCliff" in result
-    assert "OperationalBreakdown" in result
-    assert "DecliningPortfolio" in result
+    assert "Domain Schema" in result
+    assert "PropertyManager" in result
+    assert "Property" in result
+    assert "Unit" in result
+
+
+def test_render_domain_context_includes_relationships() -> None:
+    domain = DomainSchema.from_yaml(load_domain_yaml())
+    result = render_domain_context(domain)
+
+    assert "MANAGES" in result
+    assert "HAS_UNIT" in result
+
+
+def test_render_domain_context_includes_processes() -> None:
+    domain = DomainSchema.from_yaml(load_domain_yaml())
+    result = render_domain_context(domain)
+
+    assert "collections" in result
+    assert "leasing" in result
+    assert "maintenance" in result
 
 
 # -- token-budgeted injection -------------------------------------------------
@@ -144,10 +161,10 @@ def test_render_domain_context_includes_compositions() -> None:
 def test_inject_respects_token_budget() -> None:
     """When the thread already consumes most of the budget, injection is limited."""
     builder = ContextBuilder(
-        domain=DomainTBox(),
+        domain=DomainSchema(),
         token_budget=500,
     )
-    big_prompt = "x" * 1800  # ~450 tokens
+    big_prompt = "x" * 1800
     thread = [
         Message(role="system", content=big_prompt),
         Message(role="user", content="hello"),
@@ -165,7 +182,7 @@ def test_inject_respects_token_budget() -> None:
 def test_inject_includes_document_context_when_budget_allows() -> None:
     """Document context is injected when there is budget headroom."""
     builder = ContextBuilder(
-        domain=DomainTBox(),
+        domain=DomainSchema(),
         token_budget=50_000,
     )
     thread = [
@@ -184,20 +201,18 @@ def test_inject_includes_document_context_when_budget_allows() -> None:
 
 # -- WorldState ---------------------------------------------------------------
 
-def test_world_state_from_tbox() -> None:
-    tbox = DomainTBox.from_yaml(load_domain_yaml())
-    world = WorldState.from_tbox(tbox)
+def test_world_state_from_schema() -> None:
+    schema = DomainSchema.from_yaml(load_domain_yaml())
+    world = WorldState.from_schema(schema)
     assert world.loaded
-    assert world.signal_definitions > 0
-    assert world.thresholds > 0
-    assert world.policies > 0
-    assert world.causal_chains > 0
+    assert world.entity_types > 0
+    assert world.relationships > 0
+    assert world.processes > 0
     d = world.to_dict()
-    assert d["tbox_loaded"] is True
-    assert "compositions" in d
+    assert d["schema_loaded"] is True
 
 
-def test_world_state_none_tbox() -> None:
-    world = WorldState.from_tbox(None)
+def test_world_state_none_schema() -> None:
+    world = WorldState.from_schema(None)
     assert not world.loaded
-    assert world.signal_definitions == 0
+    assert world.entity_types == 0

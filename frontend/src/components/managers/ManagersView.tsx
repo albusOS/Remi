@@ -101,7 +101,7 @@ function IssueChips({ m }: { m: ManagerListItem }) {
   );
 }
 
-function AggregateStrip({ managers }: { managers: ManagerListItem[] }) {
+function AggregateStrip({ managers, loading }: { managers: ManagerListItem[]; loading?: boolean }) {
   const totalUnits = managers.reduce((s, m) => s + m.metrics.total_units, 0);
   const totalOccupied = managers.reduce((s, m) => s + m.metrics.occupied, 0);
   const totalRevenue = managers.reduce((s, m) => s + m.metrics.total_actual_rent, 0);
@@ -112,26 +112,30 @@ function AggregateStrip({ managers }: { managers: ManagerListItem[] }) {
   const avgOcc = totalUnits > 0 ? totalOccupied / totalUnits : 0;
 
   const stats: { label: string; value: string; alert?: boolean }[] = [
-    { label: "Managers", value: String(managers.length) },
-    { label: "Units", value: totalUnits.toLocaleString() },
-    { label: "Occupancy", value: pct(avgOcc), alert: avgOcc < 0.9 },
-    { label: "Revenue", value: fmt$(totalRevenue) },
-    { label: "LTL", value: fmt$(totalLTL), alert: totalLTL > 0 },
-    { label: "Delinquent", value: fmt$(totalDelinq), alert: totalDelinq > 0 },
-    { label: "Vacant", value: String(totalVacant), alert: totalVacant > 0 },
-    { label: "Issues", value: String(totalIssues), alert: totalIssues > 0 },
+    { label: "Managers", value: managers.length > 0 ? String(managers.length) : "—" },
+    { label: "Units", value: totalUnits > 0 ? totalUnits.toLocaleString() : "—" },
+    { label: "Occupancy", value: totalUnits > 0 ? pct(avgOcc) : "—", alert: totalUnits > 0 && avgOcc < 0.9 },
+    { label: "Revenue", value: totalRevenue > 0 ? fmt$(totalRevenue) : "—" },
+    { label: "LTL", value: totalLTL > 0 ? fmt$(totalLTL) : "—", alert: totalLTL > 0 },
+    { label: "Delinquent", value: totalDelinq > 0 ? fmt$(totalDelinq) : "—", alert: totalDelinq > 0 },
+    { label: "Vacant", value: totalUnits > 0 ? String(totalVacant) : "—", alert: totalVacant > 0 },
+    { label: "Issues", value: totalUnits > 0 ? String(totalIssues) : "—", alert: totalIssues > 0 },
   ];
 
   return (
-    <div className="flex flex-wrap gap-x-6 gap-y-2 px-1">
-      {stats.map((s) => (
-        <div key={s.label} className="text-center min-w-[60px]">
-          <p className="text-[9px] text-fg-faint uppercase tracking-wider">{s.label}</p>
-          <p className={`text-sm font-bold font-mono tracking-tight ${s.alert ? "text-warn" : "text-fg"}`}>
-            {s.value}
-          </p>
-        </div>
-      ))}
+    <div className="rounded-xl border border-border bg-surface-raised px-4 py-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-3">
+        {stats.map((s) => (
+          <div key={s.label} className="text-center min-w-[56px]">
+            <p className="text-[9px] text-fg-faint uppercase tracking-wider mb-0.5">{s.label}</p>
+            <p className={`text-sm font-bold font-mono tracking-tight transition-colors ${
+              loading ? "text-fg-ghost number-shimmer" : s.alert ? "text-warn-fg" : "text-fg"
+            }`}>
+              {s.value}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -225,7 +229,7 @@ export function ManagersView() {
     [],
   );
 
-  const activeMgrs = (managers ?? []).filter((m) => m.metrics.total_units > 0 || m.property_count > 0);
+  const activeMgrs = (managers ?? ([] as ManagerListItem[])).filter((m) => m.metrics.total_units > 0 || m.property_count > 0);
   const filtered = search
     ? activeMgrs.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.company?.toLowerCase().includes(search.toLowerCase()))
     : activeMgrs;
@@ -240,9 +244,8 @@ export function ManagersView() {
         </p>
       </div>
 
-      {!loading && activeMgrs.length > 0 && (
-        <AggregateStrip managers={activeMgrs} />
-      )}
+      {/* AggregateStrip — always rendered; zeros when loading or empty */}
+      <AggregateStrip managers={loading ? [] : activeMgrs} loading={loading} />
 
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-xs">
@@ -268,51 +271,58 @@ export function ManagersView() {
         </select>
       </div>
 
-      {loading && (
-        <div className="text-sm text-fg-faint animate-pulse py-16 text-center">Loading managers...</div>
-      )}
-
-      {!loading && sorted.length > 0 && (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border text-[9px] font-semibold text-fg-muted uppercase tracking-wider">
-                <th className="pl-4 pr-2 py-2.5 text-left w-8">#</th>
-                <th className="px-2 py-2.5 text-left">Manager</th>
-                <th className="px-2 py-2.5 text-left hidden lg:table-cell">Occupancy</th>
-                <th className="px-2 py-2.5 text-right hidden md:table-cell">Revenue</th>
-                <th className="px-2 py-2.5 text-right hidden lg:table-cell">LTL</th>
-                <th className="px-2 py-2.5 text-right hidden lg:table-cell">Delinquent</th>
-                <th className="px-2 py-2.5 text-left hidden sm:table-cell">Issues</th>
-                <th className="pr-4 pl-2 py-2.5 w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((m, i) => (
-                <ManagerRow key={m.id} m={m} rank={i + 1} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {!loading && sorted.length === 0 && activeMgrs.length > 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-sm text-fg-faint">No managers match &quot;{search}&quot;</p>
-        </div>
-      )}
-
-      {!loading && activeMgrs.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-sm text-fg-faint">No managers yet</p>
-          <Link
-            href="/documents"
-            className="mt-3 text-xs text-accent hover:text-accent-hover transition-colors"
-          >
-            Upload reports to get started →
-          </Link>
-        </div>
-      )}
+      {/* Table — skeleton rows on load, real rows after */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border text-[9px] font-semibold text-fg-muted uppercase tracking-wider">
+              <th className="pl-4 pr-2 py-2.5 text-left w-8">#</th>
+              <th className="px-2 py-2.5 text-left">Manager</th>
+              <th className="px-2 py-2.5 text-left hidden lg:table-cell">Occupancy</th>
+              <th className="px-2 py-2.5 text-right hidden md:table-cell">Revenue</th>
+              <th className="px-2 py-2.5 text-right hidden lg:table-cell">LTL</th>
+              <th className="px-2 py-2.5 text-right hidden lg:table-cell">Delinquent</th>
+              <th className="px-2 py-2.5 text-left hidden sm:table-cell">Issues</th>
+              <th className="pr-4 pl-2 py-2.5 w-10"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading
+              ? [...Array(5)].map((_, i) => (
+                  <tr key={i} className="border-b border-border-subtle">
+                    <td className="pl-4 pr-2 py-3"><span className="block w-4 h-2.5 rounded bg-border number-shimmer" /></td>
+                    <td className="px-2 py-3">
+                      <div className="h-3 w-32 rounded bg-border number-shimmer mb-1" />
+                      <div className="h-2 w-20 rounded bg-border-subtle number-shimmer" />
+                    </td>
+                    <td className="px-2 py-3 hidden lg:table-cell"><div className="h-2 w-24 rounded bg-border number-shimmer" /></td>
+                    <td className="px-2 py-3 hidden md:table-cell"><div className="h-2.5 w-16 rounded bg-border number-shimmer ml-auto" /></td>
+                    <td className="px-2 py-3 hidden lg:table-cell"><div className="h-2 w-12 rounded bg-border number-shimmer ml-auto" /></td>
+                    <td className="px-2 py-3 hidden lg:table-cell"><div className="h-2 w-12 rounded bg-border number-shimmer ml-auto" /></td>
+                    <td className="px-2 py-3 hidden sm:table-cell"><div className="h-5 w-16 rounded bg-border number-shimmer" /></td>
+                    <td className="pr-4 pl-2 py-3" />
+                  </tr>
+                ))
+              : sorted.map((m, i) => (
+                  <ManagerRow key={m.id} m={m} rank={i + 1} />
+                ))
+            }
+          </tbody>
+        </table>
+        {!loading && sorted.length === 0 && activeMgrs.length > 0 && (
+          <div className="py-10 text-center text-sm text-fg-faint">
+            No managers match &quot;{search}&quot;
+          </div>
+        )}
+        {!loading && activeMgrs.length === 0 && (
+          <div className="py-16 text-center">
+            <p className="text-sm text-fg-faint mb-2">No managers yet</p>
+            <Link href="/documents" className="text-xs text-accent hover:text-accent-hover transition-colors">
+              Upload reports to get started →
+            </Link>
+          </div>
+        )}
+      </div>
     </PageContainer>
   );
 }

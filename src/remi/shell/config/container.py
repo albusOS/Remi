@@ -1,11 +1,14 @@
 """REMI dependency injection container — pure wiring only.
 
 Calls factory functions from the modules that own the things being built.
-Only three kernel tool providers are registered: ``AnalysisToolProvider``
-(python, bash), ``MemoryToolProvider`` (memory_store, memory_recall),
-and ``DelegationToolProvider`` (delegate_to_agent). All domain data
-access goes through the ``remi`` CLI in agent mode, or through the
-request router's query fast path for simple questions.
+Tool providers registered: ``AnalysisToolProvider`` (python, bash),
+``MemoryToolProvider`` (memory_store, memory_recall),
+``DelegationToolProvider`` (delegate_to_agent),
+``QueryToolProvider`` (query — in-process resolver dispatch),
+``DocumentToolProvider`` (document_list, document_query).
+
+All domain data access goes through in-process tools (query, documents)
+or the ``remi`` CLI in sandbox mode. No pre-LLM routing.
 
 Only attributes read outside this module are stored as ``self.*``.
 Internal intermediaries are local variables.
@@ -26,8 +29,7 @@ from remi.agent.runtime import AgentRuntime, RetryPolicy
 from remi.agent.sandbox import Sandbox, build_sandbox
 from remi.agent.sessions import build_chat_session_store
 from remi.agent.signals import (
-    DomainTBox,
-    MutableTBox,
+    DomainSchema,
     load_domain_yaml,
     set_domain_yaml_path,
 )
@@ -59,8 +61,6 @@ from remi.application.portfolio import (
     RentRollResolver,
 )
 from remi.application.profile import build_re_profile
-from remi.application.resolvers import QueryDispatcher
-from remi.application.routing import RERouter
 from remi.application.stores import (
     InMemoryEventStore,
     StoreSuite,
@@ -68,20 +68,8 @@ from remi.application.stores import (
 )
 from remi.application.stores.indexer import AgentVectorSearch
 from remi.application.stores.world import build_re_world_model
+from remi.application.tools import DocumentToolProvider, QueryToolProvider
 from remi.shell.config.settings import RemiSettings
-
-_QUERY_SYSTEM_PROMPT = """\
-You are REMI, the AI copilot for real estate operations management.
-You have been given data that answers the user's question.
-Interpret the data and respond naturally.
-
-Rules:
-- Be concise. Bullet points over paragraphs. Numbers over adjectives.
-- Cite specific data — don't say "several" when you know the count.
-- If the data shows problems, surface them proactively.
-- Never say "based on the data provided" — just answer.
-- Short questions get short answers.
-"""
 
 
 class Container:
@@ -129,10 +117,9 @@ class Container:
         self.usage_ledger: LLMUsageLedger = LLMUsageLedger()
         tracer = Tracer(self.trace_store)
 
-        # -- Domain TBox -------------------------------------------------------
+        # -- Domain schema -----------------------------------------------------
         raw_domain = load_domain_yaml()
-        self.domain_tbox: DomainTBox = DomainTBox.from_yaml(raw_domain)
-        mutable_tbox = MutableTBox(self.domain_tbox)
+        self.domain_schema: DomainSchema = DomainSchema.from_yaml(raw_domain)
 
         # -- Sandbox -----------------------------------------------------------
         self.sandbox: Sandbox = build_sandbox(self.settings)
@@ -183,30 +170,35 @@ class Container:
         # -- World model --------------------------------------------------------
         self.world_model: WorldModel = build_re_world_model(self.property_store)
 
-        # -- Tool providers (kernel primitives only) ----------------------------
+        # -- Tool providers ----------------------------------------------------
         kernel_providers: list[ToolProvider] = [
             AnalysisToolProvider(self.sandbox),
             MemoryToolProvider(memory_store),
         ]
-        for provider in kernel_providers:
+        domain_providers: list[ToolProvider] = [
+            QueryToolProvider(
+                manager_resolver=self.manager_resolver,
+                property_resolver=self.property_resolver,
+                rent_roll_resolver=self.rent_roll_resolver,
+                dashboard_resolver=self.dashboard_resolver,
+                lease_resolver=self.lease_resolver,
+                maintenance_resolver=self.maintenance_resolver,
+                search_service=self.search_service,
+                property_store=self.property_store,
+            ),
+            DocumentToolProvider(
+                content_store=self.content_store,
+                property_store=self.property_store,
+                document_ingest=self.document_ingest,
+                vector_search=vector_search,
+            ),
+        ]
+        for provider in kernel_providers + domain_providers:
             provider.register(self.tool_registry)
-
-        # -- Request router (classifies questions into tiers) -------------------
-        re_router = RERouter()
-        query_dispatcher = QueryDispatcher(
-            manager_resolver=self.manager_resolver,
-            property_resolver=self.property_resolver,
-            rent_roll_resolver=self.rent_roll_resolver,
-            dashboard_resolver=self.dashboard_resolver,
-            lease_resolver=self.lease_resolver,
-            maintenance_resolver=self.maintenance_resolver,
-            search_service=self.search_service,
-            property_store=self.property_store,
-        )
 
         # -- Chat agent --------------------------------------------------------
         context_builder = build_context_builder(
-            domain=mutable_tbox,
+            domain=self.domain_schema,
             world_model=self.world_model,
             vector_store=self.vector_store,
             embedder=self.embedder,
@@ -217,7 +209,7 @@ class Container:
             provider_factory=self.provider_factory,
             tool_registry=self.tool_registry,
             sandbox=self.sandbox,
-            domain_tbox=self.domain_tbox,
+            domain_tbox=self.domain_schema,
             memory_store=memory_store,
             tracer=tracer,
             chat_session_store=self._chat_session_store,
@@ -230,9 +222,6 @@ class Container:
             context_builder=context_builder,
             usage_ledger=self.usage_ledger,
             recall_service=recall_service,
-            router=re_router,
-            data_resolver=query_dispatcher,
-            query_system_prompt=_QUERY_SYSTEM_PROMPT,
         )
 
         # -- Wire workflow engine ↔ agent runtime (bidirectional) --------------

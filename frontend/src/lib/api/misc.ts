@@ -67,6 +67,12 @@ export const notesApi = {
     del<{ deleted: boolean }>(`/api/v1/notes/${noteId}`),
 };
 
+export interface DomainSchemaResponse {
+  entity_types: Array<{ name: string; description: string; key_fields: string[] }>;
+  relationships: Array<{ name: string; source: string; target: string; description: string }>;
+  processes: Array<{ name: string; description: string; involves: string[] }>;
+}
+
 export const ontologyApi = {
   graphSnapshot: (scope?: { manager_id?: string; owner_id?: string }) =>
     get<GraphSnapshot>(`/api/v1/ontology/snapshot${qs(scope || {})}`),
@@ -76,6 +82,9 @@ export const ontologyApi = {
 
   operationalGraph: () =>
     get<OperationalGraph>("/api/v1/ontology/graph/operational"),
+
+  domainSchema: () =>
+    get<DomainSchemaResponse>("/api/v1/ontology/domain-schema"),
 };
 
 export const signalsApi = {

@@ -181,8 +181,26 @@ export function Dashboard() {
     return (
       <PageContainer wide>
         <div className="pt-2 pb-1"><CommandTrigger onClick={openCommandMenu} prominent /></div>
-        <div className="flex items-center justify-center py-20">
-          <div className="text-sm text-fg-faint animate-pulse">Loading dashboard...</div>
+        {/* Skeleton grid — always shows the layout, never an empty page */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-border bg-surface-raised p-6 flex flex-col items-center justify-center h-48">
+            <div className="w-24 h-24 rounded-full border-4 border-border number-shimmer" />
+            <div className="mt-4 h-3 w-24 rounded bg-border number-shimmer" />
+          </div>
+          <div className="rounded-2xl border border-border bg-surface-raised p-6 lg:col-span-2 space-y-3">
+            <div className="h-2 w-20 rounded bg-border number-shimmer" />
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="flex justify-between border-b border-border-subtle pb-2">
+                <div className="h-2.5 rounded bg-border w-28 number-shimmer" />
+                <div className="h-2.5 rounded bg-border w-16 number-shimmer" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-2xl border border-border bg-surface-raised p-6 h-36 number-shimmer" />
+          ))}
         </div>
       </PageContainer>
     );
@@ -203,7 +221,22 @@ export function Dashboard() {
     return (
       <PageContainer wide>
         <div className="pt-2 pb-1"><CommandTrigger onClick={openCommandMenu} prominent /></div>
-        <div className="flex flex-col items-center justify-center py-24 text-center anim-scale-in">
+        {/* Empty skeleton grid — structure persists even with no data */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 opacity-40 pointer-events-none select-none mb-4">
+          <div className="rounded-2xl border border-border bg-surface-raised p-6 flex flex-col items-center justify-center h-48">
+            <div className="w-24 h-24 rounded-full border-4 border-border" />
+            <div className="mt-4 h-3 w-24 rounded bg-border" />
+          </div>
+          <div className="rounded-2xl border border-border bg-surface-raised p-6 lg:col-span-2 space-y-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="flex justify-between border-b border-border-subtle pb-2">
+                <div className="h-2.5 rounded bg-border w-28" />
+                <div className="h-2.5 rounded bg-border w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-16 h-16 rounded-2xl bg-surface-sunken flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-fg-ghost" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
@@ -297,39 +330,52 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 anim-fade-up" style={{ animationDelay: "200ms" }}>
-        {totalUnits > 0 && (() => {
+        {/* Unit status — always rendered */}
+        {(() => {
           const vacant = totalUnits - totalOccupied;
           const notice = vacancies?.total_notice ?? 0;
-          const occPct = (totalOccupied / totalUnits) * 100;
-          const noticePct = (notice / totalUnits) * 100;
-          const vacPct = (vacant / totalUnits) * 100;
+          const occPct = totalUnits > 0 ? (totalOccupied / totalUnits) * 100 : 0;
+          const noticePct = totalUnits > 0 ? (notice / totalUnits) * 100 : 0;
+          const vacPct = totalUnits > 0 ? (vacant / totalUnits) * 100 : 0;
           return (
             <Link href="/vacancies" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-[10px] font-semibold text-fg-muted uppercase tracking-widest">Unit Status</h2>
-                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{totalUnits.toLocaleString()} total</span>
+                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{totalUnits > 0 ? `${totalUnits.toLocaleString()} total` : "—"}</span>
               </div>
               <div className="flex h-4 rounded-full overflow-hidden bg-border-subtle">
-                <div className="bg-ok transition-all duration-700" style={{ width: `${occPct}%` }} />
-                {noticePct > 0.5 && <div className="bg-warn transition-all duration-700" style={{ width: `${noticePct}%` }} />}
-                {vacPct > 0.5 && <div className="bg-error/70 transition-all duration-700" style={{ width: `${vacPct}%` }} />}
+                {totalUnits > 0 ? (
+                  <>
+                    <div className="bg-ok transition-all duration-700" style={{ width: `${occPct}%` }} />
+                    {noticePct > 0.5 && <div className="bg-warn transition-all duration-700" style={{ width: `${noticePct}%` }} />}
+                    {vacPct > 0.5 && <div className="bg-error/70 transition-all duration-700" style={{ width: `${vacPct}%` }} />}
+                  </>
+                ) : (
+                  <div className="bg-border-subtle w-full" />
+                )}
               </div>
               <div className="flex gap-5 mt-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-ok" />
-                  <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{totalOccupied.toLocaleString()}</span> occupied</span>
-                </div>
-                {notice > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-warn" />
-                    <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{notice}</span> notice</span>
-                  </div>
-                )}
-                {vacant > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-error/70" />
-                    <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{vacant}</span> vacant</span>
-                  </div>
+                {totalUnits > 0 ? (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-ok" />
+                      <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{totalOccupied.toLocaleString()}</span> occupied</span>
+                    </div>
+                    {notice > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-warn" />
+                        <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{notice}</span> notice</span>
+                      </div>
+                    )}
+                    {vacant > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-error/70" />
+                        <span className="text-xs text-fg-secondary"><span className="font-semibold text-fg">{vacant}</span> vacant</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-xs text-fg-faint">No units yet</span>
                 )}
               </div>
               {vacancies && vacancies.total_market_rent_at_risk > 0 && (
@@ -339,110 +385,119 @@ export function Dashboard() {
           );
         })()}
 
-        {leases && leases.leases.length > 0 && (() => {
-          const b30 = leases.leases.filter((l) => !l.is_month_to_month && l.days_left <= 30).length;
-          const b60 = leases.leases.filter((l) => !l.is_month_to_month && l.days_left > 30 && l.days_left <= 60).length;
-          const b90 = leases.leases.filter((l) => !l.is_month_to_month && l.days_left > 60 && l.days_left <= 90).length;
-          const mtm = leases.month_to_month_count;
+        {/* Lease expirations — always rendered */}
+        {(() => {
+          const b30 = leases?.leases.filter((l) => !l.is_month_to_month && l.days_left <= 30).length ?? 0;
+          const b60 = leases?.leases.filter((l) => !l.is_month_to_month && l.days_left > 30 && l.days_left <= 60).length ?? 0;
+          const b90 = leases?.leases.filter((l) => !l.is_month_to_month && l.days_left > 60 && l.days_left <= 90).length ?? 0;
+          const mtm = leases?.month_to_month_count ?? 0;
           const maxBucket = Math.max(b30, b60, b90, mtm, 1);
           const bar = (count: number, color: string) => (
-            <div className={`${color} rounded-r-full h-5 transition-all duration-700`} style={{ width: `${Math.max((count / maxBucket) * 100, count > 0 ? 8 : 0)}%` }} />
+            <div className={`${color} rounded-r-full h-5 transition-all duration-700 min-w-0`} style={{ width: `${Math.max((count / maxBucket) * 100, count > 0 ? 8 : 0)}%` }} />
           );
           return (
             <Link href="/leases" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-[10px] font-semibold text-fg-muted uppercase tracking-widest">Lease Expirations</h2>
-                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{leases.total_expiring} total</span>
+                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{leases ? `${leases.total_expiring} total` : "—"}</span>
               </div>
               <div className="space-y-2.5">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-fg-muted w-12 shrink-0 text-right">30 days</span>
-                  <div className="flex-1">{bar(b30, "bg-error")}</div>
-                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b30}</span>
+                  <div className="flex-1 bg-border-subtle rounded-r-full h-5">{bar(b30, "bg-error")}</div>
+                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b30 || "—"}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-fg-muted w-12 shrink-0 text-right">60 days</span>
-                  <div className="flex-1">{bar(b60, "bg-warn")}</div>
-                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b60}</span>
+                  <div className="flex-1 bg-border-subtle rounded-r-full h-5">{bar(b60, "bg-warn")}</div>
+                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b60 || "—"}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-fg-muted w-12 shrink-0 text-right">90 days</span>
-                  <div className="flex-1">{bar(b90, "bg-warn/50")}</div>
-                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b90}</span>
+                  <div className="flex-1 bg-border-subtle rounded-r-full h-5">{bar(b90, "bg-warn/50")}</div>
+                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{b90 || "—"}</span>
                 </div>
-                {mtm > 0 && (
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-fg-muted w-12 shrink-0 text-right">MTM</span>
-                    <div className="flex-1">{bar(mtm, "bg-accent/40")}</div>
-                    <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{mtm}</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-fg-muted w-12 shrink-0 text-right">MTM</span>
+                  <div className="flex-1 bg-border-subtle rounded-r-full h-5">{bar(mtm, "bg-accent/40")}</div>
+                  <span className="text-xs font-semibold font-mono text-fg w-6 text-right">{mtm || "—"}</span>
+                </div>
               </div>
             </Link>
           );
         })()}
 
-        {delinquency && delinquency.total_delinquent > 0 && (() => {
-          const total0_30 = delinquency.tenants.reduce((s, t) => s + t.balance_0_30, 0);
-          const total30p = delinquency.tenants.reduce((s, t) => s + t.balance_30_plus, 0);
-          const totalBal = delinquency.total_balance || 1;
+        {/* Delinquency — always rendered */}
+        {(() => {
+          const total0_30 = delinquency?.tenants.reduce((s, t) => s + t.balance_0_30, 0) ?? 0;
+          const total30p = delinquency?.tenants.reduce((s, t) => s + t.balance_30_plus, 0) ?? 0;
+          const totalBal = delinquency?.total_balance ?? 0;
+          const denom = totalBal || 1;
           return (
-            <Link href="/delinquency" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
+            <Link
+              href="/delinquency"
+              className={`rounded-2xl border bg-surface p-6 card-hover group transition-all hover:border-accent/20 ${totalBal > 0 ? "border-error/20 card-alert-glow" : "border-border"}`}
+            >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-[10px] font-semibold text-fg-muted uppercase tracking-widest">Delinquency</h2>
-                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{delinquency.total_delinquent} tenants</span>
+                <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">
+                  {delinquency ? `${delinquency.total_delinquent} tenants` : "—"}
+                </span>
               </div>
               <div className="flex items-end gap-6">
                 <div className="flex-1">
-                  <p className="text-3xl font-bold text-error tracking-tight">{fmt$(delinquency.total_balance)}</p>
+                  <p className={`text-3xl font-bold tracking-tight ${totalBal > 0 ? "text-error-fg" : "text-fg-ghost"}`}>
+                    {totalBal > 0 ? fmt$(totalBal) : "$0"}
+                  </p>
                   <p className="text-[11px] text-fg-faint mt-1">total outstanding</p>
                 </div>
                 <div className="flex gap-2 items-end h-16">
                   <div className="flex flex-col items-center gap-1">
-                    <div className="w-10 bg-warn rounded-t transition-all duration-700" style={{ height: `${(total0_30 / totalBal) * 64}px`, minHeight: total0_30 > 0 ? 8 : 0 }} />
+                    <div className="w-10 bg-warn rounded-t transition-all duration-700" style={{ height: `${(total0_30 / denom) * 64}px`, minHeight: total0_30 > 0 ? 8 : 0 }} />
                     <span className="text-[9px] text-fg-muted">0-30</span>
                   </div>
                   <div className="flex flex-col items-center gap-1">
-                    <div className="w-10 bg-error rounded-t transition-all duration-700" style={{ height: `${(total30p / totalBal) * 64}px`, minHeight: total30p > 0 ? 8 : 0 }} />
+                    <div className="w-10 bg-error rounded-t transition-all duration-700" style={{ height: `${(total30p / denom) * 64}px`, minHeight: total30p > 0 ? 8 : 0 }} />
                     <span className="text-[9px] text-fg-muted">30+</span>
                   </div>
                 </div>
               </div>
               <div className="flex gap-4 mt-3 text-[10px]">
-                <span className="text-fg-muted">0-30d: <span className="font-semibold text-warn">{fmt$(total0_30)}</span></span>
-                <span className="text-fg-muted">30+d: <span className="font-semibold text-error">{fmt$(total30p)}</span></span>
+                <span className="text-fg-muted">0-30d: <span className={`font-semibold ${total0_30 > 0 ? "text-warn" : "text-fg-faint"}`}>{total0_30 > 0 ? fmt$(total0_30) : "—"}</span></span>
+                <span className="text-fg-muted">30+d: <span className={`font-semibold ${total30p > 0 ? "text-error-fg" : "text-fg-faint"}`}>{total30p > 0 ? fmt$(total30p) : "—"}</span></span>
               </div>
             </Link>
           );
         })()}
 
-        {totalOpenMaint > 0 && (
-          <Link href="/properties" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-[10px] font-semibold text-fg-muted uppercase tracking-widest">Maintenance</h2>
-              <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{totalOpenMaint} open</span>
+        {/* Maintenance — always rendered */}
+        <Link href="/properties" className="rounded-2xl border border-border bg-surface p-6 card-hover group transition-all hover:border-accent/20">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[10px] font-semibold text-fg-muted uppercase tracking-widest">Maintenance</h2>
+            <span className="text-[10px] text-fg-ghost group-hover:text-accent transition-colors">{totalOpenMaint > 0 ? `${totalOpenMaint} open` : "—"}</span>
+          </div>
+          <div className="flex items-end gap-6">
+            <div className="flex-1">
+              <p className={`text-3xl font-bold tracking-tight ${totalOpenMaint > 0 ? "text-fg" : "text-fg-ghost"}`}>
+                {totalOpenMaint > 0 ? totalOpenMaint : "0"}
+              </p>
+              <p className="text-[11px] text-fg-faint mt-1">open requests</p>
             </div>
-            <div className="flex items-end gap-6">
-              <div className="flex-1">
-                <p className="text-3xl font-bold text-fg tracking-tight">{totalOpenMaint}</p>
-                <p className="text-[11px] text-fg-faint mt-1">open requests</p>
-              </div>
-            </div>
-            {overview.properties.filter((p) => p.open_maintenance > 0).length > 1 && (
-              <div className="mt-4 pt-3 border-t border-border-subtle space-y-1.5">
-                {[...overview.properties].filter((p) => p.open_maintenance > 0).sort((a, b) => b.open_maintenance - a.open_maintenance).slice(0, 5).map((p) => (
-                  <div key={p.property_id} className="flex items-center gap-2">
-                    <span className="text-[10px] text-fg-muted truncate w-28 shrink-0">{p.property_name}</span>
-                    <div className="flex-1 h-1.5 rounded-full bg-border-subtle overflow-hidden">
-                      <div className="h-full rounded-full bg-sky-400 transition-all duration-500" style={{ width: `${(p.open_maintenance / totalOpenMaint) * 100}%` }} />
-                    </div>
-                    <span className="text-[10px] font-mono text-fg-secondary w-5 text-right">{p.open_maintenance}</span>
+          </div>
+          {totalOpenMaint > 0 && overview.properties.filter((p) => p.open_maintenance > 0).length > 1 && (
+            <div className="mt-4 pt-3 border-t border-border-subtle space-y-1.5">
+              {[...overview.properties].filter((p) => p.open_maintenance > 0).sort((a, b) => b.open_maintenance - a.open_maintenance).slice(0, 5).map((p) => (
+                <div key={p.property_id} className="flex items-center gap-2">
+                  <span className="text-[10px] text-fg-muted truncate w-28 shrink-0">{p.property_name}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-border-subtle overflow-hidden">
+                    <div className="h-full rounded-full bg-badge-cyan-fg transition-all duration-500" style={{ width: `${(p.open_maintenance / totalOpenMaint) * 100}%` }} />
                   </div>
-                ))}
-              </div>
-            )}
-          </Link>
-        )}
+                  <span className="text-[10px] font-mono text-fg-secondary w-5 text-right">{p.open_maintenance}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Link>
       </div>
 
       {activeMgrs.length > 0 && (

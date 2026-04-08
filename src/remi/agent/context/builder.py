@@ -1,8 +1,8 @@
 """ContextBuilder — assembles the agent's per-turn perception of the world.
 
-The TBox (domain ontology) is injected once at agent priming time via
-``build_initial_thread``.  The ContextBuilder handles the per-turn ABox:
-graph neighborhood and document retrieval.
+The domain schema is injected once at agent priming time via
+``build_initial_thread``.  The ContextBuilder handles the per-turn
+perception: graph neighborhood and document retrieval.
 
 It produces a typed ``ContextFrame`` whose fields stay structured until
 ``inject_into_thread`` projects them into prose system messages.
@@ -20,7 +20,7 @@ from remi.agent.graph.retrieval.retriever import GraphRetriever
 from remi.agent.graph.stores import WorldModel
 from remi.agent.observe.events import Event
 from remi.agent.observe.types import SpanKind, Tracer
-from remi.agent.signals import DomainTBox, MutableTBox
+from remi.agent.signals import DomainSchema
 from remi.agent.types import Message
 from remi.agent.vectors.types import Embedder, VectorStore
 from remi.types.text import estimate_tokens, truncate_to_tokens
@@ -33,8 +33,9 @@ _DEFAULT_TOKEN_BUDGET = 16_000
 class ContextBuilder:
     """Assembles a per-turn ContextFrame from graph and document data.
 
-    The TBox is **not** injected here — it is part of the agent's priming
-    (see ``build_initial_thread``).  The builder focuses on the ABox:
+    The domain schema is **not** injected here — it is part of the
+    agent's priming (see ``build_initial_thread``).  The builder
+    focuses on per-turn perception:
 
     1. Optionally resolve question-relevant entities via ``GraphRetriever``
     2. Optionally fetch relevant document chunks via vector search
@@ -42,7 +43,7 @@ class ContextBuilder:
 
     def __init__(
         self,
-        domain: DomainTBox | MutableTBox,
+        domain: DomainSchema,
         graph_retriever: GraphRetriever | None = None,
         embedder: Embedder | None = None,
         vector_store: VectorStore | None = None,
@@ -68,7 +69,7 @@ class ContextBuilder:
 
         *phases* controls which per-turn injection steps run.  Valid values:
         ``"graph"``, ``"documents"``, ``"memory"``.
-        ``"domain"`` is accepted but ignored (TBox is primed, not per-turn).
+        ``"domain"`` is accepted but ignored (schema is primed, not per-turn).
         When ``None``, all phases run.
         """
         frame = ContextFrame()
@@ -79,9 +80,6 @@ class ContextBuilder:
         run_all = phases is None
         needs_graph = run_all or (phases is not None and "graph" in phases)
         needs_documents = run_all or (phases is not None and "documents" in phases)
-
-        frame.policies = list(getattr(self._domain, "policies", []))
-        frame.causal_chains = list(getattr(self._domain, "causal_chains", []))
 
         async def _fetch_graph() -> None:
             if not (needs_graph and self._graph_retriever is not None and question):
@@ -140,9 +138,9 @@ class ContextBuilder:
     ) -> None:
         """Inject per-turn perception into the thread as system messages.
 
-        The TBox is already in the thread from priming.  This injects
-        only ABox perception: document context and graph context, under
-        the token budget.
+        The domain schema is already in the thread from priming.  This
+        injects only per-turn perception: document context and graph
+        context, under the token budget.
 
         Injection point: immediately *before* the last user message.
         """
@@ -176,7 +174,7 @@ def _find_tail_inject_point(thread: list[Message]) -> int:
 
     Places dynamic per-turn context in *recent* context where LLM
     attention is strongest, while keeping the static prefix (system
-    prompt + TBox) contiguous for KV-cache hits.
+    prompt + schema) contiguous for KV-cache hits.
 
     Falls back to after the static system prefix if no user message
     exists yet (e.g. first turn).
@@ -195,7 +193,7 @@ def _find_tail_inject_point(thread: list[Message]) -> int:
 
 def build_context_builder(
     *,
-    domain: DomainTBox | MutableTBox,
+    domain: DomainSchema,
     world_model: WorldModel | None = None,
     vector_store: VectorStore | None = None,
     embedder: Embedder | None = None,

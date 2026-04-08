@@ -106,7 +106,7 @@ shell/
   config/
     settings.py   Loads YAML + .env + env-var interpolation → RemiSettings
     container.py  DI wiring — 3 kernel tool providers only
-    domain.yaml   Domain TBox — signal definitions, thresholds, rules
+    domain.yaml   Domain schema — entity types, relationships, processes
   api/
     main.py       FastAPI app factory + lifespan (bootstraps Container)
     middleware.py Request ID + structlog context injection
@@ -246,7 +246,7 @@ AgentRuntime.ask()
         ├── SkillDiscovery → load skill catalog into system prompt
         ├── MemoryRecallService → inject relevant memories
         ├── ContextBuilder.build()
-        │   Pulls: domain TBox signals, world model summary
+        │   Pulls: domain schema, world model summary
         │
         ├── LLMProvider.complete()   (streaming)
         │
@@ -342,5 +342,5 @@ For each setting, later sources win:
 - `application/` never imports from `shell/`
 - `container.py` is pure wiring — no business logic, no factory decisions
 - Factory functions live in the module that owns the thing being built
-- Domain signal definitions, thresholds, and rules live in `shell/config/domain.yaml` — never hardcoded in Python
-- The agent reasons over data via tools; there is no precomputed signal engine
+- Domain schema (entity types, relationships, processes) lives in `shell/config/domain.yaml`
+- The agent discovers patterns and calculates significance from actual data — no predefined rules or thresholds

@@ -41,7 +41,6 @@ modules:
       max_tokens: 8192
       max_iterations: 22
       max_history_turns: 20
-      compact_tbox: true
 
       system_prompt: |
         You are REMI Research — a deep analytical engine for real estate
@@ -144,6 +143,36 @@ modules:
         - Recommendations
         - Methodology
 
+        At the very end of SYNTHESIZE, emit a machine-readable artifact for
+        the frontend by printing a single JSON line in Python:
+
+        ```python
+        import json
+        artifact = {
+            "type": "research_report",
+            "title": "<short title>",
+            "summary": ["<bullet 1>", "<bullet 2>", "<bullet 3>"],
+            "charts": [
+                {
+                    "kind": "bar",
+                    "title": "<chart title>",
+                    "x_label": "<x axis label>",
+                    "y_label": "<y axis label>",
+                    "data": [{"label": "...", "value": 0.0}, ...]
+                }
+            ],
+            "findings": [
+                {"title": "...", "detail": "...", "severity": "info|warn|critical"}
+            ],
+            "recommendations": ["...", "..."]
+        }
+        print(json.dumps({"__artifact__": artifact}))
+        ```
+
+        Include 1-3 charts using the data you already computed. Charts must use
+        simple flat data arrays — no nested objects. Severity values: info, warn,
+        critical.
+
         ## Rules
 
         - EVERY claim must cite specific numbers from your analysis.
@@ -185,8 +214,8 @@ modules:
         - name: bash
           inject:
             session_id: sandbox_session_id
-        - name: memory_store
-        - name: memory_recall
+        - name: memory_write
+        - name: memory_read
 
       memory:
         namespace: remi-researcher

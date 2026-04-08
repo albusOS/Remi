@@ -1,166 +1,132 @@
-"""Test that domain.yaml loads and parses into fully typed TBox models."""
+"""Test that domain.yaml loads and parses into a typed DomainSchema."""
 
 from __future__ import annotations
 
 from remi.agent.signals import (
-    CausalChain,
-    Deontic,
-    DomainTBox,
-    Horizon,
-    InferenceRule,
-    Policy,
-    RuleCondition,
-    Severity,
-    SignalDefinition,
+    DomainSchema,
+    EntityTypeDef,
+    ProcessDef,
+    RelationshipDef,
+    load_domain_yaml,
 )
-from remi.application.core.models.enums import EntityType
-from remi.agent.signals import load_domain_yaml
 
-EXPECTED_SIGNAL_NAMES = {
-    "OccupancyDrift",
-    "DelinquencyConcentration",
-    "LeaseExpirationCliff",
-    "VacancyDuration",
-    "MaintenanceBacklog",
-    "OutlierPerformance",
-    "PerformanceTrend",
-    "CommunicationGap",
-    "PolicyBreach",
-    "LegalEscalationRisk",
-    "BelowMarketRent",
-    "ConcentrationRisk",
+EXPECTED_ENTITY_TYPES = {
+    "PropertyManager",
+    "Property",
+    "Unit",
+    "Lease",
+    "Tenant",
+    "MaintenanceRequest",
+    "Owner",
+    "Vendor",
 }
 
-EXPECTED_COMPOSITION_NAMES = {
-    "DelinquencyLeaseCliff",
-    "OperationalBreakdown",
-    "DecliningPortfolio",
+EXPECTED_PROCESSES = {
+    "collections",
+    "leasing",
+    "maintenance",
+    "turnover",
+    "performance",
 }
 
 
-def _domain() -> DomainTBox:
-    return DomainTBox.from_yaml(load_domain_yaml())
+def _domain() -> DomainSchema:
+    return DomainSchema.from_yaml(load_domain_yaml())
 
 
 class TestYamlLoading:
     def test_domain_yaml_loads(self) -> None:
         raw = load_domain_yaml()
         assert raw["apiVersion"] == "remi/v1"
-        assert raw["kind"] == "DomainTBox"
+        assert raw["kind"] == "DomainSchema"
 
-    def test_domain_tbox_parses_typed(self) -> None:
+    def test_domain_schema_parses_typed(self) -> None:
         domain = _domain()
-        assert len(domain.signals) >= 1
-        assert len(domain.thresholds) > 0
-        assert len(domain.policies) > 0
-        assert len(domain.causal_chains) > 0
-        assert len(domain.workflows) >= 1
+        assert len(domain.entity_types) >= 1
+        assert len(domain.relationships) >= 1
+        assert len(domain.processes) >= 1
 
-    def test_expected_signal_types_defined(self) -> None:
+
+class TestEntityTypes:
+    def test_expected_entity_types_defined(self) -> None:
         domain = _domain()
-        actual = set(domain.signals.keys())
-        assert EXPECTED_SIGNAL_NAMES.issubset(actual), (
-            f"Missing signals: {EXPECTED_SIGNAL_NAMES - actual}"
+        actual = {et.name for et in domain.entity_types}
+        assert EXPECTED_ENTITY_TYPES.issubset(actual), (
+            f"Missing entity types: {EXPECTED_ENTITY_TYPES - actual}"
         )
 
-
-class TestTypedSignalDefinitions:
-    def test_signal_definitions_are_typed(self) -> None:
+    def test_entity_types_are_typed(self) -> None:
         domain = _domain()
-        for name, defn in domain.signals.items():
-            assert isinstance(defn, SignalDefinition), f"{name} should be SignalDefinition"
-            assert isinstance(defn.severity, Severity), f"{name}.severity should be Severity enum"
-            assert isinstance(defn.entity, str), f"{name}.entity should be a string"
-            assert defn.entity, f"{name}.entity should be non-empty"
-            assert isinstance(defn.horizon, Horizon), f"{name}.horizon should be Horizon enum"
-            assert isinstance(defn.rule, InferenceRule), f"{name}.rule should be InferenceRule"
-            assert isinstance(defn.rule.condition, RuleCondition), (
-                f"{name}.rule.condition should be RuleCondition"
-            )
+        for et in domain.entity_types:
+            assert isinstance(et, EntityTypeDef)
+            assert et.name
+            assert et.description
 
-    def test_vacancy_duration_definition(self) -> None:
-        defn = _domain().signal("VacancyDuration")
-        assert defn is not None
-        assert defn.severity == Severity.MEDIUM
-        assert defn.entity == EntityType.UNIT
-        assert defn.rule.condition == RuleCondition.EXCEEDS_THRESHOLD
-        assert defn.rule.threshold_key == "vacancy_chronic_days"
-        assert defn.rule.metric == "days_vacant"
-
-    def test_legal_escalation_definition(self) -> None:
-        defn = _domain().signal("LegalEscalationRisk")
-        assert defn is not None
-        assert defn.severity == Severity.HIGH
-        assert defn.entity == EntityType.TENANT
-        assert defn.rule.condition == RuleCondition.IN_LEGAL_TRACK
-        assert defn.rule.statuses == ["demand", "filing", "hearing", "judgment", "evict"]
-
-
-class TestTypedPolicies:
-    def test_policies_are_typed(self) -> None:
+    def test_entity_type_lookup(self) -> None:
         domain = _domain()
-        for pol in domain.policies:
-            assert isinstance(pol, Policy)
-            assert isinstance(pol.deontic, Deontic)
-            assert pol.id.startswith("policy:")
+        assert domain.entity_type("PropertyManager") is not None
+        assert domain.entity_type("NonexistentType") is None
 
-    def test_all_policies_are_must_or_should(self) -> None:
+    def test_entity_type_has_key_fields(self) -> None:
         domain = _domain()
-        for pol in domain.policies:
-            assert pol.deontic in (Deontic.MUST, Deontic.SHOULD)
+        pm = domain.entity_type("PropertyManager")
+        assert pm is not None
+        assert len(pm.key_fields) > 0
+        assert "name" in pm.key_fields
 
 
-class TestTypedCausalChains:
-    def test_causal_chains_are_typed(self) -> None:
+class TestRelationships:
+    def test_relationships_are_typed(self) -> None:
         domain = _domain()
-        for chain in domain.causal_chains:
-            assert isinstance(chain, CausalChain)
-            assert chain.cause
-            assert chain.effect
-            assert chain.description
+        for rel in domain.relationships:
+            assert isinstance(rel, RelationshipDef)
+            assert rel.name
+            assert rel.source
+            assert rel.target
 
-
-class TestThresholds:
-    def test_thresholds_have_expected_keys(self) -> None:
+    def test_manages_relationship_exists(self) -> None:
         domain = _domain()
-        for key in (
-            "vacancy_chronic_days",
-            "lease_cliff_pct",
-            "delinquency_critical_pct",
-            "maintenance_backlog_days",
-            "below_market_rent_pct",
-        ):
-            assert key in domain.thresholds, f"Missing threshold: {key}"
-            assert domain.threshold(key) > 0
+        manages = [r for r in domain.relationships if r.name == "MANAGES"]
+        assert len(manages) == 1
+        assert manages[0].source == "PropertyManager"
+        assert manages[0].target == "Property"
+
+    def test_relationships_for_entity(self) -> None:
+        domain = _domain()
+        unit_rels = domain.relationships_for("Unit")
+        rel_names = {r.name for r in unit_rels}
+        assert "HAS_UNIT" in rel_names
+        assert "HAS_LEASE" in rel_names
+
+
+class TestProcesses:
+    def test_expected_processes_defined(self) -> None:
+        domain = _domain()
+        actual = {p.name for p in domain.processes}
+        assert EXPECTED_PROCESSES.issubset(actual), (
+            f"Missing processes: {EXPECTED_PROCESSES - actual}"
+        )
+
+    def test_processes_are_typed(self) -> None:
+        domain = _domain()
+        for proc in domain.processes:
+            assert isinstance(proc, ProcessDef)
+            assert proc.name
+            assert proc.description
+            assert len(proc.involves) > 0
+
+    def test_processes_involving_entity(self) -> None:
+        domain = _domain()
+        tenant_procs = domain.processes_involving("Tenant")
+        proc_names = {p.name for p in tenant_procs}
+        assert "collections" in proc_names
+        assert "leasing" in proc_names
 
 
 class TestDomainQueries:
-    """The TBox is queryable — not just a bag, but a navigable structure."""
-
-    def test_signals_for_entity_unit(self) -> None:
+    def test_entity_type_names(self) -> None:
         domain = _domain()
-        unit_signals = domain.signals_for_entity(EntityType.UNIT)
-        names = {d.name for d in unit_signals}
-        assert "VacancyDuration" in names
-        assert "BelowMarketRent" in names
-        assert "DelinquencyConcentration" not in names
-
-    def test_signals_for_entity_manager(self) -> None:
-        domain = _domain()
-        mgr_signals = domain.signals_for_entity(EntityType.PROPERTY_MANAGER)
-        names = {d.name for d in mgr_signals}
-        assert "DelinquencyConcentration" in names
-        assert "LeaseExpirationCliff" in names
-        assert "MaintenanceBacklog" in names
-
-    def test_signal_lookup_by_name(self) -> None:
-        domain = _domain()
-        assert domain.signal("VacancyDuration") is not None
-        assert domain.signal("NonexistentSignal") is None
-
-    def test_all_signal_names_includes_compositions(self) -> None:
-        domain = _domain()
-        names = domain.all_signal_names()
-        assert len(names) >= len(EXPECTED_SIGNAL_NAMES) + len(EXPECTED_COMPOSITION_NAMES)
-        assert "VacancyDuration" in names
-        assert "DelinquencyLeaseCliff" in names
+        names = domain.entity_type_names()
+        assert "PropertyManager" in names
+        assert "Unit" in names
+        assert len(names) == len(domain.entity_types)

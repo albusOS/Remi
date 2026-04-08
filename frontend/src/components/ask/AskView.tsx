@@ -7,9 +7,10 @@ import { SessionThread } from "./SessionThread";
 import { SessionInput } from "./SessionInput";
 import { SessionSidebar } from "./SessionSidebar";
 import { SessionEmptyState } from "./SessionEmptyState";
+import { ResearchArtifact } from "./ResearchArtifact";
 import { ThreadSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
-import type { ManagerListItem } from "@/lib/types";
+import type { ManagerListItem, ResearchArtifact as ResearchArtifactType } from "@/lib/types";
 
 export function AskView() {
   const searchParams = useSearchParams();
@@ -19,6 +20,7 @@ export function AskView() {
   const [managerId, setManagerId] = useState("");
   const [showWorkDetails, setShowWorkDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeArtifact, setActiveArtifact] = useState<ResearchArtifactType | null>(null);
   const initialQuerySent = useRef(false);
 
   const lastSendRef = useRef<string | null>(null);
@@ -70,6 +72,28 @@ export function AskView() {
   const session = activeSession;
   const hasMessages = (session?.messages.length ?? 0) > 0;
 
+  // Pop the latest live artifact into the artifact panel as soon as it arrives.
+  const liveArtifacts = session?.liveArtifacts ?? [];
+  useEffect(() => {
+    if (liveArtifacts.length > 0) {
+      setActiveArtifact(liveArtifacts[liveArtifacts.length - 1]);
+    }
+  }, [liveArtifacts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Surface artifacts from past messages when the thread loads.
+  useEffect(() => {
+    if (!session?.loaded) return;
+    for (let i = session.messages.length - 1; i >= 0; i--) {
+      const arts = session.messages[i].artifacts;
+      if (arts && arts.length > 0) {
+        setActiveArtifact(arts[arts.length - 1]);
+        break;
+      }
+    }
+  }, [session?.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const artifactOpen = activeArtifact !== null;
+
   return (
     <div className="h-full flex flex-col relative bg-surface">
       {/* Top bar */}
@@ -114,7 +138,7 @@ export function AskView() {
         </div>
       )}
 
-      {/* Content */}
+      {/* Content — split-panel when artifact is present */}
       {activeSessionId && session && !session.loaded ? (
         <ThreadSkeleton />
       ) : !activeSession || !hasMessages ? (
@@ -126,14 +150,27 @@ export function AskView() {
           managerName={managers.find((m) => m.id === managerId)?.name}
         />
       ) : (
-        <SessionThread
-          messages={session!.messages}
-          liveContent={session!.liveContent}
-          liveTools={session!.liveTools}
-          streaming={session!.streaming}
-          showWorkDetails={showWorkDetails}
-          onRetry={handleRetry}
-        />
+        <div className={`flex-1 min-h-0 flex ${artifactOpen ? "overflow-hidden" : ""}`}>
+          <div className={`flex flex-col min-w-0 ${artifactOpen ? "flex-1" : "flex-1"}`}>
+            <SessionThread
+              messages={session!.messages}
+              liveContent={session!.liveContent}
+              liveTools={session!.liveTools}
+              liveArtifacts={liveArtifacts}
+              streaming={session!.streaming}
+              showWorkDetails={showWorkDetails}
+              onRetry={handleRetry}
+            />
+          </div>
+          {artifactOpen && activeArtifact && (
+            <div className="w-[400px] xl:w-[480px] shrink-0 border-l border-border overflow-y-auto">
+              <ResearchArtifact
+                artifact={activeArtifact}
+                onClose={() => setActiveArtifact(null)}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Input */}

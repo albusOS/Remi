@@ -425,53 +425,74 @@ async def graph_subgraph(entity_id: str, c: Ctr, depth: int = Query(2, ge=1, le=
 
 
 def _build_operational_graph() -> OperationalGraphResponse:
-    from remi.agent.signals import load_domain_yaml
-    domain = load_domain_yaml()
-    tbox = domain.get("tbox", {})
-    abox = domain.get("abox", {})
+    from remi.agent.signals import DomainSchema, load_domain_yaml
+
+    raw = load_domain_yaml()
+    domain = DomainSchema.from_yaml(raw)
     nodes: list[OperationalNode] = []
     edges_list: list[OperationalEdge] = []
     seen_ids: set[str] = set()
-    processes: list[str] = []
 
     def add_node(node: OperationalNode) -> None:
         if node.id not in seen_ids:
             nodes.append(node)
             seen_ids.add(node.id)
 
-    for process_name, process_data in tbox.items():
-        if not isinstance(process_data, dict):
-            continue
-        processes.append(process_name)
-        for sig in process_data.get("signals", []):
-            sid = f"signal:{sig['name']}"
-            add_node(OperationalNode(id=sid, kind="signal", label=sig["name"].replace("_", " "), process=process_name, properties={"severity": sig.get("severity", ""), "entity": sig.get("entity", ""), "description": sig.get("description", "")}))
-        for pol in process_data.get("policies", []):
-            pid = pol.get("id", f"policy:{process_name}:{pol.get('description', '')[:20]}")
-            add_node(OperationalNode(id=pid, kind="policy", label=pol.get("description", pid)[:60], process=process_name, properties={"trigger": pol.get("trigger", ""), "deontic": pol.get("deontic", "")}))
-        for chain in process_data.get("causal_chains", []):
-            cause_id = f"cause:{process_name}:{chain['cause']}"
-            effect_id = f"effect:{process_name}:{chain['effect']}"
-            add_node(OperationalNode(id=cause_id, kind="cause", label=chain["cause"].replace("_", " "), process=process_name, properties={"description": chain.get("description", "")}))
-            add_node(OperationalNode(id=effect_id, kind="effect", label=chain["effect"].replace("_", " "), process=process_name, properties={"description": chain.get("description", "")}))
-            edges_list.append(OperationalEdge(source_id=cause_id, target_id=effect_id, link_type="CAUSES"))
-    for wf in abox.get("workflows", []):
-        wf_name = wf["name"]
-        wf_id = f"workflow:{wf_name}"
-        process = wf_name if wf_name in processes else "operations"
-        add_node(OperationalNode(id=wf_id, kind="workflow", label=wf_name.replace("_", " ").title(), process=process))
-        prev_id: str | None = None
-        for step in wf.get("steps", []):
-            step_id = step["id"]
-            add_node(OperationalNode(id=step_id, kind="step", label=step.get("description", step_id)[:50], process=process))
-            edges_list.append(OperationalEdge(source_id=wf_id, target_id=step_id, link_type="CONTAINS"))
-            if prev_id:
-                edges_list.append(OperationalEdge(source_id=prev_id, target_id=step_id, link_type="FOLLOWS"))
-            prev_id = step_id
+    for et in domain.entity_types:
+        nid = f"entity:{et.name}"
+        add_node(OperationalNode(
+            id=nid,
+            kind="entity_type",
+            label=et.name,
+            process="",
+            properties={"description": et.description, "key_fields": ", ".join(et.key_fields)},
+        ))
 
-    return OperationalGraphResponse(nodes=nodes, edges=edges_list, processes=processes)
+    for rel in domain.relationships:
+        src = f"entity:{rel.source}"
+        tgt = f"entity:{rel.target}"
+        edges_list.append(OperationalEdge(source_id=src, target_id=tgt, link_type=rel.name))
+
+    process_names: list[str] = []
+    for proc in domain.processes:
+        pid = f"process:{proc.name}"
+        process_names.append(proc.name)
+        add_node(OperationalNode(
+            id=pid,
+            kind="process",
+            label=proc.name.replace("_", " ").title(),
+            process=proc.name,
+            properties={"description": proc.description},
+        ))
+        for entity_name in proc.involves:
+            eid = f"entity:{entity_name}"
+            edges_list.append(OperationalEdge(source_id=pid, target_id=eid, link_type="INVOLVES"))
+
+    return OperationalGraphResponse(nodes=nodes, edges=edges_list, processes=process_names)
 
 
 @ontology_router.get("/graph/operational", response_model=OperationalGraphResponse)
 async def operational_graph() -> OperationalGraphResponse:
     return _build_operational_graph()
+
+
+class DomainSchemaResponse(BaseModel):
+    """Domain schema served to the frontend for context-aware UI."""
+
+    entity_types: list[dict[str, Any]]
+    relationships: list[dict[str, Any]]
+    processes: list[dict[str, Any]]
+
+
+@ontology_router.get("/domain-schema", response_model=DomainSchemaResponse)
+async def domain_schema_endpoint() -> DomainSchemaResponse:
+    """Serve the domain schema for frontend consumption."""
+    from remi.agent.signals import DomainSchema, load_domain_yaml
+
+    raw = load_domain_yaml()
+    schema = DomainSchema.from_yaml(raw)
+    return DomainSchemaResponse(
+        entity_types=[et.model_dump() for et in schema.entity_types],
+        relationships=[r.model_dump() for r in schema.relationships],
+        processes=[p.model_dump() for p in schema.processes],
+    )

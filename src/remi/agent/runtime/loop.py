@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import structlog
 
@@ -66,6 +67,92 @@ def _serialize_result(result: object) -> str | int | float | bool:
 
 _TOOL_HEARTBEAT_INTERVAL = 3.0  # seconds between heartbeat ticks
 
+# ---------------------------------------------------------------------------
+# Artifact extraction — __artifact__ protocol
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_LINE_RE = re.compile(r'\{"__artifact__":\s*(\{.*\})\s*\}')
+
+
+def _extract_artifacts(text: str) -> tuple[str, list[dict]]:
+    """Scan tool output for __artifact__ JSON lines.
+
+    Returns (cleaned_text, artifacts) where cleaned_text has the artifact
+    lines stripped so they don't appear in the displayed tool result.
+    """
+    if "__artifact__" not in text:
+        return text, []
+
+    artifacts: list[dict] = []
+    clean_lines: list[str] = []
+    for line in text.splitlines():
+        m = _ARTIFACT_LINE_RE.search(line)
+        if m:
+            try:
+                artifacts.append(json.loads(m.group(1)))
+            except json.JSONDecodeError:
+                clean_lines.append(line)
+        else:
+            clean_lines.append(line)
+    return "\n".join(clean_lines), artifacts
+
+
+# ---------------------------------------------------------------------------
+# Result schema inference — labels tool results by remi CLI command
+# ---------------------------------------------------------------------------
+
+# Maps substrings in the bash arguments to a result_schema label.
+# The frontend uses these to pick which card component to render.
+_RESULT_SCHEMA_PATTERNS: list[tuple[str, str]] = [
+    ("portfolio managers", "managers_list"),
+    ("portfolio properties", "properties_list"),
+    ("portfolio rent-roll", "rent_roll"),
+    ("portfolio manager-review", "manager_review"),
+    ("portfolio rankings", "manager_rankings"),
+    ("operations delinquency", "delinquency"),
+    ("operations leases", "leases_list"),
+    ("operations maintenance", "maintenance_list"),
+    ("operations expiring-leases", "expiring_leases"),
+    ("intelligence dashboard", "dashboard_overview"),
+    ("intelligence vacancies", "vacancies"),
+    ("intelligence trends", "trends"),
+    ("intelligence search", "search_results"),
+]
+
+
+_QUERY_OPERATION_SCHEMAS: dict[str, str] = {
+    "dashboard": "dashboard_overview",
+    "managers": "managers_list",
+    "manager_review": "manager_review",
+    "properties": "properties_list",
+    "rent_roll": "rent_roll",
+    "rankings": "manager_rankings",
+    "delinquency": "delinquency",
+    "expiring_leases": "expiring_leases",
+    "vacancies": "vacancies",
+    "leases": "leases_list",
+    "maintenance": "maintenance_list",
+    "search": "search_results",
+}
+
+
+def _infer_result_schema(tool_name: str, arguments: dict) -> str | None:
+    """Infer a result_schema label from the tool name and arguments."""
+    if tool_name == "query":
+        operation = arguments.get("operation", "")
+        return _QUERY_OPERATION_SCHEMAS.get(operation)
+
+    if tool_name not in ("bash", "sandbox_exec_shell"):
+        return None
+    cmd = arguments.get("command", "") or arguments.get("cmd", "") or ""
+    if not isinstance(cmd, str):
+        return None
+    cmd_lower = cmd.lower()
+    for pattern, schema in _RESULT_SCHEMA_PATTERNS:
+        if pattern in cmd_lower:
+            return schema
+    return None
+
 
 async def _execute_tool_call(
     tc: ToolCallRequest,
@@ -76,6 +163,8 @@ async def _execute_tool_call(
     memory_namespace: str = "",
 ) -> Message:
     """Execute a single tool call with event emission. Returns the tool Message."""
+    result_schema = _infer_result_schema(tc.name, tc.arguments)
+
     await emit(
         "tool_call",
         {"tool": tc.name, "arguments": tc.arguments, "call_id": tc.id},
@@ -97,11 +186,29 @@ async def _execute_tool_call(
     finally:
         heartbeat_task.cancel()
 
-    await emit(
-        "tool_result",
-        {"tool": tc.name, "call_id": tc.id, "result": _serialize_result(result)},
+    # Extract __artifact__ lines from string results before emitting.
+    artifacts: list[dict] = []
+    display_result = result
+    if isinstance(result, str):
+        display_result, artifacts = _extract_artifacts(result)
+
+    tool_result_payload: dict = {
+        "tool": tc.name,
+        "call_id": tc.id,
+        "result": _serialize_result(display_result),
+    }
+    if result_schema:
+        tool_result_payload["result_schema"] = result_schema
+
+    await emit("tool_result", tool_result_payload)
+
+    # Emit each extracted artifact as a separate event.
+    for artifact in artifacts:
+        await emit("artifact", {"call_id": tc.id, "tool": tc.name, "artifact": artifact})
+
+    compressed = await compress_and_offload(
+        tc.name, tc.id, display_result, memory, memory_namespace
     )
-    compressed = await compress_and_offload(tc.name, tc.id, result, memory, memory_namespace)
     return Message(role="tool", name=tc.name, tool_call_id=tc.id, content=compressed)
 
 

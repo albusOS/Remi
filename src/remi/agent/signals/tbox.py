@@ -1,8 +1,10 @@
-"""TBox models — declarative domain expertise as typed, frozen structures.
+"""Domain schema — lightweight structural vocabulary parsed from domain.yaml.
 
-DomainTBox holds signal definitions, thresholds, policies, causal chains,
-composition rules, and workflows parsed from domain.yaml. MutableTBox is
-a thin forwarding wrapper providing the same read interface.
+DomainSchema holds entity type definitions, relationship definitions, and
+business process definitions.  It describes what exists in the domain and
+how things connect — not what to look for or what thresholds matter.
+
+The agent discovers patterns and calculates significance from the actual data.
 """
 
 from __future__ import annotations
@@ -12,261 +14,92 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from remi.agent.signals.enums import Deontic, Horizon, RuleCondition, Severity
 
-
-class InferenceRule(BaseModel, frozen=True):
-    """A declarative rule that signal producers evaluate.
-
-    Producers dispatch on ``condition``. Each condition type knows
-    which fields it needs (threshold_key, window_key, periods, etc.).
-    """
-
-    metric: str
-    condition: RuleCondition
-    threshold_key: str | None = None
-    window_key: str | None = None
-    periods: int | None = None
-    percentile: int | None = None
-    statuses: list[str] | None = None
-
-
-class SignalDefinition(BaseModel, frozen=True):
-    """A named domain concept that signal producers can detect.
-
-    TBox entry for a signal — what it means, when it fires, and how to
-    evaluate it. Producers read this; no Python method per signal.
-
-    ``entity`` is a plain string so any domain can define its own entity
-    types. REMI uses EntityType enum values; a health domain could pass
-    "Patient", "Encounter", etc.
-    """
+class EntityTypeDef(BaseModel, frozen=True):
+    """An entity type in the domain — a noun the agent can reason about."""
 
     name: str
-    description: str
-    severity: Severity
-    entity: str
-    horizon: Horizon
-    rule: InferenceRule
+    description: str = ""
+    key_fields: list[str] = Field(default_factory=list)
 
 
-class Policy(BaseModel, frozen=True):
-    """A deontic obligation — something that MUST or SHOULD happen."""
-
-    id: str
-    description: str
-    trigger: str
-    deontic: Deontic
-    governs: list[str] = Field(default_factory=list)
-
-
-class CausalChain(BaseModel, frozen=True):
-    """A known cause-effect relationship in the domain."""
-
-    cause: str
-    effect: str
-    description: str
-    manifests_as: str | None = None
-
-
-class CompositionRule(BaseModel, frozen=True):
-    """When multiple signals co-occur on the same entity, emit a composite signal.
-
-    Constituents are signal type names. The engine checks that all are
-    active on a single entity of the given ``scope`` type before firing.
-    """
+class RelationshipDef(BaseModel, frozen=True):
+    """A typed, directed relationship between two entity types."""
 
     name: str
-    description: str
-    constituents: list[str]
-    scope: str
-    severity: Severity
-    require_same_entity: bool = True
+    source: str
+    target: str
+    description: str = ""
 
 
-class WorkflowStep(BaseModel, frozen=True):
-    id: str
-    description: str
-    applies_to: list[str] = Field(default_factory=list)
+class ProcessDef(BaseModel, frozen=True):
+    """A business process — a lifecycle the domain operates."""
 
-
-class WorkflowSeed(BaseModel, frozen=True):
     name: str
-    steps: list[WorkflowStep]
+    description: str = ""
+    involves: list[str] = Field(default_factory=list)
 
 
-class DomainTBox(BaseModel, frozen=True):
-    """Declarative business rules and calibrations, parsed from domain.yaml.
+class DomainSchema(BaseModel, frozen=True):
+    """Structural vocabulary of the domain, parsed from domain.yaml.
 
-    Every field is typed. Every query method returns typed models.
-    Adding a signal to domain.yaml and having it fail Pydantic validation
-    is the correct outcome — it means the YAML is wrong, not the code.
+    Describes what entity types exist, how they relate, and what business
+    processes the product covers.  Validated at startup — a malformed
+    domain.yaml fails fast with a Pydantic error.
     """
 
-    signals: dict[str, SignalDefinition] = Field(default_factory=dict)
-    thresholds: dict[str, float] = Field(default_factory=dict)
-    policies: list[Policy] = Field(default_factory=list)
-    causal_chains: list[CausalChain] = Field(default_factory=list)
-    compositions: list[CompositionRule] = Field(default_factory=list)
-    workflows: list[WorkflowSeed] = Field(default_factory=list)
+    entity_types: list[EntityTypeDef] = Field(default_factory=list)
+    relationships: list[RelationshipDef] = Field(default_factory=list)
+    processes: list[ProcessDef] = Field(default_factory=list)
 
     @classmethod
-    def from_yaml(cls, raw: dict[str, Any]) -> DomainTBox:
-        tbox = raw.get("tbox", {})
-        abox = raw.get("abox", {})
+    def from_yaml(cls, raw: dict[str, Any]) -> DomainSchema:
+        schema = raw.get("schema", {})
 
-        raw_signals: list[dict[str, Any]] = []
-        raw_policies: list[dict[str, Any]] = []
-        raw_thresholds: dict[str, float] = {}
-        raw_chains: list[dict[str, Any]] = []
-
-        top_level_keys = {
-            "compositions",
-            "signals",
-            "policies",
-            "thresholds",
-            "causal_chains",
-        }
-
-        for key, section in tbox.items():
-            if key in top_level_keys or not isinstance(section, dict):
-                continue
-            raw_signals.extend(section.get("signals", []))
-            raw_policies.extend(section.get("policies", []))
-            raw_thresholds.update(section.get("thresholds", {}))
-            raw_chains.extend(section.get("causal_chains", []))
-
-        raw_signals.extend(tbox.get("signals", []))
-        raw_policies.extend(tbox.get("policies", []))
-        raw_thresholds.update(tbox.get("thresholds", {}))
-        raw_chains.extend(tbox.get("causal_chains", []))
-
-        signal_defs: dict[str, SignalDefinition] = {}
-        for s in raw_signals:
-            defn = SignalDefinition(
-                name=s["name"],
-                description=s.get("description", "").strip(),
-                severity=Severity(s["severity"]),
-                entity=s["entity"],
-                horizon=Horizon(s["horizon"]),
-                rule=InferenceRule(**s["rule"]),
-            )
-            signal_defs[defn.name] = defn
-
-        policies = [
-            Policy(
-                id=p["id"],
-                description=p.get("description", ""),
-                trigger=p.get("trigger", ""),
-                deontic=Deontic(p["deontic"]),
-                governs=p.get("governs", []),
-            )
-            for p in raw_policies
+        entity_types = [
+            EntityTypeDef(**et) for et in schema.get("entity_types", [])
         ]
-
-        causal_chains = [
-            CausalChain(
-                cause=c["cause"],
-                effect=c["effect"],
-                description=c.get("description", ""),
-                manifests_as=c.get("manifests_as"),
-            )
-            for c in raw_chains
+        relationships = [
+            RelationshipDef(**r) for r in schema.get("relationships", [])
         ]
-
-        compositions = [
-            CompositionRule(
-                name=c["name"],
-                description=c.get("description", "").strip(),
-                constituents=c["constituents"],
-                scope=c["scope"],
-                severity=Severity(c["severity"]),
-                require_same_entity=c.get("require_same_entity", True),
-            )
-            for c in tbox.get("compositions", [])
-        ]
-
-        workflows = [
-            WorkflowSeed(
-                name=w["name"],
-                steps=[WorkflowStep(**step) for step in w.get("steps", [])],
-            )
-            for w in abox.get("workflows", [])
+        processes = [
+            ProcessDef(**p) for p in schema.get("processes", [])
         ]
 
         return cls(
-            signals=signal_defs,
-            thresholds=raw_thresholds,
-            policies=policies,
-            causal_chains=causal_chains,
-            compositions=compositions,
-            workflows=workflows,
+            entity_types=entity_types,
+            relationships=relationships,
+            processes=processes,
         )
 
-    def threshold(self, key: str, default: float = 0.0) -> float:
-        return self.thresholds.get(key, default)
+    def entity_type(self, name: str) -> EntityTypeDef | None:
+        """Look up an entity type by name."""
+        for et in self.entity_types:
+            if et.name == name:
+                return et
+        return None
 
-    def signals_for_entity(self, entity: str) -> list[SignalDefinition]:
-        return [d for d in self.signals.values() if d.entity == entity]
+    def entity_type_names(self) -> list[str]:
+        return [et.name for et in self.entity_types]
 
-    def signal(self, name: str) -> SignalDefinition | None:
-        return self.signals.get(name)
+    def relationships_for(self, entity_name: str) -> list[RelationshipDef]:
+        """Return relationships where entity_name is source or target."""
+        return [
+            r for r in self.relationships
+            if r.source == entity_name or r.target == entity_name
+        ]
 
-    def all_signal_names(self) -> list[str]:
-        names = list(self.signals.keys())
-        names.extend(c.name for c in self.compositions)
-        return names
+    def processes_involving(self, entity_name: str) -> list[ProcessDef]:
+        """Return processes that involve a given entity type."""
+        return [
+            p for p in self.processes
+            if entity_name in p.involves
+        ]
 
 
-class MutableTBox:
-    """Thin forwarding wrapper over a frozen DomainTBox.
-
-    Provides the same read interface as DomainTBox so that callers
-    can accept ``DomainTBox | MutableTBox`` without branching.
-    """
-
-    def __init__(self, base: DomainTBox) -> None:
-        self._base = base
-
-    @property
-    def base(self) -> DomainTBox:
-        return self._base
-
-    @property
-    def signals(self) -> dict[str, SignalDefinition]:
-        return dict(self._base.signals)
-
-    @property
-    def thresholds(self) -> dict[str, float]:
-        return dict(self._base.thresholds)
-
-    @property
-    def causal_chains(self) -> list[CausalChain]:
-        return list(self._base.causal_chains)
-
-    @property
-    def policies(self) -> list[Policy]:
-        return list(self._base.policies)
-
-    @property
-    def compositions(self) -> list[CompositionRule]:
-        return list(self._base.compositions)
-
-    @property
-    def workflows(self) -> list[WorkflowSeed]:
-        return list(self._base.workflows)
-
-    def threshold(self, key: str, default: float = 0.0) -> float:
-        return self._base.threshold(key, default)
-
-    def signals_for_entity(self, entity: str) -> list[SignalDefinition]:
-        return self._base.signals_for_entity(entity)
-
-    def signal(self, name: str) -> SignalDefinition | None:
-        return self._base.signal(name)
-
-    def all_signal_names(self) -> list[str]:
-        return self._base.all_signal_names()
+# Keep the old name as an alias during transition
+DomainTBox = DomainSchema
+MutableTBox = DomainSchema
 
 
 _domain_yaml_path: Path | None = None
@@ -284,7 +117,7 @@ def set_domain_yaml_path(path: Path) -> None:
 def load_domain_yaml(*, path: Path | None = None) -> dict[str, Any]:
     """Load domain.yaml and return the raw parsed dict.
 
-    Use ``DomainTBox.from_yaml(raw)`` to get a typed TBox.
+    Use ``DomainSchema.from_yaml(raw)`` to get a typed schema.
     """
     import yaml
 

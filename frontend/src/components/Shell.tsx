@@ -6,24 +6,30 @@ import { useCallback, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppOSEvents } from "@/hooks/useAppOSEvents";
 import { CommandMenu, useCommandMenu } from "@/components/ui/CommandMenu";
+import { useTheme } from "@/lib/theme";
 import type { FeedEvent } from "@/lib/types";
 
 function NavLink({
-  href, label, icon, active, onClick,
+  href, label, icon, active, collapsed, onClick,
 }: {
-  href: string; label: string; icon: ReactNode; active: boolean; onClick?: () => void;
+  href: string; label: string; icon: ReactNode; active: boolean; collapsed?: boolean; onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
+      title={collapsed ? label : undefined}
       className={`
-        flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] transition-all
-        ${active ? "bg-surface-sunken text-fg font-medium" : "text-fg-muted hover:text-fg-secondary hover:bg-surface-raised"}
+        flex items-center rounded-lg text-[13px] transition-all
+        ${collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2"}
+        ${active
+          ? "bg-accent-soft text-fg font-medium border border-accent/20"
+          : "text-fg-muted hover:text-fg-secondary hover:bg-surface-raised border border-transparent"
+        }
       `}
     >
       {icon}
-      <span>{label}</span>
+      {!collapsed && <span>{label}</span>}
     </Link>
   );
 }
@@ -96,7 +102,9 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const { connected } = useAppOSEvents(onEvent);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const cmd = useCommandMenu();
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/" || pathname === "/ask";
@@ -107,59 +115,107 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const closeMobile = () => setMobileOpen(false);
 
-  const sidebar = (
+  const sidebarContent = (isCollapsed: boolean) => (
     <>
-      <div className="px-4 py-4 border-b border-border-subtle">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
+      <div className={`border-b border-border-subtle ${isCollapsed ? "px-2 py-4 flex justify-center" : "px-4 py-4"}`}>
+        <div className={`flex items-center ${isCollapsed ? "" : "gap-2.5"}`}>
+          <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center shrink-0">
             <span className="text-accent-fg text-[11px] font-bold tracking-tight">R</span>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-fg tracking-tight">REMI</h1>
-            <p className="text-[9px] text-fg-faint -mt-0.5 italic truncate">your portfolio, clarified</p>
-          </div>
+          {!isCollapsed && (
+            <div className="min-w-0">
+              <h1 className="text-sm font-semibold text-fg tracking-tight">REMI</h1>
+              <p className="text-[9px] text-fg-faint -mt-0.5 truncate">portfolio intelligence</p>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="px-2 pt-2">
         <button
           onClick={() => { closeMobile(); cmd.setOpen(true); }}
-          className="w-full flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] text-fg-ghost hover:text-fg-muted hover:border-fg-faint transition-all"
+          title={isCollapsed ? "Search (⌘K)" : undefined}
+          className={`
+            flex items-center rounded-lg border border-border bg-surface text-[11px] text-fg-faint hover:text-fg-muted hover:border-fg-ghost transition-all
+            ${isCollapsed ? "w-full justify-center px-2 py-1.5" : "w-full gap-2 px-2.5 py-1.5"}
+          `}
         >
           <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
-          <span className="flex-1 text-left truncate">Search...</span>
-          <kbd className="font-mono text-[9px] opacity-60">⌘K</kbd>
+          {!isCollapsed && (
+            <>
+              <span className="flex-1 text-left truncate">Search...</span>
+              <kbd className="font-mono text-[9px] opacity-40">⌘K</kbd>
+            </>
+          )}
         </button>
       </div>
 
       <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.href} {...item} active={isActive(item.href)} onClick={closeMobile} />
+          <NavLink key={item.href} {...item} active={isActive(item.href)} collapsed={isCollapsed} onClick={closeMobile} />
         ))}
       </div>
 
-      <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-2">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${connected ? "bg-ok" : "bg-error"}`} />
-        <span className="text-[10px] text-fg-faint">
-          {connected ? "Live" : "Offline"}
-        </span>
+      <div className={`border-t border-border-subtle ${isCollapsed ? "px-2 py-3 flex flex-col items-center gap-2" : "px-3 py-3 flex items-center justify-between gap-2"}`}>
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${connected ? "bg-ok" : "bg-error"}`} />
+          {!isCollapsed && (
+            <span className="text-[10px] text-fg-faint">
+              {connected ? "Live" : "Offline"}
+            </span>
+          )}
+        </div>
+        <div className={`flex items-center ${isCollapsed ? "flex-col gap-1" : "gap-1"}`}>
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-fg-faint hover:text-fg hover:bg-surface-raised transition-all"
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+              </svg>
+            )}
+          </button>
+          {/* Collapse toggle — desktop only */}
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden md:flex w-7 h-7 rounded-lg items-center justify-center text-fg-faint hover:text-fg hover:bg-surface-raised transition-all"
+            aria-label="Toggle sidebar"
+          >
+            <svg
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+            </svg>
+          </button>
+        </div>
       </div>
     </>
   );
 
   return (
     <div className="h-screen flex overflow-hidden">
-      <nav className="hidden md:flex w-52 shrink-0 border-r border-border bg-surface-raised flex-col">
-        {sidebar}
+      <nav
+        className={`hidden md:flex shrink-0 border-r border-border bg-surface-sunken flex-col transition-[width] duration-200 ease-out overflow-hidden ${collapsed ? "w-14" : "w-52"}`}
+      >
+        {sidebarContent(collapsed)}
       </nav>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-fg/20 drawer-overlay" onClick={closeMobile} />
           <nav className="absolute left-0 top-0 bottom-0 w-64 bg-surface-raised border-r border-border flex flex-col drawer-panel" style={{ animationName: "drawerSlideLeft" }}>
-            {sidebar}
+            {sidebarContent(false)}
           </nav>
         </div>
       )}
@@ -173,16 +229,18 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
             <span className="text-sm font-semibold text-fg truncate">REMI</span>
           </div>
-          <button
-            onClick={() => cmd.setOpen(true)}
-            className="ml-auto w-8 h-8 rounded-lg flex items-center justify-center text-fg-muted hover:text-fg hover:bg-surface-raised transition-colors"
-            aria-label="Search"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-          </button>
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${connected ? "bg-ok" : "bg-error"}`} />
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => cmd.setOpen(true)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-fg-muted hover:text-fg hover:bg-surface-raised transition-colors"
+              aria-label="Search"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </button>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${connected ? "bg-ok" : "bg-error"}`} />
+          </div>
         </div>
 
         <main className="flex-1 overflow-hidden">{children}</main>

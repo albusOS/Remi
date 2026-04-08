@@ -82,6 +82,7 @@ export const api = {
   graphSnapshot: ontologyApi.graphSnapshot,
   graphSubgraph: ontologyApi.graphSubgraph,
   operationalGraph: ontologyApi.operationalGraph,
+  domainSchema: ontologyApi.domainSchema,
 
   listSignals: signalsApi.list,
 

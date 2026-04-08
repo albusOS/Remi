@@ -1,71 +1,174 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — change these to retheme the entire app.
+ * Design tokens — warm dark.
  *
- * Palette vibe: warm, minimal, confident.
- * Accent is a dusty rose — intentional, not decorative.
+ * Palette vibe: deep charcoal with warm undertones. Futuristic data terminal
+ * aesthetic — like an ops console designed by someone who cares about beauty.
+ * Accent is a charged rose-pink: the same dusty rose DNA, now electric against
+ * the dark ground.
  */
 @theme {
-  /* Surface hierarchy */
+  /* Surface hierarchy — warm dark */
+  --color-surface: #0f0d0c;
+  --color-surface-raised: #161311;
+  --color-surface-sunken: #0a0908;
+
+  /* Border hierarchy */
+  --color-border: #2a2420;
+  --color-border-subtle: #1e1a17;
+
+  /* Foreground hierarchy */
+  --color-fg: #ede8e3;
+  --color-fg-secondary: #c4bdb5;
+  --color-fg-muted: #7a6f66;
+  --color-fg-faint: #4a4038;
+  --color-fg-ghost: #2e2720;
+
+  /* Primary accent — charged rose */
+  --color-accent: #e8727c;
+  --color-accent-hover: #f08088;
+  --color-accent-fg: #0f0d0c;
+  --color-accent-soft: rgba(232, 114, 124, 0.1);
+
+  /* User chat bubble */
+  --color-user-bubble: #1e1a17;
+  --color-user-bubble-fg: #c4bdb5;
+
+  /* Status — semantic only, never decorative */
+  --color-ok: #4caf82;
+  --color-warn: #e09b4a;
+  --color-error: #d95f5f;
+  --color-ok-soft: rgba(76, 175, 130, 0.12);
+  --color-warn-soft: rgba(224, 155, 74, 0.12);
+  --color-error-soft: rgba(217, 95, 95, 0.12);
+  --color-ok-fg: #6dcfa0;
+  --color-warn-fg: #f0b46a;
+  --color-error-fg: #f08080;
+
+  /* Badge variants */
+  --color-badge-default: #1e1a17;
+  --color-badge-default-fg: #7a6f66;
+  --color-badge-blue: rgba(80, 140, 210, 0.15);
+  --color-badge-blue-fg: #80b4e8;
+  --color-badge-amber: rgba(224, 155, 74, 0.15);
+  --color-badge-amber-fg: #f0b46a;
+  --color-badge-emerald: rgba(76, 175, 130, 0.15);
+  --color-badge-emerald-fg: #6dcfa0;
+  --color-badge-red: rgba(217, 95, 95, 0.15);
+  --color-badge-red-fg: #f08080;
+  --color-badge-purple: rgba(160, 100, 220, 0.15);
+  --color-badge-purple-fg: #c090e8;
+  --color-badge-cyan: rgba(60, 180, 200, 0.15);
+  --color-badge-cyan-fg: #70d4e4;
+
+  /* Code blocks */
+  --color-code-bg: #161311;
+  --color-code-fg: #c4bdb5;
+  --color-code-border: #2a2420;
+  --color-code-inline-bg: #1e1a17;
+  --color-code-inline-fg: #e8727c;
+}
+
+/*
+ * Light mode overrides — applied when html[data-theme="light"].
+ * Dark is the default (tokens defined in @theme above).
+ * These vars shadow the @theme values without touching Tailwind's static output.
+ */
+:root[data-theme="light"] {
   --color-surface: #ffffff;
   --color-surface-raised: #faf9f7;
   --color-surface-sunken: #f3f1ee;
 
-  /* Border hierarchy */
   --color-border: #e8e4df;
   --color-border-subtle: #f3f1ee;
 
-  /* Foreground hierarchy */
   --color-fg: #1a1614;
   --color-fg-secondary: #3d3530;
   --color-fg-muted: #7a6f66;
   --color-fg-faint: #b0a89f;
   --color-fg-ghost: #d9d3cc;
 
-  /* Primary accent — dusty rose */
   --color-accent: #c4727a;
   --color-accent-hover: #b5636b;
   --color-accent-fg: #ffffff;
-  --color-accent-soft: #fdf0f1;
+  --color-accent-soft: rgba(196, 114, 122, 0.08);
 
-  /* User chat bubble */
   --color-user-bubble: #f3f1ee;
   --color-user-bubble-fg: #3d3530;
 
-  /* Status — semantic only, never decorative */
   --color-ok: #5cb589;
   --color-warn: #d4974e;
   --color-error: #c95c5c;
-  --color-ok-soft: #edf7f1;
-  --color-warn-soft: #fdf5ec;
-  --color-error-soft: #fdf0f0;
+  --color-ok-soft: rgba(92, 181, 137, 0.1);
+  --color-warn-soft: rgba(212, 151, 78, 0.1);
+  --color-error-soft: rgba(201, 92, 92, 0.1);
   --color-ok-fg: #2d6b4a;
   --color-warn-fg: #7a5520;
   --color-error-fg: #8b3535;
 
-  /* Badge variants */
   --color-badge-default: #f3f1ee;
   --color-badge-default-fg: #7a6f66;
-  --color-badge-blue: #eef4fc;
+  --color-badge-blue: rgba(59, 111, 181, 0.1);
   --color-badge-blue-fg: #3b6fb5;
-  --color-badge-amber: #fdf5ec;
+  --color-badge-amber: rgba(212, 151, 78, 0.12);
   --color-badge-amber-fg: #7a5520;
-  --color-badge-emerald: #edf7f1;
+  --color-badge-emerald: rgba(92, 181, 137, 0.12);
   --color-badge-emerald-fg: #2d6b4a;
-  --color-badge-red: #fdf0f0;
+  --color-badge-red: rgba(201, 92, 92, 0.12);
   --color-badge-red-fg: #8b3535;
-  --color-badge-purple: #f4f0fc;
+  --color-badge-purple: rgba(107, 79, 160, 0.1);
   --color-badge-purple-fg: #6b4fa0;
-  --color-badge-cyan: #eef8fa;
+  --color-badge-cyan: rgba(42, 122, 138, 0.1);
   --color-badge-cyan-fg: #2a7a8a;
 
-  /* Code blocks */
   --color-code-bg: #faf9f7;
   --color-code-fg: #3d3530;
   --color-code-border: #e8e4df;
   --color-code-inline-bg: #f3f1ee;
-  --color-code-inline-fg: #3d3530;
+  --color-code-inline-fg: #c4727a;
+}
+
+/*
+ * Utility overrides that use hard-coded rgba values need light-mode versions.
+ * These classes are re-declared under [data-theme="light"] so they use
+ * lighter shadows that don't look like muddy blobs on white.
+ */
+:root[data-theme="light"] .card-hover:hover {
+  box-shadow: 0 4px 24px -8px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(196, 114, 122, 0.1);
+}
+:root[data-theme="light"] .card-alert-glow {
+  box-shadow: 0 0 20px -6px rgba(212, 151, 78, 0.18), inset 0 0 0 1px rgba(212, 151, 78, 0.14);
+}
+:root[data-theme="light"] .accent-glow {
+  box-shadow: 0 0 16px -4px rgba(196, 114, 122, 0.25);
+}
+:root[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px) saturate(1.5);
+  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+}
+:root[data-theme="light"] .panel-glow::before {
+  background: linear-gradient(90deg, transparent, rgba(196, 114, 122, 0.35), transparent);
+}
+:root[data-theme="light"] .mesh-bg {
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(196, 114, 122, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(59, 111, 181, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(92, 181, 137, 0.03) 0%, transparent 50%);
+}
+:root[data-theme="light"] .grid-bg {
+  background-image:
+    linear-gradient(rgba(232, 228, 223, 0.8) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 228, 223, 0.8) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+:root[data-theme="light"] .ring-pulse {
+  animation: ringPulseLight 3s ease-in-out infinite;
+}
+@keyframes ringPulseLight {
+  0%, 100% { filter: drop-shadow(0 0 0px transparent); }
+  50% { filter: drop-shadow(0 0 8px rgba(196, 114, 122, 0.4)); }
 }
 
 body {
@@ -75,18 +178,18 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-fg-ghost);
-  border-radius: 3px;
+  background: var(--color-border);
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-fg-faint);
+  background: var(--color-fg-ghost);
 }
 
 /* ---- Stagger animations for lists / grids ---- */
@@ -160,13 +263,33 @@ body {
 }
 .card-hover:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 24px -4px rgba(26, 22, 20, 0.08);
+  box-shadow: 0 4px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(232, 114, 124, 0.08);
+}
+
+/* ---- Alert card glow ---- */
+.card-alert-glow {
+  box-shadow: 0 0 24px -6px rgba(224, 155, 74, 0.2), inset 0 0 0 1px rgba(224, 155, 74, 0.12);
+}
+
+/* ---- Accent glow (for focused/active elements) ---- */
+.accent-glow {
+  box-shadow: 0 0 20px -4px rgba(232, 114, 124, 0.3);
+}
+
+/* ---- Number shimmer (for loading placeholder numbers) ---- */
+@keyframes numberShimmer {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+  100% { opacity: 0.3; }
+}
+.number-shimmer {
+  animation: numberShimmer 1.8s ease-in-out infinite;
 }
 
 /* ---- Occupancy ring pulse ---- */
 @keyframes ringPulse {
   0%, 100% { filter: drop-shadow(0 0 0px transparent); }
-  50% { filter: drop-shadow(0 0 6px rgba(196, 114, 122, 0.3)); }
+  50% { filter: drop-shadow(0 0 8px rgba(232, 114, 124, 0.5)); }
 }
 .ring-pulse {
   animation: ringPulse 3s ease-in-out infinite;
@@ -174,9 +297,9 @@ body {
 
 /* ---- Glass surface ---- */
 .glass {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(12px) saturate(1.5);
-  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+  background: rgba(22, 19, 17, 0.7);
+  backdrop-filter: blur(12px) saturate(1.8);
+  -webkit-backdrop-filter: blur(12px) saturate(1.8);
 }
 
 /* ---- Command menu (cmdk + Radix Dialog) ---- */
@@ -322,7 +445,42 @@ body {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(196, 114, 122, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(232, 114, 124, 0.5), transparent);
   pointer-events: none;
   z-index: 1;
 }
+
+/* ---- Gradient mesh background for hero areas ---- */
+.mesh-bg {
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(232, 114, 124, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(80, 140, 210, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(76, 175, 130, 0.03) 0%, transparent 50%);
+}
+
+/* ---- Micro grid background ---- */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(42, 36, 32, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42, 36, 32, 0.6) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ---- Artifact panel entrance ---- */
+@keyframes artifactIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.artifact-panel {
+  animation: artifactIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ---- Number count-up animation ---- */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.number-reveal {
+  animation: countUp 0.4s ease-out both;
+}
+

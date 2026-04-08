@@ -12,7 +12,6 @@ import structlog
 from remi.agent.documents import ContentStore
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.protocols import PropertyStore, VectorSearch
-from remi.application.ingestion.pipeline import DocumentIngestService
 
 _log = structlog.get_logger(__name__)
 

@@ -1,47 +1,27 @@
-"""signals — TBox domain ontology and enums.
+"""signals — domain schema: entity types, relationships, and processes.
 
-Core modules:
-  enums      — Severity, RuleCondition, Horizon, Deontic
-  tbox       — SignalDefinition, Policy, CausalChain, DomainTBox, MutableTBox
+The domain schema describes the structural vocabulary of the business.
+The agent discovers patterns and significance from actual data.
 """
 
-from remi.agent.signals.enums import (
-    Deontic,
-    Horizon,
-    RuleCondition,
-    Severity,
-)
 from remi.agent.signals.tbox import (
-    CausalChain,
-    CompositionRule,
+    DomainSchema,
     DomainTBox,
-    InferenceRule,
+    EntityTypeDef,
     MutableTBox,
-    Policy,
-    SignalDefinition,
-    WorkflowSeed,
-    WorkflowStep,
+    ProcessDef,
+    RelationshipDef,
     load_domain_yaml,
     set_domain_yaml_path,
 )
 
 __all__ = [
-    # enums
-    "Deontic",
-    "Horizon",
-    "RuleCondition",
-    "Severity",
-    # tbox
-    "CausalChain",
-    "CompositionRule",
+    "DomainSchema",
     "DomainTBox",
-    "InferenceRule",
+    "EntityTypeDef",
     "MutableTBox",
-    "Policy",
-    "SignalDefinition",
-    "WorkflowSeed",
-    "WorkflowStep",
-    # loaders
+    "ProcessDef",
+    "RelationshipDef",
     "load_domain_yaml",
     "set_domain_yaml_path",
 ]

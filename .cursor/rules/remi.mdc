@@ -175,7 +175,7 @@ src/remi/
     events/           Typed event bus — the OS-level pub-sub nervous system
     memory/           First-class agent memory — read/write with namespaces
     observe/          Structured logging, tracing
-    signals/          Signal types, TBox, stores, producers (agent infra)
+    signals/          Domain schema: entity types, relationships, processes
     graph/            Knowledge graph types, bridge, retriever
     documents/        Document types, stores, parsers
     db/               Database engine + tables
@@ -246,29 +246,35 @@ and snapshot system have been deleted. Do not create or import from
 **Dependency direction:** `application/` imports from `agent/` — never
 the reverse. `shell/` imports from both. `types/` imports nothing.
 
-**Dual-mode agent interface:**
+**Single-path agent architecture:**
 
-The director operates in two modes, selected per-request:
+Every request goes through the agent loop. There is no pre-LLM
+routing, no tier classification, no regex-based dispatch. The LLM
+decides how to handle the question using its tool surface.
 
-- **Ask mode** (default) — fast conversational Q&A. In-process
-  `query` and `search` tools call resolvers directly. No sandbox,
-  no subprocess. Sub-second data access. 5 tools: `query`, `search`,
-  `delegate_to_agent`, `memory_store`, `memory_recall`.
-- **Agent mode** — deep research with sandbox. `bash` + `python` +
-  CLI commands + delegation. For complex analysis, scripting, data
-  joins, regressions. 5 tools: `bash`, `python`, `delegate_to_agent`,
-  `memory_store`, `memory_recall`.
+The director has a unified tool set — fast in-process tools for
+data access, sandbox tools for computation, and delegation for
+deep work:
 
-Both modes share memory and delegation. The mode determines the
-tool surface and system prompt. `app.yaml` declares `ask_tools` /
-`ask_system_prompt` and `agent_tools` / `agent_system_prompt`
-separately.
+| Tool | Speed | What it does |
+|------|-------|-------------|
+| `query` | ~10ms | In-process resolver dispatch — single tool, 12 operations |
+| `document_list` | ~10ms | List uploaded documents with metadata |
+| `document_query` | ~10ms | Search within document content (rows, chunks) |
+| `bash` | ~1-5s | Shell commands + `remi` CLI for write operations |
+| `python` | ~1-5s | Persistent Python session for computation |
+| `delegate_to_agent` | 2-30s | Supervised delegation to specialist agents |
+| `memory_write` | ~10ms | Write to persistent agent memory |
+| `memory_read` | ~10ms | Read from persistent agent memory |
 
 Three clean concepts:
 
-- **Tool** = kernel primitive exposed via LLM function calling.
-- **Command** = a `remi` CLI subcommand returning structured JSON
-  (agent mode). Returns `{"status": "success"|"error", "data": ..., "metadata": {...}}`.
+- **Tool** = capability exposed via LLM function calling. In-process
+  tools (`query`, `document_*`, `memory_*`) are sub-10ms. Sandbox
+  tools (`bash`, `python`) require a subprocess.
+- **Command** = a `remi` CLI subcommand returning structured JSON.
+  Returns `{"status": "success"|"error", "data": ..., "metadata": {...}}`.
+  Used via `bash` for write operations and commands not in the `query` tool.
 - **Skill** = a markdown playbook (`SKILL.md`) with domain knowledge.
   Discovered at startup, injected into the system prompt.
 
@@ -277,8 +283,16 @@ The `QueryToolProvider` (`application/tools/query.py`) provides a single
 appropriate resolver in-process. One tool schema covers all read
 operations (~300 tokens vs ~4000 for 13 separate tools).
 
+The `DocumentToolProvider` (`application/tools/documents.py`) provides
+`document_list` and `document_query` for document discovery and
+content search. Documents are stored as parsed content (rows, chunks)
+in `ContentStore` + metadata in `PropertyStore`. Raw file bytes are
+not retained. Document content is NOT embedded in the vector store —
+the extracted entities (managers, properties, units) are the
+searchable representation.
+
 The agent does NOT `import remi` in Python. There is no bridge.py.
-Python (agent mode only) is for computation on data already retrieved.
+Python is for computation on data already retrieved via tools.
 
 ## Task System — Supervised Multi-Agent Delegation
 
@@ -665,46 +679,43 @@ The container reads both and wires the right combination.
 The YAML manifest is the intermediate representation for a visual
 canvas. Three concepts compose into agent networks:
 
-### Tools — mode-scoped sets
+### Tools — unified set
 
-Seven tools exist in the registry. Each agent declares two tool sets
-in YAML — `ask_tools` (fast, in-process) and `agent_tools` (sandbox):
+All agents declare a single `tools:` list. No mode-scoped sets.
+The LLM picks which tools to use based on the question.
 
-| Tool | Mode | What it does |
-|------|------|-------------|
-| `query` | ask | In-process resolver dispatch — single tool, many operations |
-| `search` | ask | Semantic search over the vector index |
-| `bash` | agent | Shell commands + `remi` CLI for data access |
-| `python` | agent | Persistent Python session for computation |
-| `delegate_to_agent` | both | Supervised delegation to another agent |
-| `memory_store` | both | Write to agent memory |
-| `memory_recall` | both | Read from agent memory |
+| Tool | Registered by | What it does |
+|------|--------------|-------------|
+| `query` | `QueryToolProvider` | In-process resolver dispatch — 12 operations |
+| `document_list` | `DocumentToolProvider` | List documents with metadata |
+| `document_query` | `DocumentToolProvider` | Search within document content |
+| `bash` | `AnalysisToolProvider` | Shell commands + `remi` CLI |
+| `python` | `AnalysisToolProvider` | Persistent Python session |
+| `delegate_to_agent` | `DelegationToolProvider` | Supervised delegation |
+| `memory_write` | `MemoryToolProvider` | Write to persistent memory |
+| `memory_read` | `MemoryToolProvider` | Read from persistent memory |
 
 ```yaml
-ask_tools:
+tools:
   - name: query
-  - name: search
-  - name: delegate_to_agent
-  - name: memory_store
-  - name: memory_recall
-
-agent_tools:
-  - name: bash
-    inject:
-      session_id: sandbox_session_id
+  - name: document_list
+  - name: document_query
   - name: python
     config:
       timeout: 120
     inject:
       session_id: sandbox_session_id
+  - name: bash
+    inject:
+      session_id: sandbox_session_id
   - name: delegate_to_agent
-  - name: memory_store
-  - name: memory_recall
+  - name: memory_write
+  - name: memory_read
 ```
 
-**Ask mode** is the default. In-process `query`/`search` call resolvers
-directly — no subprocess, no sandbox. For deep analysis, the agent
-delegates or the user requests agent mode explicitly.
+The LLM chooses `query` for fast lookups, `bash`/`python` for
+computation, and `delegate_to_agent` for deep research. No pre-LLM
+routing decides this — the model sees all tools and picks the right one.
 
 ### Declarative delegation graph
 
@@ -875,82 +886,51 @@ packages prematurely.
 
 ## Key Constraints
 
-- `shell/config/domain.yaml` is the source of truth for signal definitions,
-  thresholds, and rules — do not hardcode these values in Python
-- The agent reasons over data via CLI commands — there is no precomputed
-  signal engine. The TBox defines the vocabulary; the agent queries on demand.
+- `shell/config/domain.yaml` is the source of truth for the domain schema
+  — entity types, relationships, and business processes
+- The agent discovers patterns and calculates significance from actual data.
+  `domain.yaml` provides structural vocabulary, not predefined rules or thresholds.
 - `types/` is for cross-cutting primitives only — no business logic
 - Prefer small focused modules over accumulating logic in an existing file
 - When a file is growing beyond a single clear responsibility, flag it
 
-## Request Routing — Tiered Dispatch Before the Agent Loop
+## Request Flow — Single Path, LLM Decides
 
-Every user question goes through a **request router** before any agent
-loop, sandbox, or tool resolution happens.  The router classifies the
-question into one of three tiers:
-
-| Tier | What happens | Latency |
-|------|-------------|---------|
-| `direct` | Single LLM call. No tools, no data fetch. Greetings, follow-ups. | ~200ms |
-| `query` | Data fetched in-process via resolvers, injected into a single LLM call. No tools, no agent loop. | ~300ms |
-| `agent` | Full think-act-observe loop. Sandbox, CLI, tools, delegation. | 2-30s |
-
-### Architecture
-
-The kernel defines **protocols only** (domain-agnostic):
-
-- `RequestRouter` protocol (`agent/runtime/router.py`) — `classify(question) → RoutingDecision`
-- `DataResolver` protocol (`agent/runtime/query_path.py`) — `resolve(operation, params) → dict`
-- `Tier` enum, `RoutingDecision` dataclass
-- `run_query_path()` — generic data-inject + single-LLM-call formatter
-
-The application layer provides **implementations** (domain-specific):
-
-- `RERouter` (`application/routing.py`) — rule-based keyword classifier
-  for real estate questions. Maps to operations like `dashboard`,
-  `delinquency`, `properties`, etc.
-- `QueryDispatcher` (`application/resolvers.py`) — maps operation names
-  to resolver calls (`ManagerResolver`, `DashboardResolver`, etc.)
-
-The container wires both into `AgentRuntime` via constructor injection.
-
-### Flow
+Every request goes through the agent loop. There is no pre-LLM
+router, no tier classification. `AgentRuntime.ask()` builds the
+context, runs `AgentNode`, and the LLM picks tools.
 
 ```
 POST /api/v1/agents/{name}/ask
   → AgentRuntime.ask()
-      → router.classify(question)
-      → Tier.DIRECT  → _ask_direct()  → single provider.complete()
-      → Tier.QUERY   → _ask_query()   → resolver.resolve() + provider.complete()
-      → Tier.AGENT   → _ask_agent()   → full AgentNode.run() loop
+      → session_id? → _ask_session() (multi-turn)
+      → else        → _ask_agent()  (single-shot)
+          → AgentNode.run()
+              → LLM sees tools: query, document_*, bash, python, delegate, memory
+              → Simple question? → query(operation="dashboard") → done in 1 tool call
+              → Document question? → document_list() + document_query() → done
+              → Complex analysis? → bash/python/delegate → multi-round loop
 ```
 
 ### Rules
 
-- **No `mode` on AskRequest.** The router decides the tier, not the
-  frontend.  The API accepts `question`, `session_id`, `manager_id`.
-- **Sessions always use the agent loop.** Multi-turn context needs the
-  full thread machinery.
-- **No domain knowledge in `agent/`.** The router protocol and query
-  path are domain-agnostic.  Keywords, operation names, and resolver
-  dispatch live in `application/`.
-- **No `QueryToolProvider` or `ask_tools`.** The previous pattern of
-  giving the LLM different tools per mode was deleted.  The router
-  eliminates the LLM from the routing decision entirely for the
-  common case.
-- **Fallback is always `Tier.AGENT`.** When the router is uncertain,
-  the full agent loop runs.  Safety over speed.
-- **The router is not a node.** It lives in `AgentRuntime.ask()`,
-  before any node, workflow, or loop is instantiated.  Tier.DIRECT
-  and Tier.QUERY never enter the agent loop at all.
+- **No pre-LLM routing.** The `RequestRouter`, `RERouter`, `Tier` enum,
+  `DataResolver`, `QueryDispatcher`, and `query_path.py` are deleted.
+  Do not recreate them.
+- **The LLM decides the tool.** The `query` tool is fast enough (~10ms)
+  that letting the LLM call it costs one tool round but gains
+  flexibility — no more regex misclassifications.
+- **No `mode` on AskRequest.** The API accepts `question`, `session_id`,
+  `manager_id`. The LLM handles both simple and complex questions.
 
 ### Adding new query operations
 
-1. Add a keyword pattern in `application/routing.py` (`_QUERY_OPS`)
-2. Add a handler method in `application/resolvers.py` (`QueryDispatcher`)
-3. Add it to the `_DISPATCH` table in `resolvers.py`
+1. Add a handler method in `application/tools/query.py` (`QueryToolProvider`)
+2. Add it to the dispatch table in `_build_dispatch()`
+3. Update the `_OPERATIONS` string constant
 
-No changes to the kernel.  No new tools.  No YAML changes.
+No changes to the kernel. No YAML changes needed (unless adding
+a whole new tool).
 
 ## What Was Deleted (Do Not Recreate)
 
@@ -961,13 +941,21 @@ These systems were removed as compensatory complexity. Do not recreate them:
   uses `remi` CLI commands via `bash`, not Python imports.
 - **Domain function-calling tools** (`WorkflowToolProvider`, `ActionToolProvider`,
   `SearchToolProvider`) — `manager_review`, `entity_search`, `portfolio_health`
-  etc. Replaced by CLI commands.
-- **Ask-mode query tools** (`QueryToolProvider`, `ask_tools`, `agent_tools`) —
-  in-process tools registered on the LLM's tool catalog for fast Q&A.
-  Replaced by the request router which bypasses the LLM for routing
-  entirely. Do not give the LLM different tool sets per mode.
+  etc. as separate tools. Replaced by the single `query` tool with an
+  `operation` parameter.
+- **Request router** (`RERouter`, `QueryDispatcher`, `DataResolver`,
+  `RequestRouter` protocol, `Tier` enum, `query_path.py`) — pre-LLM
+  regex classifier that bypassed the agent loop. Replaced by the
+  single-path architecture where the LLM uses in-process tools directly.
+  Do not recreate tiered routing or regex classifiers.
+- **Mode-scoped tool sets** (`ask_tools`, `agent_tools`) — different
+  tool surfaces per mode. Replaced by a single `tools:` list. All
+  tools are available to every request; the LLM picks what to use.
 - **Entailment engine** (`application/services/detection/signals/`) — 7 evaluators
-  + engine + pipeline that precomputed signals. The agent queries data directly now.
+  + engine + pipeline that precomputed signals. The agent discovers patterns directly.
+- **Signal definitions, policies, causal chains** — pre-declared rules in
+  `domain.yaml` (TBox). Replaced by agent-driven discovery. `domain.yaml` now
+  holds only structural vocabulary (entity types, relationships, processes).
 - **Snapshot/rollup system** (`SnapshotService`, `RollupStore`) — point-in-time
   metric captures. Replaced by the event system (`core/events.py`).
 - **Synthetic data generation** (`seeding/synthetic.py`, `_backfill_history`) —

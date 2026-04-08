@@ -4,7 +4,6 @@ Public API::
 
     from remi.agent.runtime import AgentRuntime, AgentSessions, RetryPolicy
     from remi.agent.runtime import RuntimeConfig, Placement, Isolation, Durability
-    from remi.agent.runtime import RequestRouter, DataResolver, Tier, RoutingDecision
 """
 
 from remi.agent.runtime.config import (
@@ -16,25 +15,19 @@ from remi.agent.runtime.config import (
     RuntimeConfig,
     ScalingConfig,
 )
-from remi.agent.runtime.query_path import DataResolver
 from remi.agent.runtime.retry import RetryPolicy
-from remi.agent.runtime.router import RequestRouter, RoutingDecision, Tier
 from remi.agent.runtime.runner import AgentRuntime
 from remi.agent.runtime.sessions import AgentSessions
 
 __all__ = [
     "AgentRuntime",
     "AgentSessions",
-    "DataResolver",
     "Durability",
     "Isolation",
     "Placement",
     "QueuePriority",
-    "RequestRouter",
     "ResourceBudget",
     "RetryPolicy",
-    "RoutingDecision",
     "RuntimeConfig",
     "ScalingConfig",
-    "Tier",
 ]

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Markdown } from "@/components/ui/Markdown";
+import { ToolResultCard } from "./ToolResultCard";
 import type { ChatMessage, ToolCall, UsageInfo } from "@/lib/types";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -38,7 +39,7 @@ function toolLabel(name: string): string {
   return TOOL_LABELS[name] || name.replace(/_/g, " ");
 }
 
-function ToolCallRow({ tc }: { tc: ToolCall }) {
+function ToolCallRow({ tc, showDetails }: { tc: ToolCall; showDetails: boolean }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -61,7 +62,12 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
           <span className="text-[10px] text-fg-ghost">{(tc.duration / 1000).toFixed(1)}s</span>
         )}
       </button>
-      {open && (
+
+      {/* Inline result card for recognized schemas */}
+      <ToolResultCard tc={tc} />
+
+      {/* Raw JSON toggle — only in work-details mode */}
+      {showDetails && open && (
         <div className="ml-5 mt-1 mb-2 rounded-lg bg-surface-raised border border-border p-2.5 space-y-2">
           <pre className="text-[10px] text-fg-muted font-mono overflow-x-auto leading-relaxed">
             {JSON.stringify(tc.arguments, null, 2)}
@@ -179,6 +185,7 @@ export function SessionThread({
   streaming: boolean;
   showWorkDetails: boolean;
   onRetry?: () => void;
+  liveArtifacts?: import("@/lib/types").ResearchArtifact[];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -247,10 +254,10 @@ export function SessionThread({
                 className="flex justify-start"
               >
                 <div className="max-w-[90%] space-y-2">
-                  {msg.tools && msg.tools.length > 0 && showWorkDetails && (
+                  {msg.tools && msg.tools.length > 0 && (
                     <div className="pl-0.5 space-y-0">
                       {msg.tools.map((tc) => (
-                        <ToolCallRow key={tc.id} tc={tc} />
+                        <ToolCallRow key={tc.id} tc={tc} showDetails={showWorkDetails} />
                       ))}
                     </div>
                   )}
@@ -285,7 +292,7 @@ export function SessionThread({
               {showWorkDetails && (
                 <div className="pl-0.5 space-y-0">
                   {liveTools.map((tc) => (
-                    <ToolCallRow key={tc.id} tc={tc} />
+                    <ToolCallRow key={tc.id} tc={tc} showDetails={showWorkDetails} />
                   ))}
                 </div>
               )}
@@ -299,7 +306,7 @@ export function SessionThread({
               {showWorkDetails && liveTools.length > 0 && (
                 <div className="pl-0.5 space-y-0">
                   {liveTools.map((tc) => (
-                    <ToolCallRow key={tc.id} tc={tc} />
+                    <ToolCallRow key={tc.id} tc={tc} showDetails={showWorkDetails} />
                   ))}
                 </div>
               )}

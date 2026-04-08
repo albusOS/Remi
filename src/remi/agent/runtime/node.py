@@ -20,10 +20,7 @@ from remi.agent.config import AgentConfig
 from remi.agent.context.builder import _find_tail_inject_point
 from remi.agent.skills import FilesystemSkillDiscovery, SkillMetadata
 from remi.agent.context.frame import WorldState
-from remi.agent.context.rendering import (
-    extract_signal_references,
-    render_domain_context,
-)
+from remi.agent.context.rendering import render_domain_context
 from remi.agent.llm.types import LLMProvider, estimate_cost
 from remi.agent.memory import MemoryStore
 from remi.agent.memory.extraction import extract_episode
@@ -134,9 +131,9 @@ class AgentNode(BaseModule):
         tracer: Tracer | None = context.deps.tracer or context.extras.get("tracer")
 
         domain = context.deps.domain_tbox or context.extras.get("domain_tbox")
-        world = WorldState.from_tbox(domain)
+        world = WorldState.from_schema(domain)
         domain_priming = (
-            render_domain_context(domain, compact=cfg.compact_tbox) if domain is not None else ""
+            render_domain_context(domain) if domain is not None else ""
         )
 
         thread = build_initial_thread(
@@ -219,8 +216,8 @@ class AgentNode(BaseModule):
             if tracer is not None and world.loaded:
                 async with tracer.span(
                     SpanKind.PERCEPTION,
-                    "tbox_priming",
-                    **{k: v for k, v in world.to_dict().items() if k != "tbox_loaded"},
+                    "schema_priming",
+                    **{k: v for k, v in world.to_dict().items() if k != "schema_loaded"},
                 ):
                     pass
 
@@ -321,14 +318,12 @@ class AgentNode(BaseModule):
 
             if tracer is not None:
                 final_text = final if isinstance(final, str) else json.dumps(final, default=str)
-                signal_names = extract_signal_references(final_text, domain)
                 async with tracer.span(
                     SpanKind.REASONING,
                     "agent_output",
                     model=cfg.model,
                     provider=cfg.provider,
                     output_length=len(final_text),
-                    signals_referenced=signal_names,
                     has_recommendation=any(
                         kw in final_text.lower()
                         for kw in ("recommend", "suggest", "should", "consider", "action")

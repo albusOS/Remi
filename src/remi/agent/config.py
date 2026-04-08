@@ -161,7 +161,6 @@ class AgentConfig(BaseModel):
     agent_max_iterations: int | None = None
     max_history_turns: int = 10
     stop_when: str = "no_tool_calls"
-    compact_tbox: bool = False
 
     # Phase-gated execution (researcher)
     phases: list[PhaseConfig] = Field(default_factory=list)
@@ -273,6 +272,5 @@ class AgentConfig(BaseModel):
             agent_max_iterations=data.get("agent_max_iterations"),
             max_history_turns=data.get("max_history_turns", 10),
             stop_when=data.get("stop_when", "no_tool_calls"),
-            compact_tbox=data.get("compact_tbox", False),
             output_contract=data.get("output_contract", "conversation"),
         )

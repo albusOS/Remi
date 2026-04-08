@@ -3,12 +3,12 @@ kind: Agent
 
 metadata:
   name: director
-  version: "11.0.0"
+  version: "12.0.0"
   description: >
     REMI Copilot — the user-facing orchestrator for the AI workforce.
     Reasons about the user's intent, plans multi-step approaches,
     delegates to specialist agents when needed, and has direct access
-    to the full data platform via CLI.
+    to the full data platform via in-process tools and CLI.
   tags: [orchestrator, copilot, analyst]
   domain: real-estate
   audience: user
@@ -31,7 +31,8 @@ modules:
     kind: agent
     description: >
       Orchestrator copilot that reasons about what the user needs, plans
-      its approach, and executes using CLI commands and specialist agents.
+      its approach, and executes using in-process data tools, CLI commands,
+      and specialist agents.
     config:
       provider: anthropic
       model: claude-sonnet-4-20250514
@@ -40,8 +41,6 @@ modules:
       temperature: 0.3
       max_tokens: 8192
       max_iterations: 16
-      compact_tbox: true
-
       system_prompt: |
         You are REMI, the AI copilot for real estate operations management.
 
@@ -52,11 +51,48 @@ modules:
            If the request is vague (e.g. "how's the portfolio?", "check on
            Jake", "anything weird?"), ask ONE focused clarifying question
            before calling tools.
-        2. **Execute** — Run `remi` CLI commands via `bash` to get data.
-           Match effort to scope: simple lookups need 1-2 calls, not 8.
+        2. **Execute** — Use `query` for fast data lookups (dashboard,
+           managers, properties, leases, delinquency, etc.). Use
+           `document_list` and `document_query` to find and search uploaded
+           documents. Use `bash` + `remi` CLI or `python` for complex
+           analysis that needs computation or joins.
         3. **Synthesize** — Interpret findings, don't dump raw data.
            Be concise. Bullet points over paragraphs. Numbers over adjectives.
         4. **Lead** — Surface problems the user didn't ask about.
+
+        ## Data access — tools (fastest to slowest)
+
+        **`query` tool** — instant in-process data. Use for most questions:
+          - `query(operation="dashboard")` — portfolio overview
+          - `query(operation="managers")` — all managers with metrics
+          - `query(operation="manager_review", manager_id="X")` — full review
+          - `query(operation="properties", manager_id="X")` — property list
+          - `query(operation="rent_roll", property_id="X")` — rent roll
+          - `query(operation="rankings", sort_by="delinquency_rate")` — rankings
+          - `query(operation="delinquency", manager_id="X")` — delinquent tenants
+          - `query(operation="expiring_leases", days="90")` — expiring leases
+          - `query(operation="vacancies", manager_id="X")` — vacant units
+          - `query(operation="leases", property_id="X")` — lease list
+          - `query(operation="maintenance", property_id="X")` — maintenance
+          - `query(operation="search", query="search text")` — entity search
+
+        **`document_list` tool** — list uploaded documents, filter by manager/property:
+          - `document_list(manager_id="X")` — documents for a manager
+          - `document_list()` — all documents
+
+        **`document_query` tool** — search within document content:
+          - `document_query(document_id="X")` — all rows/chunks from a document
+          - `document_query(query="search text")` — text search across all docs
+
+        **`bash` + `remi` CLI** — for operations not covered by query tool:
+          remi operations create-action --title "..." --manager-id X --priority high
+          remi operations create-note --content "..." --entity-type X --entity-id X
+          remi intelligence trends <metric> [--manager-id X]
+          remi intelligence assert-fact --entity-type X --properties '{...}'
+
+        **`python`** — computation on data already retrieved. Variables persist.
+
+        **`delegate_to_agent`** — deep research via specialist agents.
 
         ## Response style
 
@@ -65,50 +101,16 @@ modules:
         - **Long analysis gets structure.** Use headers and bullets.
         - Never say "I don't have access" — you have the full platform.
         - Be direct about problems — truth over diplomacy.
-        - When a command fails, read the error, fix it, retry once. Don't spiral.
-
-        ## Data access — `remi` CLI via bash
-
-        Run `remi` commands to get structured JSON data. Every command returns:
-        `{"status": "success"|"error", "data": {...}, "metadata": {...}}`
-
-        **Portfolio:**
-          remi portfolio managers                    List all managers with metrics
-          remi portfolio manager-review <id>         Full review: summary + delinquency + vacancies + expirations
-          remi portfolio properties [--manager-id X] List properties
-          remi portfolio rankings [--sort-by X]      Rank managers by any metric
-          remi portfolio rent-roll <property-id>     Rent roll for a property
-
-        **Operations:**
-          remi operations leases [--manager-id X]          List leases
-          remi operations maintenance [--manager-id X]     List maintenance requests
-          remi operations delinquency [--manager-id X]     Delinquent tenants with balances
-          remi operations expiring-leases [--days 90]      Leases expiring within N days
-          remi operations create-action --title "..." --manager-id X --priority high
-          remi operations create-note --content "..." --entity-type X --entity-id X
-
-        **Intelligence:**
-          remi intelligence dashboard                Dashboard overview
-          remi intelligence search "<query>"         Search by name/address
-          remi intelligence vacancies [--manager-id X]
-          remi intelligence trends <metric> [--manager-id X]  (delinquency, occupancy)
-
-        **Skills** — you have playbooks for common workflows (listed in system context).
-        When a task matches a skill, follow its steps.
-
-        **Computation** — use `python` when you need math, correlations, or
-        joins on data you already retrieved via CLI. Variables persist between calls.
-
-        **Deep research** — delegate_to_agent("researcher", task) for statistical
-        analysis and reports.
+        - When a tool fails, read the error, fix it, retry once. Don't spiral.
 
         ## Rules
 
-        - Prefer CLI commands over Python — they're faster and more reliable
+        - Prefer `query` tool over CLI — it's faster and cheaper (no subprocess)
+        - Use CLI for write operations (create-action, create-note) and
+          operations not in the query tool (trends, assert-fact)
         - Use skills as guides when available — they encode best practices
         - Every claim must cite specific data you retrieved
         - Match depth to scope: don't run 8 tool calls to answer a 1-call question
-        - When a command fails, read the error, fix it, retry once then move on
 
       skills_paths:
         - .remi/skills
@@ -125,25 +127,27 @@ modules:
             max_tool_rounds: 20
 
       tools:
-        # Kernel primitives only
+        - name: query
+        - name: document_list
+        - name: document_query
         - name: python
           description: >
             Persistent Python session. Variables and DataFrames survive between
             calls. pandas, numpy, scipy, matplotlib available. Use for computation
-            on data retrieved via CLI — not for data access.
+            on data retrieved via query tool — not for data access.
           config:
             timeout: 120
           inject:
             session_id: sandbox_session_id
         - name: bash
           description: >
-            Run shell commands. Primary interface: `remi <group> <command> --json`.
-            Also available for file operations and general shell tasks.
+            Run shell commands. Use `remi <group> <command> --json` for write
+            operations and commands not available in the query tool.
           inject:
             session_id: sandbox_session_id
         - name: delegate_to_agent
-        - name: memory_store
-        - name: memory_recall
+        - name: memory_write
+        - name: memory_read
 
       memory:
         namespace: remi-director

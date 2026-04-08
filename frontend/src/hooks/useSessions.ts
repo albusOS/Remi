@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, SessionSummary, ToolCall, UsageInfo } from "@/lib/types";
+import type { ChatMessage, ResearchArtifact, SessionSummary, ToolCall, UsageInfo } from "@/lib/types";
 
 let _msgSeq = 0;
 function msgId(): string {
@@ -15,6 +15,7 @@ export interface SessionState {
   messages: ChatMessage[];
   liveContent: string;
   liveTools: ToolCall[];
+  liveArtifacts: ResearchArtifact[];
   streaming: boolean;
   error: string | null;
   loaded: boolean;
@@ -25,6 +26,7 @@ function emptySessionState(): SessionState {
     messages: [],
     liveContent: "",
     liveTools: [],
+    liveArtifacts: [],
     streaming: false,
     error: null,
     loaded: false,
@@ -314,9 +316,27 @@ export function useSessions(agent: string) {
         updateState(sid, (s) => ({
           ...s,
           liveTools: s.liveTools.map((t) =>
-            t.id === callId ? { ...t, result: evt.data.result, status: "done" as const, duration: dur } : t,
+            t.id === callId
+              ? {
+                  ...t,
+                  result: evt.data.result,
+                  result_schema: evt.data.result_schema as string | undefined,
+                  status: "done" as const,
+                  duration: dur,
+                }
+              : t,
           ),
         }));
+        break;
+      }
+      case "artifact": {
+        const art = evt.data.artifact as ResearchArtifact;
+        if (art) {
+          updateState(sid, (s) => ({
+            ...s,
+            liveArtifacts: [...s.liveArtifacts, art],
+          }));
+        }
         break;
       }
       case "done": {
@@ -347,11 +367,13 @@ export function useSessions(agent: string) {
                 content: finalContent,
                 timestamp: Date.now(),
                 tools: [...s.liveTools],
+                artifacts: s.liveArtifacts.length ? [...s.liveArtifacts] : undefined,
                 usage,
               },
             ],
             liveTools: [],
             liveContent: "",
+            liveArtifacts: [],
             streaming: false,
           };
         });
@@ -400,14 +422,16 @@ export function useSessions(agent: string) {
                 content: finalContent,
                 timestamp: Date.now(),
                 tools: [...state.liveTools],
+                artifacts: state.liveArtifacts.length ? [...state.liveArtifacts] : undefined,
               },
             ],
             liveContent: "",
             liveTools: [],
+            liveArtifacts: [],
             streaming: false,
           });
         } else {
-          next.set(sid, { ...state, streaming: false, liveContent: "", liveTools: [] });
+          next.set(sid, { ...state, streaming: false, liveContent: "", liveTools: [], liveArtifacts: [] });
         }
         return next;
       }
