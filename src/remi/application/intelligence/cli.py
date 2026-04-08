@@ -38,13 +38,13 @@ def dashboard(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/dashboard")
+        data = get("/dashboard/overview")
         emit_success(data, command="remi intelligence dashboard")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.dashboard_resolver.get_overview())
+    result = _run(c.dashboard_resolver.dashboard_overview())
     if as_json:
         emit_success(
             result.model_dump(mode="json"),

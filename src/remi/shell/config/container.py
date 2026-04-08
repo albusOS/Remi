@@ -4,7 +4,8 @@ Calls factory functions from the modules that own the things being built.
 Only three kernel tool providers are registered: ``AnalysisToolProvider``
 (python, bash), ``MemoryToolProvider`` (memory_store, memory_recall),
 and ``DelegationToolProvider`` (delegate_to_agent). All domain data
-access goes through the ``remi`` CLI.
+access goes through the ``remi`` CLI in agent mode, or through the
+request router's query fast path for simple questions.
 
 Only attributes read outside this module are stored as ``self.*``.
 Internal intermediaries are local variables.
@@ -58,6 +59,8 @@ from remi.application.portfolio import (
     RentRollResolver,
 )
 from remi.application.profile import build_re_profile
+from remi.application.resolvers import QueryDispatcher
+from remi.application.routing import RERouter
 from remi.application.stores import (
     InMemoryEventStore,
     StoreSuite,
@@ -66,6 +69,19 @@ from remi.application.stores import (
 from remi.application.stores.indexer import AgentVectorSearch
 from remi.application.stores.world import build_re_world_model
 from remi.shell.config.settings import RemiSettings
+
+_QUERY_SYSTEM_PROMPT = """\
+You are REMI, the AI copilot for real estate operations management.
+You have been given data that answers the user's question.
+Interpret the data and respond naturally.
+
+Rules:
+- Be concise. Bullet points over paragraphs. Numbers over adjectives.
+- Cite specific data — don't say "several" when you know the count.
+- If the data shows problems, surface them proactively.
+- Never say "based on the data provided" — just answer.
+- Short questions get short answers.
+"""
 
 
 class Container:
@@ -175,6 +191,19 @@ class Container:
         for provider in kernel_providers:
             provider.register(self.tool_registry)
 
+        # -- Request router (classifies questions into tiers) -------------------
+        re_router = RERouter()
+        query_dispatcher = QueryDispatcher(
+            manager_resolver=self.manager_resolver,
+            property_resolver=self.property_resolver,
+            rent_roll_resolver=self.rent_roll_resolver,
+            dashboard_resolver=self.dashboard_resolver,
+            lease_resolver=self.lease_resolver,
+            maintenance_resolver=self.maintenance_resolver,
+            search_service=self.search_service,
+            property_store=self.property_store,
+        )
+
         # -- Chat agent --------------------------------------------------------
         context_builder = build_context_builder(
             domain=mutable_tbox,
@@ -201,6 +230,9 @@ class Container:
             context_builder=context_builder,
             usage_ledger=self.usage_ledger,
             recall_service=recall_service,
+            router=re_router,
+            data_resolver=query_dispatcher,
+            query_system_prompt=_QUERY_SYSTEM_PROMPT,
         )
 
         # -- Wire workflow engine ↔ agent runtime (bidirectional) --------------

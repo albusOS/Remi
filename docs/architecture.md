@@ -119,36 +119,60 @@ shell/
 
 ---
 
-## Agent interface — CLI-first
+## Agent interface — dual mode
 
-Agents interact with the REMI platform through three layers:
+Agents operate in two modes, selected per-request:
 
-| Layer | What | Where |
-|-------|------|-------|
-| **Tool** | Kernel primitive exposed via LLM function calling | `agent/tools/` — `bash`, `python`, `delegate_to_agent`, `memory_store`, `memory_recall` |
-| **Command** | `remi` CLI subcommand that queries or mutates domain data (JSON output) | `application/{slice}/cli.py` — e.g. `remi portfolio managers`, `remi operations delinquency` |
-| **Skill** | Markdown playbook that teaches an agent what to look for and which commands to run | `.remi/skills/{name}/SKILL.md` — loaded at session start |
+### Ask mode (default) — fast conversational Q&A
 
-### How it works
+In-process tools call resolvers directly. No sandbox, no subprocess.
+Sub-second data access for simple lookups and conversational questions.
+
+| Tool | What it does |
+|------|-------------|
+| `query` | Universal data access — one tool, many operations (managers, properties, delinquency, trends, etc.) |
+| `search` | Semantic search across entities and documents |
+| `delegate_to_agent` | Escalate to researcher for deep analysis |
+| `memory_store` / `memory_recall` | Agent long-term memory |
+
+The `query` tool accepts an `operation` parameter that dispatches to
+the appropriate resolver in-process (~300 tokens vs ~4000 for separate tools).
+
+### Agent mode — deep research with sandbox
+
+Full `bash` + `python` + CLI commands. Sandbox spawned on demand.
+For complex analysis, scripting, data joins, regressions.
+
+| Tool | What it does |
+|------|-------------|
+| `bash` | Shell commands + `remi` CLI for data access |
+| `python` | Persistent Python session for computation |
+| `delegate_to_agent` | Supervised delegation |
+| `memory_store` / `memory_recall` | Agent long-term memory |
 
 ```
-HTTP POST /api/v1/agents/{name}/ask
+HTTP POST /api/v1/agents/{name}/ask  { mode: "ask" | "agent" }
           │
           ▼
   AgentRuntime.ask() (agent/runtime/)
           │
-          ├── 5 kernel tools (function calling)
-          │   bash, python, delegate_to_agent, memory_store, memory_recall
+          ├── ask mode: query → resolvers (in-process, sub-second)
+          │                search → vector index (in-process)
           │
-          ├── bash → remi portfolio managers (JSON output)
-          │   bash → remi operations delinquency --manager-id jake
-          │   bash → remi intelligence search "delinquent tenants"
-          │
-          └── python → computation on CLI-retrieved data
-              (DataFrames, statistics, trend analysis)
+          └── agent mode: bash → remi portfolio managers (JSON output)
+                          python → computation on CLI-retrieved data
 ```
 
-When `REMI_API_URL` is set (inside the sandbox), CLI commands proxy to the running API server for fast execution — no container cold start. See `shell/cli/client.py`.
+When `REMI_API_URL` is set (inside the sandbox in agent mode), CLI commands
+proxy to the running API server — no container cold start. See `shell/cli/client.py`.
+
+### Concepts
+
+| Layer | What | Where |
+|-------|------|-------|
+| **Tool** | Kernel primitive exposed via LLM function calling | `agent/tools/` + `application/tools/query.py` |
+| **Command** | `remi` CLI subcommand (JSON output) — agent mode | `application/{slice}/cli.py` |
+| **Skill** | Markdown playbook with domain knowledge | `.remi/skills/{name}/SKILL.md` |
 
 ### Streaming response
 

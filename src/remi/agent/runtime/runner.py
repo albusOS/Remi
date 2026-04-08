@@ -4,9 +4,13 @@ Lean invocation facade. Loads agent configs from YAML manifests, builds
 runtime contexts, and delegates execution to ``AgentNode``. Session
 state management lives in ``AgentSessions`` — this module only invokes.
 
-The old ``_run_graph`` (multi-module DAG inside app.yaml) is gone.
-Multi-step orchestration belongs in the workflow engine, which now
-supports ``kind: agent`` steps natively.
+**Request routing**: Before entering the agent loop, ``ask()`` runs the
+injected ``RequestRouter`` to classify the question into a tier:
+
+- ``direct`` — single LLM call, no tools, no data fetch
+- ``query``  — data fetched in-process via ``DataResolver``, formatted
+  by a single LLM call, no agent loop
+- ``agent``  — full think-act-observe loop with sandbox and tools
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import yaml
 
 from remi.agent.context.builder import ContextBuilder
 from remi.agent.llm.factory import LLMProviderFactory
+from remi.agent.llm.types import Message
 from remi.agent.memory import MemoryStore
 from remi.agent.memory.recall import MemoryRecallService
 from remi.agent.observe.types import Tracer
@@ -27,7 +32,9 @@ from remi.agent.runtime.base import ModuleOutput
 from remi.agent.runtime.config import RuntimeConfig
 from remi.agent.runtime.deps import RunDeps, RunParams, RuntimeContext, ScopeContext
 from remi.agent.runtime.node import AgentNode
+from remi.agent.runtime.query_path import DataResolver, run_query_path
 from remi.agent.runtime.retry import RetryPolicy
+from remi.agent.runtime.router import RequestRouter, RoutingDecision, Tier
 from remi.agent.runtime.sessions import AgentSessions
 from remi.agent.sandbox.types import Sandbox
 from remi.agent.signals import DomainTBox
@@ -52,8 +59,8 @@ class EventCallback(Protocol):
 class AgentRuntime:
     """Runs any named agent — stateless or session-aware.
 
-    ``ask()`` is the single entry point.  Pass ``session_id`` for
-    session-aware multi-turn; omit it for stateless single-shot.
+    ``ask()`` is the single entry point.  The injected ``RequestRouter``
+    classifies each question into a tier before execution begins.
     """
 
     def __init__(
@@ -71,6 +78,9 @@ class AgentRuntime:
         context_builder: ContextBuilder | None = None,
         usage_ledger: LLMUsageLedger | None = None,
         recall_service: MemoryRecallService | None = None,
+        router: RequestRouter | None = None,
+        data_resolver: DataResolver | None = None,
+        query_system_prompt: str = "",
     ) -> None:
         self._provider_factory = provider_factory
         self._tool_registry = tool_registry
@@ -84,6 +94,9 @@ class AgentRuntime:
         self._context_builder = context_builder
         self._usage_ledger = usage_ledger
         self._recall_service = recall_service
+        self._router = router
+        self._data_resolver = data_resolver
+        self._query_system_prompt = query_system_prompt
 
         self.sessions = AgentSessions(chat_session_store)
 
@@ -101,21 +114,38 @@ class AgentRuntime:
         question: str,
         *,
         session_id: str | None = None,
-        mode: Literal["ask", "agent"] = "agent",
         on_event: EventCallback | None = None,
+        manager_id: str | None = None,
     ) -> tuple[str | None, str]:
         """Run an agent. Returns ``(answer, run_id)``.
 
-        When *session_id* is provided the session thread is loaded,
-        the question appended, and the reply persisted — multi-turn.
-        When omitted the agent runs stateless with an ephemeral sandbox.
+        The router classifies the question first.  For ``direct`` and
+        ``query`` tiers, the agent loop is bypassed entirely.  For
+        ``agent`` tier (or when no router is configured), the full
+        think-act-observe loop runs.
+
+        Session-aware calls always go through the agent loop (the
+        session may have multi-turn context that the fast path can't
+        handle).
         """
         if session_id is not None:
             return await self._ask_session(
-                session_id, question, mode=mode, on_event=on_event,
+                session_id, question, on_event=on_event,
             )
-        return await self._ask_stateless(
-            agent_name, question, mode=mode, on_event=on_event,
+
+        decision = self._classify(question, manager_id=manager_id)
+        log = logger.bind(agent=agent_name, tier=decision.tier.value)
+
+        if decision.tier == Tier.DIRECT:
+            return await self._ask_direct(question, on_event=on_event, log=log)
+
+        if decision.tier == Tier.QUERY and self._data_resolver is not None:
+            return await self._ask_query(
+                question, decision, on_event=on_event, log=log,
+            )
+
+        return await self._ask_agent(
+            agent_name, question, on_event=on_event,
         )
 
     async def run_chat_agent(
@@ -140,7 +170,7 @@ class AgentRuntime:
         log.info("agent_run_start", thread_length=len(thread), provider=provider, model=model)
 
         sid = sandbox_session_id or f"chat-{run_id}"
-        await self._ensure_sandbox_session(sid, mode=mode)
+        await self._ensure_sandbox_session(sid)
 
         params = RunParams(
             mode=mode,
@@ -176,25 +206,92 @@ class AgentRuntime:
         )
         return answer
 
-    # -- Private paths -----------------------------------------------------
+    # -- Tier handlers -----------------------------------------------------
 
-    async def _ask_stateless(
+    async def _ask_direct(
+        self,
+        question: str,
+        *,
+        on_event: EventCallback | None,
+        log: Any,
+    ) -> tuple[str | None, str]:
+        """Tier.DIRECT — single LLM call, no tools, no data."""
+        run_id = new_run_id()
+        log = log.bind(run_id=run_id)
+        log.info("direct_start")
+
+        emit = on_event or _noop_event
+        provider = self._provider_factory.create(self._default_provider)
+
+        messages: list[Message] = [
+            Message(
+                role="system",
+                content=(
+                    self._query_system_prompt
+                    or "You are a helpful assistant. Be concise."
+                ),
+            ),
+            Message(role="user", content=question),
+        ]
+
+        response = await provider.complete(
+            model=self._default_model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+
+        answer = response.content or ""
+        await emit("done", {"tier": "direct", "model": self._default_model})
+        log.info("direct_done", answer_length=len(answer))
+        return answer, run_id
+
+    async def _ask_query(
+        self,
+        question: str,
+        decision: RoutingDecision,
+        *,
+        on_event: EventCallback | None,
+        log: Any,
+    ) -> tuple[str | None, str]:
+        """Tier.QUERY — fetch data in-process, format with one LLM call."""
+        run_id = new_run_id()
+        log = log.bind(run_id=run_id, operation=decision.operation)
+        log.info("query_start")
+
+        assert self._data_resolver is not None
+        provider = self._provider_factory.create(self._default_provider)
+
+        answer, metadata = await run_query_path(
+            question=question,
+            operation=decision.operation,
+            params=decision.params,
+            resolver=self._data_resolver,
+            provider=provider,
+            model=self._default_model,
+            system_preamble=self._query_system_prompt,
+            on_event=on_event,
+        )
+
+        log.info("query_done", answer_length=len(answer), **metadata)
+        return answer, run_id
+
+    async def _ask_agent(
         self,
         agent_name: str,
         question: str,
         *,
-        mode: Literal["ask", "agent"],
         on_event: EventCallback | None,
     ) -> tuple[str | None, str]:
-        """Ephemeral single-shot — sandbox created and destroyed per call."""
+        """Tier.AGENT — full agent loop with sandbox and tools."""
         run_id = new_run_id()
-        log = logger.bind(run_id=run_id, agent=agent_name, mode=mode)
+        log = logger.bind(run_id=run_id, agent=agent_name, tier="agent")
         log.info("ask_start", question_length=len(question))
 
         sandbox_sid = f"ask-{run_id}"
-        await self._ensure_sandbox_session(sandbox_sid, mode=mode)
+        await self._ensure_sandbox_session(sandbox_sid)
 
-        params = RunParams(mode=mode, sandbox_session_id=sandbox_sid, on_event=on_event)
+        params = RunParams(mode="agent", sandbox_session_id=sandbox_sid, on_event=on_event)
         ctx = self._build_context(run_id=run_id, params=params)
 
         try:
@@ -219,10 +316,9 @@ class AgentRuntime:
         session_id: str,
         question: str,
         *,
-        mode: Literal["ask", "agent"],
         on_event: EventCallback | None,
     ) -> tuple[str | None, str]:
-        """Session-aware multi-turn — loads thread, persists reply."""
+        """Session-aware multi-turn — always uses the agent loop."""
         session = await self.sessions.get(session_id)
         if session is None:
             raise SessionNotFoundError(session_id)
@@ -239,7 +335,6 @@ class AgentRuntime:
             thread,
             on_event,
             sandbox_session_id=session.sandbox_session_id,
-            mode=mode,
             provider=session.provider,
             model=session.model,
         )
@@ -252,6 +347,13 @@ class AgentRuntime:
         return (answer, run_id)
 
     # -- Internal helpers --------------------------------------------------
+
+    def _classify(
+        self, question: str, *, manager_id: str | None = None,
+    ) -> RoutingDecision:
+        if self._router is None:
+            return RoutingDecision(tier=Tier.AGENT)
+        return self._router.classify(question, manager_id=manager_id)
 
     def _load_agent_config(
         self,
@@ -304,18 +406,14 @@ class AgentRuntime:
             extras=merged_extras,
         )
 
-    async def _ensure_sandbox_session(
-        self,
-        session_id: str,
-        *,
-        mode: Literal["ask", "agent"] = "agent",
-    ) -> None:
+    async def _ensure_sandbox_session(self, session_id: str) -> None:
         session = await self._sandbox.get_session(session_id)
         if session is None:
-            await self._sandbox.create_session(
-                session_id,
-                extra_env={"REMI_MODE": mode},
-            )
+            await self._sandbox.create_session(session_id)
+
+
+async def _noop_event(_type: str, _data: dict[str, Any]) -> None:
+    pass
 
 
 def _extract_answer(output: Any) -> str | None:

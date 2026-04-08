@@ -1,22 +1,20 @@
 # REMI sandbox image — isolated Python execution environment.
 #
-# This image runs agent-generated code in a throwaway container per
+# This image runs agent-generated code inside a throwaway container per
 # session.  It intentionally has NO access to the REMI source tree or
-# application secrets; it communicates back to the API only via HTTP
-# through the REMI_API_URL environment variable injected at container
-# start time.
+# application secrets; it communicates back to the host API only via the
+# `remi` CLI operating in client mode (REMI_API_URL env var).
 #
 # Security posture
 # ----------------
 # - Non-root user (sandbox) with no sudo
-# - Only the standard library + data/analytics packages installed
+# - Standard library + data/analytics packages + remi CLI
 # - No Docker socket, no host mount, no privileged flag
-# - Network egress limited to REMI_API_URL by the Docker network
-#   policy defined in docker-compose.yaml
+# - Network egress limited to the REMI API by Docker network policy
 #
-# Build
-# -----
-#   docker build -t remi-sandbox:latest ./sandbox
+# Build (from repo root)
+# ----------------------
+#   docker build -t remi-sandbox:latest -f sandbox/Dockerfile .
 #
 # The API container spawns sessions via DockerSandbox, which starts
 # each container with `sleep infinity` and uses `docker exec` for code
@@ -24,10 +22,7 @@
 
 FROM python:3.13-slim
 
-# Analytics packages only — NO networking libraries (httpx, requests,
-# aiohttp, urllib3).  The only way to reach outside the sandbox is via
-# the injected ``remi`` module, which uses stdlib urllib against the
-# internal REMI_API_URL.
+# Analytics packages
 RUN pip install --no-cache-dir \
         pandas \
         numpy \
@@ -35,8 +30,14 @@ RUN pip install --no-cache-dir \
         scikit-learn \
         statsmodels
 
-# Non-root execution — agents should not be able to install packages
-# or modify the image layer even if they escape the exec() boundary.
+# Install remi CLI from source.  In the sandbox, REMI_API_URL is always
+# set so the CLI runs in client mode (stdlib urllib -> host API).
+COPY pyproject.toml README.md ./build/
+COPY src/ ./build/src/
+RUN pip install --no-cache-dir ./build \
+    && rm -rf ./build
+
+# Non-root execution
 RUN useradd --create-home --shell /bin/false --uid 1001 sandbox
 USER sandbox
 
@@ -48,6 +49,3 @@ ENV PYTHONUNBUFFERED=1 \
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=2 \
     CMD ["python", "-c", "print('ok')"]
-
-# Entry point is intentionally left unset; DockerSandbox starts
-# containers with `sleep infinity` and execs code into them.

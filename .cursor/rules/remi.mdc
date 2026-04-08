@@ -246,25 +246,39 @@ and snapshot system have been deleted. Do not create or import from
 **Dependency direction:** `application/` imports from `agent/` — never
 the reverse. `shell/` imports from both. `types/` imports nothing.
 
-**CLI-first agent interface:**
+**Dual-mode agent interface:**
 
-All agents access the platform through the `remi` CLI via `bash`.
-The sandbox has `REMI_API_URL` set, so `remi` commands proxy to the
-running API server (zero cold start). Three clean concepts:
+The director operates in two modes, selected per-request:
 
-- **Tool** = kernel primitive exposed via LLM function calling:
-  `bash`, `python`, `delegate_to_agent`, `memory_store`, `memory_recall`.
-  Five tools. That's it.
-- **Command** = a `remi` CLI subcommand returning structured JSON.
-  This is how agents (and humans) access the platform.
-  Every command returns `{"status": "success"|"error", "data": ..., "metadata": {...}}`.
-- **Skill** = a markdown playbook (`SKILL.md`) with domain knowledge
-  + example CLI commands. Discovered at startup, injected into the
-  system prompt.
+- **Ask mode** (default) — fast conversational Q&A. In-process
+  `query` and `search` tools call resolvers directly. No sandbox,
+  no subprocess. Sub-second data access. 5 tools: `query`, `search`,
+  `delegate_to_agent`, `memory_store`, `memory_recall`.
+- **Agent mode** — deep research with sandbox. `bash` + `python` +
+  CLI commands + delegation. For complex analysis, scripting, data
+  joins, regressions. 5 tools: `bash`, `python`, `delegate_to_agent`,
+  `memory_store`, `memory_recall`.
+
+Both modes share memory and delegation. The mode determines the
+tool surface and system prompt. `app.yaml` declares `ask_tools` /
+`ask_system_prompt` and `agent_tools` / `agent_system_prompt`
+separately.
+
+Three clean concepts:
+
+- **Tool** = kernel primitive exposed via LLM function calling.
+- **Command** = a `remi` CLI subcommand returning structured JSON
+  (agent mode). Returns `{"status": "success"|"error", "data": ..., "metadata": {...}}`.
+- **Skill** = a markdown playbook (`SKILL.md`) with domain knowledge.
+  Discovered at startup, injected into the system prompt.
+
+The `QueryToolProvider` (`application/tools/query.py`) provides a single
+`query` tool with an `operation` parameter that dispatches to the
+appropriate resolver in-process. One tool schema covers all read
+operations (~300 tokens vs ~4000 for 13 separate tools).
 
 The agent does NOT `import remi` in Python. There is no bridge.py.
-There is no `application/tools/workflows.py`. Python is for computation
-on data already retrieved via CLI.
+Python (agent mode only) is for computation on data already retrieved.
 
 ## Task System — Supervised Multi-Agent Delegation
 
@@ -651,28 +665,36 @@ The container reads both and wires the right combination.
 The YAML manifest is the intermediate representation for a visual
 canvas. Three concepts compose into agent networks:
 
-### Tools — kernel primitives only
+### Tools — mode-scoped sets
 
-Only five tools exist in the function-calling registry:
+Seven tools exist in the registry. Each agent declares two tool sets
+in YAML — `ask_tools` (fast, in-process) and `agent_tools` (sandbox):
 
-| Tool | What it does |
-|------|-------------|
-| `bash` | Run shell commands (primary: `remi` CLI for data access) |
-| `python` | Persistent Python session for computation |
-| `delegate_to_agent` | Supervised delegation to another agent |
-| `memory_store` | Write to agent memory |
-| `memory_recall` | Read from agent memory |
-
-Each agent declares which tools it uses in YAML:
+| Tool | Mode | What it does |
+|------|------|-------------|
+| `query` | ask | In-process resolver dispatch — single tool, many operations |
+| `search` | ask | Semantic search over the vector index |
+| `bash` | agent | Shell commands + `remi` CLI for data access |
+| `python` | agent | Persistent Python session for computation |
+| `delegate_to_agent` | both | Supervised delegation to another agent |
+| `memory_store` | both | Write to agent memory |
+| `memory_recall` | both | Read from agent memory |
 
 ```yaml
-tools:
+ask_tools:
+  - name: query
+  - name: search
+  - name: delegate_to_agent
+  - name: memory_store
+  - name: memory_recall
+
+agent_tools:
+  - name: bash
+    inject:
+      session_id: sandbox_session_id
   - name: python
     config:
       timeout: 120
-    inject:
-      session_id: sandbox_session_id
-  - name: bash
     inject:
       session_id: sandbox_session_id
   - name: delegate_to_agent
@@ -680,10 +702,9 @@ tools:
   - name: memory_recall
 ```
 
-All domain data access goes through the `remi` CLI via `bash`.
-There are no domain-specific function-calling tools (no `manager_review`,
-no `entity_search`, no `portfolio_health`). Those were replaced by
-CLI commands.
+**Ask mode** is the default. In-process `query`/`search` call resolvers
+directly — no subprocess, no sandbox. For deep analysis, the agent
+delegates or the user requests agent mode explicitly.
 
 ### Declarative delegation graph
 
@@ -862,6 +883,75 @@ packages prematurely.
 - Prefer small focused modules over accumulating logic in an existing file
 - When a file is growing beyond a single clear responsibility, flag it
 
+## Request Routing — Tiered Dispatch Before the Agent Loop
+
+Every user question goes through a **request router** before any agent
+loop, sandbox, or tool resolution happens.  The router classifies the
+question into one of three tiers:
+
+| Tier | What happens | Latency |
+|------|-------------|---------|
+| `direct` | Single LLM call. No tools, no data fetch. Greetings, follow-ups. | ~200ms |
+| `query` | Data fetched in-process via resolvers, injected into a single LLM call. No tools, no agent loop. | ~300ms |
+| `agent` | Full think-act-observe loop. Sandbox, CLI, tools, delegation. | 2-30s |
+
+### Architecture
+
+The kernel defines **protocols only** (domain-agnostic):
+
+- `RequestRouter` protocol (`agent/runtime/router.py`) — `classify(question) → RoutingDecision`
+- `DataResolver` protocol (`agent/runtime/query_path.py`) — `resolve(operation, params) → dict`
+- `Tier` enum, `RoutingDecision` dataclass
+- `run_query_path()` — generic data-inject + single-LLM-call formatter
+
+The application layer provides **implementations** (domain-specific):
+
+- `RERouter` (`application/routing.py`) — rule-based keyword classifier
+  for real estate questions. Maps to operations like `dashboard`,
+  `delinquency`, `properties`, etc.
+- `QueryDispatcher` (`application/resolvers.py`) — maps operation names
+  to resolver calls (`ManagerResolver`, `DashboardResolver`, etc.)
+
+The container wires both into `AgentRuntime` via constructor injection.
+
+### Flow
+
+```
+POST /api/v1/agents/{name}/ask
+  → AgentRuntime.ask()
+      → router.classify(question)
+      → Tier.DIRECT  → _ask_direct()  → single provider.complete()
+      → Tier.QUERY   → _ask_query()   → resolver.resolve() + provider.complete()
+      → Tier.AGENT   → _ask_agent()   → full AgentNode.run() loop
+```
+
+### Rules
+
+- **No `mode` on AskRequest.** The router decides the tier, not the
+  frontend.  The API accepts `question`, `session_id`, `manager_id`.
+- **Sessions always use the agent loop.** Multi-turn context needs the
+  full thread machinery.
+- **No domain knowledge in `agent/`.** The router protocol and query
+  path are domain-agnostic.  Keywords, operation names, and resolver
+  dispatch live in `application/`.
+- **No `QueryToolProvider` or `ask_tools`.** The previous pattern of
+  giving the LLM different tools per mode was deleted.  The router
+  eliminates the LLM from the routing decision entirely for the
+  common case.
+- **Fallback is always `Tier.AGENT`.** When the router is uncertain,
+  the full agent loop runs.  Safety over speed.
+- **The router is not a node.** It lives in `AgentRuntime.ask()`,
+  before any node, workflow, or loop is instantiated.  Tier.DIRECT
+  and Tier.QUERY never enter the agent loop at all.
+
+### Adding new query operations
+
+1. Add a keyword pattern in `application/routing.py` (`_QUERY_OPS`)
+2. Add a handler method in `application/resolvers.py` (`QueryDispatcher`)
+3. Add it to the `_DISPATCH` table in `resolvers.py`
+
+No changes to the kernel.  No new tools.  No YAML changes.
+
 ## What Was Deleted (Do Not Recreate)
 
 These systems were removed as compensatory complexity. Do not recreate them:
@@ -872,6 +962,10 @@ These systems were removed as compensatory complexity. Do not recreate them:
 - **Domain function-calling tools** (`WorkflowToolProvider`, `ActionToolProvider`,
   `SearchToolProvider`) — `manager_review`, `entity_search`, `portfolio_health`
   etc. Replaced by CLI commands.
+- **Ask-mode query tools** (`QueryToolProvider`, `ask_tools`, `agent_tools`) —
+  in-process tools registered on the LLM's tool catalog for fast Q&A.
+  Replaced by the request router which bypasses the LLM for routing
+  entirely. Do not give the LLM different tool sets per mode.
 - **Entailment engine** (`application/services/detection/signals/`) — 7 evaluators
   + engine + pipeline that precomputed signals. The agent queries data directly now.
 - **Snapshot/rollup system** (`SnapshotService`, `RollupStore`) — point-in-time

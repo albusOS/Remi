@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import typer
 
+from remi.agent.observe import configure_logging
 from remi.shell.config.capabilities import (
     all_capabilities,
     ensure_capabilities_registered,
     resolve_cli_group,
 )
+
+configure_logging(level="WARNING")
 
 cli = typer.Typer(
     name="remi",
@@ -19,17 +22,20 @@ cli = typer.Typer(
 
 @cli.command()
 def serve(
-    host: str = typer.Option("127.0.0.1", help="Host to bind to"),
-    port: int = typer.Option(8000, help="Port to listen on"),
+    host: str = typer.Option("", help="Host to bind to (default: settings.api.host)"),
+    port: int = typer.Option(0, help="Port to listen on (default: settings.api.port)"),
     reload: bool = typer.Option(False, help="Enable auto-reload"),
 ) -> None:
     """Start the API server."""
     import uvicorn
 
+    from remi.shell.config.settings import load_settings
+
+    settings = load_settings()
     uvicorn.run(
         "remi.shell.api.main:app",
-        host=host,
-        port=port,
+        host=host or settings.api.host,
+        port=port or settings.api.port,
         reload=reload,
     )
 

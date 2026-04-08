@@ -38,9 +38,8 @@ _BLOCKED_COMMANDS = [
 ]
 
 # Libraries that must not be importable inside the sandbox.
-# Network libraries: the only outbound channel is the injected ``remi``
-# bridge module, which uses stdlib ``urllib.request`` against the
-# internal REMI API URL.
+# Network libraries: the only outbound channel is the ``remi`` CLI
+# running in client mode (stdlib ``urllib.request`` against REMI_API_URL).
 # Process-spawning libraries: blocked because the exec wrapper neuters
 # subprocess/os.system at runtime, and allowing the import would let
 # agent code re-import a fresh copy.
@@ -159,11 +158,10 @@ def has_blocked_imports(code: str) -> list[str]:
                     top = alias.name.split(".")[0]
                     if top in BLOCKED_IMPORTS:
                         found.append(top)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    top = node.module.split(".")[0]
-                    if top in BLOCKED_IMPORTS:
-                        found.append(top)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                top = node.module.split(".")[0]
+                if top in BLOCKED_IMPORTS:
+                    found.append(top)
 
     # Catch dynamic imports: __import__("httpx"), importlib.import_module("httpx")
     for match in re.finditer(

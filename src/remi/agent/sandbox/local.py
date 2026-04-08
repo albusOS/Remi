@@ -195,7 +195,7 @@ class _PersistentInterpreter:
                 self._proc.stderr.readline(),
                 timeout=2,
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             elapsed = (time.monotonic() - start) * 1000
             await self.kill()
             return {
@@ -362,7 +362,7 @@ class LocalSandbox(Sandbox):
                 status=ExecStatus.ERROR,
                 error=(
                     f"Blocked network import(s): {names}. "
-                    "Use `import remi` to access platform data."
+                    "Use the `bash` tool to run `remi` CLI commands instead."
                 ),
             )
 

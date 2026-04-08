@@ -102,8 +102,8 @@ services:
   #   docker compose --profile build build sandbox
   sandbox:
     build:
-      context: sandbox
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: sandbox/Dockerfile
     image: remi-sandbox:latest
     profiles:
       - build
@@ -111,6 +111,12 @@ services:
 networks:
   default:
     driver: bridge
+  # Sandbox network — isolates agent containers from the internet.
+  # Production: internal=true blocks all egress; sandbox containers reach
+  # the REMI API only because the ``api`` service joins both networks.
+  # Local dev: create a non-internal network so sandbox containers can
+  # reach host.docker.internal:
+  #   docker network create --driver bridge remi_sandbox
   remi_sandbox:
     driver: bridge
     internal: true

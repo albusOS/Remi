@@ -1,15 +1,19 @@
 """Docker container sandbox — one container per session with network isolation.
 
 Each session gets a dedicated Docker container running the ``remi-sandbox``
-image.  The container stays alive for the session's lifetime (variables
-survive between ``exec_python`` calls), and is removed on ``destroy_session``.
+image.  The container stays alive for the session's lifetime and is removed
+on ``destroy_session``.  Each ``exec_python`` call is a fresh interpreter
+invocation; state is shared only through files in ``/session``.
+
+Platform access uses the ``remi`` CLI installed in the image, which runs
+in client mode via ``REMI_API_URL``.
 
 Security posture:
-- Attached to an internal-only Docker network (no internet egress)
 - Read-only root filesystem with tmpfs at /session and /tmp
 - Memory, CPU, and PID limits enforced
 - Non-root user (uid 1001) inside the container
 - No privileged mode, no cap-add, no-new-privileges
+- Host-side import and command blocklists enforced before execution
 """
 
 from __future__ import annotations
@@ -31,52 +35,7 @@ from remi.agent.sandbox.types import ExecResult, ExecStatus, Sandbox, SandboxSes
 
 _log = structlog.get_logger(__name__)
 
-_SENTINEL = "__REMI_EXEC_DONE__"
-
 _STAGING_ROOT = Path(tempfile.gettempdir()) / "remi-sandbox-staging"
-
-_EXEC_WRAPPER = f'''\
-import sys, io, traceback
-
-_remi_sentinel = "{_SENTINEL}"
-
-while True:
-    _remi_lines: list[str] = []
-    for _remi_line in sys.stdin:
-        _remi_line = _remi_line.rstrip("\\n")
-        if _remi_line == _remi_sentinel:
-            break
-        _remi_lines.append(_remi_line)
-    else:
-        break
-
-    _remi_code = "\\n".join(_remi_lines)
-    _remi_old_stdout = sys.stdout
-    _remi_old_stderr = sys.stderr
-    _remi_cap_out = io.StringIO()
-    _remi_cap_err = io.StringIO()
-    sys.stdout = _remi_cap_out
-    sys.stderr = _remi_cap_err
-    _remi_rc = 0
-    try:
-        exec(compile(_remi_code, "<sandbox>", "exec"), globals())
-    except SystemExit as _remi_e:
-        _remi_rc = _remi_e.code if isinstance(_remi_e.code, int) else 1
-    except Exception:
-        traceback.print_exc(file=_remi_cap_err)
-        _remi_rc = 1
-    finally:
-        sys.stdout = _remi_old_stdout
-        sys.stderr = _remi_old_stderr
-
-    _remi_out_text = _remi_cap_out.getvalue()
-    _remi_err_text = _remi_cap_err.getvalue()
-    print(_remi_out_text, end="", flush=True)
-    print(_remi_sentinel, flush=True)
-    print(_remi_err_text, end="", file=sys.stderr, flush=True)
-    print(_remi_sentinel, file=sys.stderr, flush=True)
-    print(str(_remi_rc), file=sys.stderr, flush=True)
-'''
 
 
 def _import_aiodocker():  # type: ignore[no-untyped-def]
@@ -156,16 +115,19 @@ class DockerSandbox(Sandbox):
         sid = session_id or f"sandbox-{uuid.uuid4().hex[:12]}"
         client = await self._get_client()
 
-        staging = self._staging_dir(sid)
-        staging.mkdir(parents=True, exist_ok=True)
-        for name, content in self._session_files.items():
-            (staging / name).write_text(content, encoding="utf-8")
-        (staging / "_remi_exec_wrapper.py").write_text(
-            _EXEC_WRAPPER, encoding="utf-8",
-        )
-
         env = {**self._extra_env, **(extra_env or {})}
         env_list = [f"{k}={v}" for k, v in env.items()]
+
+        has_init_files = bool(self._session_files)
+        staging: Path | None = None
+        binds: list[str] = []
+
+        if has_init_files:
+            staging = self._staging_dir(sid)
+            staging.mkdir(parents=True, exist_ok=True)
+            for name, content in self._session_files.items():
+                (staging / name).write_text(content, encoding="utf-8")
+            binds.append(f"{staging}:/opt/init:ro")
 
         container_name = f"remi-sandbox-{sid}"
 
@@ -186,9 +148,7 @@ class DockerSandbox(Sandbox):
                     "/session": "rw,nosuid,size=256m,uid=1001,gid=1001",
                     "/tmp": "rw,nosuid,size=64m,uid=1001,gid=1001",
                 },
-                "Binds": [
-                    f"{staging}:/opt/init:ro",
-                ],
+                "Binds": binds,
                 "NetworkMode": self._network,
             },
         }
@@ -203,11 +163,12 @@ class DockerSandbox(Sandbox):
             container_id = info["Id"]
             self._containers[sid] = container_id
 
-            await self._docker_exec(
-                container_id,
-                ["sh", "-c", "cp /opt/init/* /session/ 2>/dev/null; true"],
-                timeout=10,
-            )
+            if has_init_files:
+                await self._docker_exec(
+                    container_id,
+                    ["sh", "-c", "cp /opt/init/* /session/ 2>/dev/null; true"],
+                    timeout=10,
+                )
 
         except Exception:
             _log.error(
@@ -256,7 +217,7 @@ class DockerSandbox(Sandbox):
                 status=ExecStatus.ERROR,
                 error=(
                     f"Blocked network import(s): {names}. "
-                    "Use `import remi` to access platform data."
+                    "Use the `bash` tool to run `remi` CLI commands instead."
                 ),
             )
 
@@ -561,43 +522,12 @@ class DockerSandbox(Sandbox):
             "exit_code": exit_code,
         }
 
-    def _parse_exec_output(self, result: dict[str, Any]) -> tuple[str, str, int]:
-        """Parse sentinel-delimited output from the persistent interpreter."""
-        raw_stdout = result.get("stdout", "")
-        raw_stderr = result.get("stderr", "")
-
-        stdout = ""
-        stderr = ""
-        exit_code = result.get("exit_code", 0)
-
-        if _SENTINEL in raw_stdout:
-            parts = raw_stdout.split(_SENTINEL, 1)
-            stdout = parts[0]
-        else:
-            stdout = raw_stdout
-
-        if _SENTINEL in raw_stderr:
-            parts = raw_stderr.split(_SENTINEL)
-            stderr = parts[0] if parts else ""
-            if len(parts) >= 3:
-                rc_text = parts[2].strip() if len(parts) > 2 else ""
-                if rc_text.isdigit() or rc_text.lstrip("-").isdigit():
-                    exit_code = int(rc_text)
-        else:
-            stderr = raw_stderr
-
-        return stdout, stderr, exit_code
-
     async def _list_container_files(self, container_id: str) -> list[str]:
         """List user files in /session/ inside the container."""
         try:
             result = await self._docker_exec(
                 container_id,
-                [
-                    "sh", "-c",
-                    "ls -1 /session/ 2>/dev/null | "
-                    "grep -v '^_remi_' | grep -v '^init$'",
-                ],
+                ["sh", "-c", "ls -1 /session/ 2>/dev/null"],
                 timeout=5,
             )
             stdout = result.get("stdout", "").strip()

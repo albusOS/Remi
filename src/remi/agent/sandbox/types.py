@@ -64,8 +64,7 @@ class Sandbox(abc.ABC):
     Files
     -----
     ``set_session_files`` registers a mapping of filename → content that is
-    written into every new session's working directory at creation time. The
-    container uses this to inject the ``remi.py`` SDK.
+    written into every new session's working directory at creation time.
     """
 
     def set_session_files(self, files: dict[str, str]) -> None:  # noqa: B027

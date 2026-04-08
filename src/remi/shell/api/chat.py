@@ -34,7 +34,6 @@ router = APIRouter(prefix="/agents", tags=["ai"])
 class AskRequest(BaseModel):
     question: str
     session_id: str | None = None
-    mode: str = "agent"
     manager_id: str | None = None
 
 
@@ -55,18 +54,14 @@ async def ask_agent(
         line = json.dumps({"event": event_type, "data": data}, default=str)
         await queue.put(line)
 
-    question = body.question
-    if body.manager_id:
-        question = f"[Context: manager_id={body.manager_id}]\n\n{question}"
-
     async def _run() -> None:
         try:
             await c.chat_agent.ask(
                 agent_name,
-                question,
+                body.question,
                 session_id=body.session_id,
-                mode=body.mode,  # type: ignore[arg-type]
                 on_event=_on_event,
+                manager_id=body.manager_id,
             )
         except Exception:
             logger.warning("ask_stream_failed", agent=agent_name, exc_info=True)
