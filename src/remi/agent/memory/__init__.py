@@ -30,8 +30,9 @@ from remi.agent.memory.extraction import extract_episode
 from remi.agent.memory.factory import build_memory_store
 from remi.agent.memory.mem import InMemoryMemoryStore
 from remi.agent.memory.recall import MemoryRecallService
+from remi.agent.memory.scoped import ScopedMemoryStore
 from remi.agent.memory.store import MemoryStore
-from remi.agent.memory.types import Importance, MemoryEntry, MemoryNamespace
+from remi.agent.memory.types import Importance, MemoryEntry, MemoryNamespace, RecallService
 
 __all__ = [
     "Importance",
@@ -40,6 +41,8 @@ __all__ = [
     "MemoryNamespace",
     "MemoryRecallService",
     "MemoryStore",
+    "RecallService",
+    "ScopedMemoryStore",
     "build_memory_store",
     "extract_episode",
 ]

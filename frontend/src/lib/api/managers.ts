@@ -12,7 +12,8 @@ export const managersApi = {
       .then((r) => r.managers.map(({ manager_id, ...rest }) => ({ id: manager_id, ...rest }))),
 
   getReview: (id: string) =>
-    get<ManagerReview>(`/api/v1/managers/${id}/review`),
+    get<{ summary: ManagerReview }>(`/api/v1/managers/${id}/review`)
+      .then((r) => r.summary),
 
   create: (data: { name: string; email?: string; company?: string; phone?: string }) =>
     post<{ manager_id: string; name: string }>("/api/v1/managers", data),

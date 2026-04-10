@@ -113,9 +113,7 @@ def register(cap: CapabilityDescriptor) -> None:
 def get_capability(name: str) -> CapabilityDescriptor:
     """Return a registered capability by name, or raise."""
     if name not in _capabilities:
-        raise ValueError(
-            f"Unknown capability: {name!r}. Registered: {sorted(_capabilities)}"
-        )
+        raise ValueError(f"Unknown capability: {name!r}. Registered: {sorted(_capabilities)}")
     return _capabilities[name]
 
 
@@ -215,13 +213,10 @@ def _shell_wiring() -> list[_ShellWiring]:
     return [
         _ShellWiring(
             name="agents",
-            router_refs=(
-                "remi.shell.api.chat:router",
-            ),
+            router_refs=("remi.shell.api.chat:router",),
         ),
         _ShellWiring(
             name="portfolio",
-            manifest_name="manager_review",
             router_refs=(
                 "remi.application.portfolio.api:managers_router",
                 "remi.application.portfolio.api:owners_router",
@@ -232,7 +227,6 @@ def _shell_wiring() -> list[_ShellWiring]:
         ),
         _ShellWiring(
             name="operations",
-            manifest_name="action_planner",
             router_refs=(
                 "remi.application.operations.api:leases_router",
                 "remi.application.operations.api:maintenance_router",
@@ -244,7 +238,6 @@ def _shell_wiring() -> list[_ShellWiring]:
         ),
         _ShellWiring(
             name="intelligence",
-            manifest_name="researcher",
             router_refs=(
                 "remi.application.intelligence.api:dashboard_router",
                 "remi.application.intelligence.api:search_router",
@@ -256,10 +249,7 @@ def _shell_wiring() -> list[_ShellWiring]:
         ),
         _ShellWiring(
             name="ingestion",
-            manifest_name="document_ingestion",
-            router_refs=(
-                "remi.application.ingestion.api:router",
-            ),
+            router_refs=("remi.application.ingestion.api:router",),
             cli_ref="remi.application.ingestion.cli:cli_group",
         ),
         _ShellWiring(
@@ -320,10 +310,12 @@ def ensure_capabilities_registered() -> None:
         )
 
     for w in standalone_wiring:
-        register(CapabilityDescriptor(
-            name=w.name,
-            router_refs=w.router_refs,
-            cli_ref=w.cli_ref,
-        ))
+        register(
+            CapabilityDescriptor(
+                name=w.name,
+                router_refs=w.router_refs,
+                cli_ref=w.cli_ref,
+            )
+        )
 
     _registered = True

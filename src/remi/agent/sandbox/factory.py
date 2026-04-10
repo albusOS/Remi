@@ -18,38 +18,57 @@ docker
 
 from __future__ import annotations
 
+import importlib
+
 import structlog
 
-from remi.agent.sandbox.local import LocalSandbox
+from remi.agent.sandbox.types import SandboxSettings
+from remi.agent.sandbox.adapters.local import LocalSandbox
 from remi.agent.sandbox.types import Sandbox
-from remi.types.config import RemiSettings
 
 _log = structlog.get_logger(__name__)
 
+_ADAPTERS: dict[str, tuple[str, str]] = {
+    "docker": ("remi.agent.sandbox.adapters.docker", "DockerSandbox"),
+}
+
 
 def build_sandbox(
-    settings: RemiSettings,
+    settings: SandboxSettings,
     *,
+    api_url: str = "",
     session_files: dict[str, str] | None = None,
 ) -> Sandbox:
-    """Construct the sandbox backend selected by ``settings.sandbox.backend``."""
-    cfg = settings.sandbox
-    api_url = settings.api.resolved_internal_url()
-    extra_env = {"REMI_API_URL": api_url}
+    """Construct the sandbox backend selected by ``settings.backend``.
+
+    *api_url* is injected by the composition root so the kernel never
+    reaches into product-level ``ApiSettings``.
+    """
+    cfg = settings
+    extra_env = {"REMI_API_URL": api_url} if api_url else {}
 
     backend = cfg.backend.lower()
 
-    if backend == "docker":
-        from remi.agent.sandbox.docker import DockerSandbox
-
+    if backend == "local":
+        _log.info("sandbox_backend", backend="local", api_url=api_url)
+        sb: Sandbox = LocalSandbox(
+            extra_env=extra_env,
+            default_timeout=cfg.default_timeout,
+            max_output_bytes=cfg.max_output_bytes,
+            session_ttl_seconds=cfg.session_ttl_seconds,
+        )
+    elif backend in _ADAPTERS:
+        module_path, class_name = _ADAPTERS[backend]
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
         _log.info(
             "sandbox_backend",
-            backend="docker",
+            backend=backend,
             api_url=api_url,
             image=cfg.image,
             network=cfg.network,
         )
-        sb: Sandbox = DockerSandbox(
+        sb = cls(
             image=cfg.image,
             network=cfg.network,
             extra_env=extra_env,
@@ -61,12 +80,11 @@ def build_sandbox(
             pids_limit=cfg.pids_limit,
         )
     else:
-        if backend != "local":
-            _log.warning(
-                "sandbox_unknown_backend",
-                backend=backend,
-                fallback="local",
-            )
+        _log.warning(
+            "sandbox_unknown_backend",
+            backend=backend,
+            fallback="local",
+        )
         _log.info("sandbox_backend", backend="local", api_url=api_url)
         sb = LocalSandbox(
             extra_env=extra_env,

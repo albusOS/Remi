@@ -33,9 +33,7 @@ class ToolExecutor:
         tracer: Tracer | None,
         log: structlog.stdlib.BoundLogger,
     ) -> None:
-        self._bindings: dict[str, ToolBinding] = {
-            b.definition.name: b for b in bindings
-        }
+        self._bindings: dict[str, ToolBinding] = {b.definition.name: b for b in bindings}
         self._definitions = [b.definition for b in bindings]
         self._tracer = tracer
         self._log = log
@@ -115,6 +113,9 @@ def _build_context_values(context: RuntimeContext) -> dict[str, Any]:
     sid = context.params.sandbox_session_id or context.extras.get("sandbox_session_id")
     if sid:
         values["sandbox_session_id"] = sid
+    task_id = context.extras.get("task_id")
+    if task_id:
+        values["task_id"] = task_id
     if context.scope.entity_id:
         values["scope_entity_id"] = context.scope.entity_id
     if context.scope.entity_type:
@@ -122,6 +123,11 @@ def _build_context_values(context: RuntimeContext) -> dict[str, Any]:
     if context.scope.tool_scope:
         values.update(context.scope.tool_scope)
     return values
+
+
+def _resolve_tool_namespace(context: RuntimeContext) -> str:
+    """Determine the tool namespace from the workspace context."""
+    return context.workspace.tool_namespace
 
 
 def resolve_agent_tools(
@@ -132,28 +138,34 @@ def resolve_agent_tools(
 ) -> list[ToolBinding]:
     """Resolve the agent's declared tools into bound capabilities.
 
-    Each ``ToolRef`` in the agent's mode-specific tool list is resolved
-    through the ``ToolCatalog`` into a self-contained ``ToolBinding``
-    with config, description, and context injection baked in.
+    Each ``ToolRef`` in the agent's tool list is resolved through the
+    ``ToolCatalog`` into a self-contained ``ToolBinding`` with config,
+    description, and context injection baked in.
+
+    Tool resolution is workspace-scoped: when a ``WorkspaceContext`` is
+    present in ``context.extras``, only tools registered under that
+    workspace's namespace (plus global kernel tools) are visible.
 
     ``caller_agent`` is injected into context values so that tools
     like ``delegate_to_agent`` can identify the calling agent.
     """
     registry = context.deps.tool_registry or context.extras.get("tool_registry")
-    mode_tools = cfg.tools_for_mode(mode)
-    if not registry or not mode_tools:
+    if not registry or not cfg.tools:
         return []
 
+    tool_namespace = _resolve_tool_namespace(context)
+
     if not isinstance(registry, ToolCatalog):
-        return _resolve_via_legacy(registry, mode_tools, context, cfg.name)
+        return _resolve_via_legacy(registry, cfg.tools, context, cfg.name)
 
     ctx_values = _build_context_values(context)
     if cfg.name:
         ctx_values["caller_agent"] = cfg.name
     bindings: list[ToolBinding] = []
-    for ref in mode_tools:
+    for ref in cfg.tools:
         binding = registry.resolve(
             ref.name,
+            namespace=tool_namespace,
             agent_config=ref.config or None,
             agent_description=ref.description,
             inject=ref.inject or None,
@@ -204,11 +216,13 @@ def _resolve_via_legacy(
                 merged.setdefault("caller_agent", _ctx["caller_agent"])
             return await _fn(merged)
 
-        bindings.append(ToolBinding(
-            definition=definition,
-            execute=bound_execute,
-            source=ref.name,
-        ))
+        bindings.append(
+            ToolBinding(
+                definition=definition,
+                execute=bound_execute,
+                source=ref.name,
+            )
+        )
     return bindings
 
 

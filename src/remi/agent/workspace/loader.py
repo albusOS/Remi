@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 import structlog
 
+from remi.agent.llm.types import Message
 from remi.agent.sandbox.types import Sandbox
 
 _log = structlog.get_logger(__name__)
@@ -96,8 +97,6 @@ def inject_workspace(
     """
     if snapshot.is_empty:
         return
-
-    from remi.agent.llm.types import Message
 
     rendered = snapshot.render()
     if not rendered:

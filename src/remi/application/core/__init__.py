@@ -15,10 +15,12 @@ from remi.application.core.events import (
     FieldChange,
 )
 from remi.application.core.protocols import (
+    DocumentIngester,
     EmbedRequest,
     PropertyStore,
     TextIndexer,
     TextSearchHit,
+    UploadResult,
     VectorSearch,
 )
 
@@ -27,11 +29,13 @@ __all__ = [
     "ChangeSet",
     "ChangeSource",
     "ChangeType",
+    "DocumentIngester",
     "EmbedRequest",
     "EventStore",
     "FieldChange",
     "PropertyStore",
     "TextIndexer",
     "TextSearchHit",
+    "UploadResult",
     "VectorSearch",
 ]

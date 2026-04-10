@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/Badge";
 import type { FileEntry } from "@/hooks/useFileUpload";
-import type { ManagerListItem, ReviewItem } from "@/lib/types";
+import type { HumanQuestion, ManagerListItem, ReviewItem, WaitingTask } from "@/lib/types";
 
 const ACCEPT =
   ".csv,.xlsx,.xls,.pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.gif,.webp";
@@ -69,6 +69,121 @@ const KIND_LABELS: Record<string, string> = {
   classification_uncertain: "Unknown Type",
   manager_inferred: "Manager",
 };
+
+function HumanQuestionCard({
+  taskId,
+  questions,
+  onAnswered,
+}: {
+  taskId: string;
+  questions: HumanQuestion[];
+  onAnswered: () => void;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const q of questions) {
+      init[q.id] = q.default ?? (q.options[0]?.id ?? "");
+    }
+    return init;
+  });
+  const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  if (submitted) {
+    return (
+      <div className="rounded-lg border border-ok/20 bg-ok/5 px-3 py-2 flex items-center gap-2">
+        <svg className="w-3.5 h-3.5 text-ok shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+        </svg>
+        <span className="text-[10px] text-ok">Answered — ingestion resuming</span>
+      </div>
+    );
+  }
+
+  const handleSubmit = async () => {
+    const missing = questions.filter((q) => q.required && !answers[q.id]);
+    if (missing.length > 0) return;
+    setBusy(true);
+    try {
+      await api.supplyHumanAnswers(taskId, answers);
+      setSubmitted(true);
+      onAnswered();
+    } catch {
+      // user can retry
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-accent/20 bg-accent/5 px-3 py-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />
+        <p className="text-[10px] font-medium text-accent uppercase tracking-wide">REMI needs your input</p>
+      </div>
+      <div className="space-y-2.5">
+        {questions.map((q) => (
+          <div key={q.id} className="space-y-1">
+            <p className="text-[11px] text-fg-secondary">{q.prompt}</p>
+            {q.kind === "select" && q.options.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {q.options.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt.id }))}
+                    disabled={busy}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-medium border transition-all disabled:opacity-50 ${
+                      answers[q.id] === opt.id
+                        ? "border-accent bg-accent text-accent-fg"
+                        : "border-border bg-surface hover:bg-surface-raised hover:border-fg-faint"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {q.kind === "text" && (
+              <input
+                type="text"
+                value={answers[q.id] ?? ""}
+                onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                disabled={busy}
+                placeholder={q.default ?? "Your answer…"}
+                className="w-full bg-surface border border-border rounded px-2 py-1 text-[10px] text-fg focus:outline-none focus:border-accent/40 disabled:opacity-50"
+              />
+            )}
+            {q.kind === "confirm" && (
+              <div className="flex gap-1.5">
+                {["yes", "no"].map((val) => (
+                  <button
+                    key={val}
+                    onClick={() => setAnswers((a) => ({ ...a, [q.id]: val }))}
+                    disabled={busy}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-medium border transition-all disabled:opacity-50 ${
+                      answers[q.id] === val
+                        ? "border-accent bg-accent text-accent-fg"
+                        : "border-border bg-surface hover:bg-surface-raised"
+                    }`}
+                  >
+                    {val === "yes" ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={handleSubmit}
+        disabled={busy || questions.some((q) => q.required && !answers[q.id])}
+        className="px-3 py-1.5 rounded-md text-[10px] font-medium bg-accent text-accent-fg hover:opacity-90 transition-opacity disabled:opacity-40"
+      >
+        {busy ? "Sending…" : "Continue ingestion"}
+      </button>
+    </div>
+  );
+}
 
 function ReviewItemCard({
   item,
@@ -305,6 +420,73 @@ function FileRow({ entry }: { entry: FileEntry }) {
   const reviewItems = entry.result?.knowledge?.review_items ?? [];
   const isDuplicate = !!entry.result?.duplicate;
 
+  const [waitingTask, setWaitingTask] = useState<WaitingTask | null>(null);
+  const [ingestionDone, setIngestionDone] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    const documentId = entry.result?.id;
+    const isProcessing = entry.result?.status === "processing";
+
+    if (!documentId || !isProcessing) return;
+
+    cancelledRef.current = false;
+
+    const poll = async () => {
+      try {
+        const task = await api.getWaitingTask(documentId);
+        if (cancelledRef.current) return;
+
+        if (task.status === "waiting_on_human" && task.task_id) {
+          setWaitingTask(task);
+        } else if (task.status === "done") {
+          setWaitingTask(null);
+          setIngestionDone(true);
+          return;
+        } else if (task.status === "unknown") {
+          return;
+        } else {
+          pollRef.current = setTimeout(poll, 2500);
+        }
+      } catch {
+        if (!cancelledRef.current) pollRef.current = setTimeout(poll, 5000);
+      }
+    };
+
+    pollRef.current = setTimeout(poll, 1500);
+
+    return () => {
+      cancelledRef.current = true;
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [entry.result?.id, entry.result?.status]);
+
+  const handleAnswered = () => {
+    setWaitingTask(null);
+    if (pollRef.current) clearTimeout(pollRef.current);
+    cancelledRef.current = false;
+    // re-poll after answering to detect when ingestion completes
+    const documentId = entry.result?.id;
+    if (!documentId) return;
+    const resumePoll = async () => {
+      try {
+        const task = await api.getWaitingTask(documentId);
+        if (cancelledRef.current) return;
+        if (task.status === "done") {
+          setIngestionDone(true);
+        } else if (task.status === "waiting_on_human" && task.task_id) {
+          setWaitingTask(task);
+        } else {
+          pollRef.current = setTimeout(resumePoll, 2500);
+        }
+      } catch {
+        if (!cancelledRef.current) pollRef.current = setTimeout(resumePoll, 5000);
+      }
+    };
+    pollRef.current = setTimeout(resumePoll, 2000);
+  };
+
   return (
     <div className="py-2">
       <div className="flex items-start gap-3">
@@ -319,7 +501,16 @@ function FileRow({ entry }: { entry: FileEntry }) {
           {entry.status === "uploading" && (
             <p className="text-[10px] text-accent mt-0.5">Processing...</p>
           )}
-          {entry.status === "done" && entry.summary && (
+          {entry.status === "done" && entry.result?.status === "processing" && !ingestionDone && !waitingTask && (
+            <p className="text-[10px] text-fg-faint mt-0.5 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full border border-fg-ghost border-t-transparent animate-spin shrink-0" />
+              Ingesting in background…
+            </p>
+          )}
+          {entry.status === "done" && ingestionDone && (
+            <p className="text-[10px] text-ok mt-0.5">Ingested successfully</p>
+          )}
+          {entry.status === "done" && entry.result?.status !== "processing" && entry.summary && (
             <p className={`text-[10px] mt-0.5 ${isDuplicate ? "text-warn" : "text-ok"}`}>{entry.summary}</p>
           )}
           {entry.status === "done" && entry.warnings.length > 0 && (
@@ -339,6 +530,16 @@ function FileRow({ entry }: { entry: FileEntry }) {
           </Badge>
         )}
       </div>
+
+      {waitingTask?.status === "waiting_on_human" && waitingTask.task_id && (
+        <div className="mt-2 ml-7">
+          <HumanQuestionCard
+            taskId={waitingTask.task_id}
+            questions={waitingTask.questions}
+            onAnswered={handleAnswered}
+          />
+        </div>
+      )}
 
       {entry.status === "done" && entry.result && reviewItems.length > 0 && (
         <ReviewSection

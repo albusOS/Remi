@@ -72,6 +72,7 @@ export interface UploadResult {
   kind: string;
   row_count: number;
   report_type: string;
+  status: "done" | "processing";
   columns: string[];
   chunk_count: number;
   page_count: number;
@@ -87,4 +88,26 @@ export interface CorrectRowResponse {
   relationships_created: number;
   review_items: ReviewItem[];
   validation_warnings: string[];
+}
+
+export interface HumanQuestionOption {
+  id: string;
+  label: string;
+}
+
+export interface HumanQuestion {
+  id: string;
+  prompt: string;
+  kind: "select" | "text" | "confirm";
+  options: HumanQuestionOption[];
+  default: string | null;
+  required: boolean;
+}
+
+export type WaitingTaskStatus = "waiting_on_human" | "running" | "done" | "unknown";
+
+export interface WaitingTask {
+  status: WaitingTaskStatus;
+  task_id?: string | null;
+  questions: HumanQuestion[];
 }

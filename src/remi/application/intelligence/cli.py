@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import typer
 
-from remi.shell.cli.output import emit_error, emit_success
+from remi.application.cli_output import emit_error, emit_success
+from remi.application.intelligence.assertions import add_context as _add_context
+from remi.application.intelligence.assertions import assert_fact as _assert_fact
 
 cli_group = typer.Typer(
     name="intelligence",
@@ -44,7 +47,7 @@ def dashboard(
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.dashboard_resolver.dashboard_overview())
+    result = _run(c.dashboard_builder.dashboard_overview())
     if as_json:
         emit_success(
             result.model_dump(mode="json"),
@@ -70,12 +73,15 @@ def search(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/search", {
-            "q": query,
-            "types": types,
-            "manager_id": manager_id,
-            "limit": limit,
-        })
+        data = get(
+            "/search",
+            {
+                "q": query,
+                "types": types,
+                "manager_id": manager_id,
+                "limit": limit,
+            },
+        )
         emit_success(
             data.get("results", data),
             command="remi intelligence search",
@@ -109,7 +115,7 @@ def vacancies(
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.dashboard_resolver.vacancy_tracker(manager_id=manager_id))
+    result = _run(c.vacancy_resolver.vacancy_tracker(manager_id=manager_id))
     emit_success(
         result.model_dump(mode="json"),
         command="remi intelligence vacancies",
@@ -127,11 +133,14 @@ def trends(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get(f"/dashboard/trends/{metric}", {
-            "manager_id": manager_id,
-            "property_id": property_id,
-            "periods": periods,
-        })
+        data = get(
+            f"/dashboard/trends/{metric}",
+            {
+                "manager_id": manager_id,
+                "property_id": property_id,
+                "periods": periods,
+            },
+        )
         emit_success(data, command="remi intelligence trends")
         return
 
@@ -139,17 +148,21 @@ def trends(
     _run(c.ensure_bootstrapped())
 
     if metric == "delinquency":
-        result = _run(c.dashboard_resolver.delinquency_trend(
-            manager_id=manager_id,
-            property_id=property_id,
-            periods=periods,
-        ))
+        result = _run(
+            c.trend_resolver.delinquency_trend(
+                manager_id=manager_id,
+                property_id=property_id,
+                periods=periods,
+            )
+        )
     elif metric == "occupancy":
-        result = _run(c.dashboard_resolver.occupancy_trend(
-            manager_id=manager_id,
-            property_id=property_id,
-            periods=periods,
-        ))
+        result = _run(
+            c.trend_resolver.occupancy_trend(
+                manager_id=manager_id,
+                property_id=property_id,
+                periods=periods,
+            )
+        )
     else:
         emit_error(
             "INVALID_METRIC",
@@ -170,32 +183,33 @@ def assert_fact(
     entity_id: str | None = typer.Option(None, help="Entity ID (auto-generated if omitted)"),
 ) -> None:
     """Record a fact or observation as a note with assertion provenance."""
-    import json as _json
-
     if _is_remote():
         from remi.shell.cli.client import post
 
-        data = post("/knowledge/assert", {
-            "entity_type": entity_type,
-            "properties": _json.loads(properties),
-            "entity_id": entity_id,
-        })
+        data = post(
+            "/knowledge/assert",
+            {
+                "entity_type": entity_type,
+                "properties": json.loads(properties),
+                "entity_id": entity_id,
+            },
+        )
         emit_success(data, command="remi intelligence assert-fact")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
 
-    from remi.application.tools.assertions import _assert_fact
-
-    result = _run(_assert_fact(
-        c.property_store,
-        c.event_store,
-        c.event_bus,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        properties=_json.loads(properties),
-    ))
+    result = _run(
+        _assert_fact(
+            c.property_store,
+            c.event_store,
+            c.event_bus,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            properties=json.loads(properties),
+        )
+    )  # type: ignore[arg-type]
     emit_success(result, command="remi intelligence assert-fact")
 
 
@@ -209,23 +223,26 @@ def add_context(
     if _is_remote():
         from remi.shell.cli.client import post
 
-        data = post("/knowledge/context", {
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "context": context,
-        })
+        data = post(
+            "/knowledge/context",
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "context": context,
+            },
+        )
         emit_success(data, command="remi intelligence add-context")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
 
-    from remi.application.tools.assertions import _add_context
-
-    result = _run(_add_context(
-        c.property_store,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        context=context,
-    ))
+    result = _run(
+        _add_context(
+            c.property_store,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            context=context,
+        )
+    )  # type: ignore[arg-type]
     emit_success(result, command="remi intelligence add-context")

@@ -1,8 +1,11 @@
 """Settings loader — YAML + env-var assembly.
 
-Config schema models live in ``remi.types.config``. This module handles
-loading from YAML files, .env parsing, and env-var interpolation to
-produce a populated ``RemiSettings`` instance.
+Product-level settings models (``RemiSettings``, ``ApiSettings``, etc.)
+are defined here in the composition root. Kernel infrastructure settings
+(LLM, sandbox, embeddings, etc.) live in ``remi.agent.config``.
+
+Loading logic (YAML files, .env parsing, env-var interpolation) produces
+a populated ``RemiSettings`` instance consumed by ``Container``.
 """
 
 from __future__ import annotations
@@ -13,30 +16,79 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, Field
 
-from remi.types.config import (
-    ApiSettings,
-    EmbeddingsSettings,
-    ExecutionSettings,
-    LLMSettings,
-    LoggingSettings,
-    RemiSettings,
-    SandboxSettings,
-    SecretsSettings,
-    StateStoreSettings,
-)
+from remi.agent.events.factory import EventBusSettings
+from remi.agent.llm.types import LLMSettings, SecretsSettings
+from remi.agent.memory.factory import MemoryStoreSettings
+from remi.agent.observe.factory import TraceStoreSettings
+from remi.agent.sandbox.types import SandboxSettings
+from remi.agent.sessions.factory import SessionStoreSettings
+from remi.agent.tasks.factory import TaskQueueSettings
+from remi.agent.vectors.types import EmbeddingsSettings, VectorStoreSettings
 
-# Re-export so existing `from remi.shell.config.settings import RemiSettings` still works
+# ---------------------------------------------------------------------------
+# Product-level settings — composition root concerns
+# ---------------------------------------------------------------------------
+
+
+class StateStoreSettings(BaseModel):
+    backend: str = "in_memory"
+    dsn: str | None = None
+
+
+class LoggingSettings(BaseModel):
+    level: str = "INFO"
+    format: str = "structured"
+
+
+class ExecutionSettings(BaseModel):
+    max_retries: int = 3
+    retry_delay_seconds: float = 1.0
+    concurrency_limit: int = 10
+    idempotency: bool = True
+
+
+class ApiSettings(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    cors_origins: list[str] = Field(default_factory=list)
+    internal_api_url: str = ""
+
+    def resolved_internal_url(self) -> str:
+        if self.internal_api_url:
+            return self.internal_api_url.rstrip("/")
+        return f"http://127.0.0.1:{self.port}"
+
+
+class RemiSettings(BaseModel):
+    environment: str = "development"
+    secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    state_store: StateStoreSettings = Field(default_factory=StateStoreSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
+    api: ApiSettings = Field(default_factory=ApiSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
+    sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings)
+    vectors: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    memory: MemoryStoreSettings = Field(default_factory=MemoryStoreSettings)
+    tracing: TraceStoreSettings = Field(default_factory=TraceStoreSettings)
+    sessions: SessionStoreSettings = Field(default_factory=SessionStoreSettings)
+    event_bus: EventBusSettings = Field(default_factory=EventBusSettings)
+    task_queue: TaskQueueSettings = Field(default_factory=TaskQueueSettings)
+
+
 __all__ = [
+    "ApiSettings",
+    "EmbeddingsSettings",
+    "ExecutionSettings",
+    "LLMSettings",
+    "LoggingSettings",
+    "RemiSettings",
+    "SandboxSettings",
     "SecretsSettings",
     "StateStoreSettings",
-    "LoggingSettings",
-    "ExecutionSettings",
-    "ApiSettings",
-    "LLMSettings",
-    "SandboxSettings",
-    "EmbeddingsSettings",
-    "RemiSettings",
     "load_settings",
 ]
 

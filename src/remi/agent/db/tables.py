@@ -35,8 +35,6 @@ class DocumentRow(SQLModel, table=True):
     doc_metadata: dict[str, Any] = Field(default_factory=dict, sa_type=sa.JSON)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Vector embeddings table (requires pgvector extension)
 # ---------------------------------------------------------------------------

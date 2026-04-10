@@ -53,22 +53,24 @@ _RE_API_PATH_EXAMPLES = (
     "  GET /api/v1/ontology/search?object_type=Property \u2014 ontology query"
 )
 
-_RE_SECTION_LABELS = frozenset({
-    "current",
-    "vacant",
-    "notice",
-    "past",
-    "future",
-    "eviction",
-    "month-to-month",
-    "total",
-    "grand total",
-    "subtotal",
-    "vacant-unrented",
-    "vacant-rented",
-    "notice-unrented",
-    "notice-rented",
-})
+_RE_SECTION_LABELS = frozenset(
+    {
+        "current",
+        "vacant",
+        "notice",
+        "past",
+        "future",
+        "eviction",
+        "month-to-month",
+        "total",
+        "grand total",
+        "subtotal",
+        "vacant-unrented",
+        "vacant-rented",
+        "notice-unrented",
+        "notice-rented",
+    }
+)
 
 
 def build_re_profile() -> DomainProfile:

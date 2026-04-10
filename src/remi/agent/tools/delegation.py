@@ -70,8 +70,7 @@ class DelegationToolProvider(ToolProvider):
             allowed = workforce.get_delegates(caller)
             if not allowed:
                 all_names = [
-                    name for name, desc in workforce.agents.items()
-                    if desc.audience != "user"
+                    name for name, desc in workforce.agents.items() if desc.audience != "user"
                 ]
                 allowed = {n: "" for n in all_names}
 
@@ -86,8 +85,7 @@ class DelegationToolProvider(ToolProvider):
 
             constraints = TaskConstraints(
                 timeout_seconds=(
-                    float(timeout) if timeout
-                    else (ref_c.timeout_seconds if ref_c else None)
+                    float(timeout) if timeout else (ref_c.timeout_seconds if ref_c else None)
                 ),
                 max_tool_rounds=ref_c.max_tool_rounds if ref_c else None,
                 max_tokens=ref_c.max_tokens if ref_c else None,

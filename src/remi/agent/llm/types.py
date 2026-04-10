@@ -90,6 +90,7 @@ __all__ = [
     "ToolDefinition",
     "Message",
     "ProviderConfig",
+    "ProviderFactory",
     "ModelPricing",
     "ModelCapabilities",
     "TokenUsage",
@@ -277,6 +278,23 @@ class StreamChunk:
 # ---------------------------------------------------------------------------
 
 
+class ProviderFactory(abc.ABC):
+    """Port for LLM provider creation — maps a backend name to an ``LLMProvider``.
+
+    The concrete ``LLMProviderFactory`` in ``llm/factory.py`` implements
+    this.  ``RunDeps`` should depend on this protocol, not the concrete class.
+    """
+
+    @abc.abstractmethod
+    def create(self, name: str, **overrides: Any) -> LLMProvider: ...
+
+    @abc.abstractmethod
+    def available(self) -> list[str]: ...
+
+    @abc.abstractmethod
+    def has(self, name: str) -> bool: ...
+
+
 class LLMProvider(abc.ABC):
     """Abstract LLM provider. Each adapter converts REMI-neutral types
     to its own wire format internally."""
@@ -339,3 +357,27 @@ class LLMProvider(abc.ABC):
     @abc.abstractmethod
     def model_capabilities(self, model: str) -> ModelCapabilities:
         """Return capabilities/limits for a model name."""
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+
+class SecretsSettings(BaseModel):
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    google_api_key: str = ""
+    voyage_api_key: str = ""
+    database_url: str = ""
+
+    @property
+    def has_any_llm_key(self) -> bool:
+        return bool(self.openai_api_key or self.anthropic_api_key or self.google_api_key)
+
+
+class LLMSettings(BaseModel):
+    """Default LLM provider and model — overridable per-session."""
+
+    default_provider: str = "anthropic"
+    default_model: str = "claude-sonnet-4-20250514"

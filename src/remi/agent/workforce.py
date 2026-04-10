@@ -24,6 +24,7 @@ is computed from individual ``kind: Agent`` manifests.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum, unique
 from typing import Any
 
@@ -33,7 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from remi.agent.config import AgentConfig, DelegateRef
 from remi.agent.runtime.config import RuntimeConfig
-from remi.agent.workflow.registry import get_manifest_path
+from remi.agent.workflow.registry import all_manifests, get_manifest_path
 
 logger = structlog.get_logger(__name__)
 
@@ -143,10 +144,7 @@ class Workforce(BaseModel):
     @property
     def tool_surface(self) -> dict[str, tuple[str, ...]]:
         """Agent name -> tool names it has access to."""
-        return {
-            name: desc.tools
-            for name, desc in self.agents.items()
-        }
+        return {name: desc.tools for name, desc in self.agents.items()}
 
     def get_delegates(self, agent_name: str) -> dict[str, str]:
         """Return {child_name: description} for a specific parent agent."""
@@ -177,8 +175,12 @@ class Workforce(BaseModel):
         return result
 
     @classmethod
-    def from_manifests(cls, agent_names: list[str]) -> Workforce:
-        """Build a workforce from an explicit list of agent manifest names."""
+    def from_manifests(cls, agent_names: Iterable[str]) -> Workforce:
+        """Build a workforce from agent manifest names.
+
+        Accepts any iterable of name strings — ``list``, ``dict.keys()``,
+        ``set``, etc.
+        """
         agents: dict[str, AgentDescriptor] = {}
         for name in agent_names:
             try:
@@ -191,8 +193,6 @@ class Workforce(BaseModel):
     @classmethod
     def from_registry(cls) -> Workforce:
         """Build a workforce from all manifests registered at startup."""
-        from remi.agent.workflow.registry import all_manifests
-
         return cls.from_manifests(list(all_manifests()))
 
 

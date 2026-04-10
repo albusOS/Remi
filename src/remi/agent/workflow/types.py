@@ -28,7 +28,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Tag
 from remi.agent.llm.types import TokenUsage
 from remi.agent.runtime.config import RuntimeConfig
 
-
 # ---------------------------------------------------------------------------
 # Wire — typed edge between nodes
 # ---------------------------------------------------------------------------
@@ -165,7 +164,6 @@ WorkflowNode = Annotated[
 ]
 
 
-
 # ---------------------------------------------------------------------------
 # Workflow defaults — from YAML top-level
 # ---------------------------------------------------------------------------
@@ -184,11 +182,26 @@ class WorkflowDefaults(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ContextMode(StrEnum):
+    """How data flows between steps in a workflow.
+
+    ``WIRES`` (default) — explicit per-field Wire routing.
+    ``ACCUMULATE`` — a single dict accumulates across steps;
+    each transform step receives the full context and its dict
+    output is merged back for the next step.  Zero wires needed
+    for the common "enrich a document" pattern.
+    """
+
+    WIRES = "wires"
+    ACCUMULATE = "accumulate"
+
+
 class WorkflowDef(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
     defaults: WorkflowDefaults = WorkflowDefaults()
+    context_mode: ContextMode = ContextMode.WIRES
     steps: tuple[WorkflowNode, ...] = ()
     wires: tuple[Wire, ...] = ()
     runtime: RuntimeConfig = RuntimeConfig()

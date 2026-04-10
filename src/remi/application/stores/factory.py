@@ -7,12 +7,22 @@ interface.  Postgres-related imports are conditional since ``sqlmodel``
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from remi.agent.documents import ContentStore
-from remi.agent.documents.mem import InMemoryContentStore
+from remi.agent.documents.adapters.mem import InMemoryContentStore
 from remi.application.core.protocols import PropertyStore
-from remi.types.config import RemiSettings
+
+
+@dataclass
+class _BootstrapHook:
+    """Callable wrapper so StoreSuite doesn't expose engine types."""
+
+    _fn: Callable[[], Awaitable[None]]
+
+    async def __call__(self) -> None:
+        await self._fn()
 
 
 @dataclass
@@ -33,29 +43,23 @@ class StoreSuite:
             await self._bootstrap()
 
 
-@dataclass
-class _BootstrapHook:
-    """Callable wrapper so StoreSuite doesn't expose engine types."""
+def build_store_suite(
+    *,
+    backend: str = "in_memory",
+    dsn: str = "",
+) -> StoreSuite:
+    """Build all application-layer stores from backend selection.
 
-    _fn: object  # async () -> None
-
-    async def __call__(self) -> None:
-        from collections.abc import Awaitable, Callable
-
-        fn: Callable[[], Awaitable[None]] = self._fn  # type: ignore[assignment]
-        await fn()
-
-
-def build_store_suite(settings: RemiSettings) -> StoreSuite:
-    """Build all application-layer stores from settings.
-
-    Returns a ``StoreSuite`` with no SQLAlchemy types in its interface.
+    Parameters
+    ----------
+    backend:
+        ``"in_memory"`` (default) or ``"postgres"``.
+    dsn:
+        Database connection URL. Required when *backend* is ``"postgres"``.
     """
     from remi.application.stores.mem import InMemoryPropertyStore
 
-    backend = settings.state_store.backend
     if backend == "postgres":
-        dsn = settings.state_store.dsn or settings.secrets.database_url
         if not dsn:
             raise ValueError(
                 "state_store.backend is 'postgres' but no DATABASE_URL or "
@@ -71,7 +75,7 @@ def build_store_suite(settings: RemiSettings) -> StoreSuite:
         engine = create_async_engine_from_url(dsn)
         session_factory = async_session_factory(engine)
 
-        from remi.agent.documents.pg import PostgresContentStore
+        from remi.agent.documents.adapters.pg import PostgresContentStore
 
         async def _bootstrap() -> None:
             await create_tables(engine)

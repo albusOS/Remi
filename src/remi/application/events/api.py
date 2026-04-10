@@ -46,7 +46,9 @@ def _matches_types(topic: str, type_patterns: list[str]) -> bool:
 async def poll_feed(
     c: Ctr,
     after: int = Query(default=0, ge=0, description="Cursor — return events with seq > after"),
-    types: str | None = Query(default=None, description="Comma-separated topic globs (e.g. ingestion.*,assertion.*)"),
+    types: str | None = Query(
+        default=None, description="Comma-separated topic globs (e.g. ingestion.*,assertion.*)"
+    ),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> FeedResponse:
     """Poll for events since the given cursor.

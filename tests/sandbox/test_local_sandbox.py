@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from remi.agent.sandbox.local import LocalSandbox
+from remi.agent.sandbox.adapters.local import LocalSandbox
 from remi.agent.sandbox.types import ExecStatus
 
 

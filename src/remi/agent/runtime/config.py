@@ -42,11 +42,14 @@ class Placement(StrEnum):
              Decouples API latency from agent execution cost.
     CONTAINER — each run gets its own container/sandbox. Full isolation.
                 Highest latency, strongest resource guarantees.
+    SERVICE — agent runs as its own long-lived HTTP service.
+              Independently deployable. ``endpoint`` must be set.
     """
 
     INLINE = "inline"
     WORKER = "worker"
     CONTAINER = "container"
+    SERVICE = "service"
 
 
 @unique
@@ -116,6 +119,9 @@ class RuntimeConfig(BaseModel):
     Parsed from the ``runtime:`` section of app.yaml. Every field has a
     sensible default so omitting ``runtime:`` entirely gives you the
     current single-process behavior.
+
+    ``endpoint`` is the base URL when ``placement: service`` — the agent
+    runs as its own HTTP service at this address. Ignored for other placements.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -125,6 +131,7 @@ class RuntimeConfig(BaseModel):
     durability: Durability = Durability.EPHEMERAL
     resources: ResourceBudget = ResourceBudget()
     scaling: ScalingConfig = ScalingConfig()
+    endpoint: str = ""
 
     def to_task_constraints(self) -> dict[str, Any]:
         """Export resource limits in the shape TaskConstraints expects."""

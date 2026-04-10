@@ -143,13 +143,17 @@ class GraphToolProvider(ToolProvider):
             neighborhood: list[GraphLink] = []
 
             entity_results = await entity_store.find_entities(
-                question, type_name=type_filter, limit=limit,
+                question,
+                type_name=type_filter,
+                limit=limit,
             )
             entities.extend(entity_results)
 
             if world_model is not None:
                 world_results = await world_model.search_objects(
-                    question, object_type=type_filter, limit=limit,
+                    question,
+                    object_type=type_filter,
+                    limit=limit,
                 )
                 seen_ids = {e.id for e in entities}
                 for obj in world_results:
@@ -168,8 +172,7 @@ class GraphToolProvider(ToolProvider):
 
             return {
                 "entities": [
-                    {"id": e.id, "type": e.type_name, "properties": e.properties}
-                    for e in entities
+                    {"id": e.id, "type": e.type_name, "properties": e.properties} for e in entities
                 ],
                 "links": [
                     {

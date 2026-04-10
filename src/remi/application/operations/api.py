@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from remi.application.core.models import (
@@ -24,18 +24,22 @@ from remi.application.core.models import (
     TenantStatus,
     TradeCategory,
 )
-from remi.application.operations.models import (
+from remi.application.dependencies import Ctr
+from remi.application.operations.views import (
+    LeaseCalendar,
     LeaseListResult,
     MaintenanceListResult,
     MaintenanceSummaryResult,
     TenantDetail,
 )
-from remi.application.portfolio.models import LeaseCalendar
-from remi.application.dependencies import Ctr
 from remi.types.errors import NotFoundError
 from remi.types.identity import (
     lease_id as _lease_id,
+)
+from remi.types.identity import (
     maintenance_id as _maintenance_id,
+)
+from remi.types.identity import (
     tenant_id as _tenant_id,
 )
 
@@ -91,7 +95,9 @@ leases_router = APIRouter(prefix="/leases", tags=["leases"])
 
 
 @leases_router.get("", response_model=LeaseListResult)
-async def list_leases(c: Ctr, property_id: str | None = None, status: str | None = None) -> LeaseListResult:
+async def list_leases(
+    c: Ctr, property_id: str | None = None, status: str | None = None
+) -> LeaseListResult:
     return await c.lease_resolver.list_leases(property_id=property_id, status=status)
 
 
@@ -109,9 +115,21 @@ async def create_lease(body: CreateLeaseRequest, c: Ctr) -> CreateLeaseResponse:
     if not tenant:
         raise NotFoundError("Tenant", body.tenant_id)
     lid = _lease_id(tenant.name, body.property_id, unit.unit_number)
-    lease = Lease(id=lid, unit_id=body.unit_id, tenant_id=body.tenant_id, property_id=body.property_id, start_date=date.fromisoformat(body.start_date), end_date=date.fromisoformat(body.end_date), monthly_rent=Decimal(str(body.monthly_rent)), deposit=Decimal(str(body.deposit)), status=LeaseStatus(body.status))
+    lease = Lease(
+        id=lid,
+        unit_id=body.unit_id,
+        tenant_id=body.tenant_id,
+        property_id=body.property_id,
+        start_date=date.fromisoformat(body.start_date),
+        end_date=date.fromisoformat(body.end_date),
+        monthly_rent=Decimal(str(body.monthly_rent)),
+        deposit=Decimal(str(body.deposit)),
+        status=LeaseStatus(body.status),
+    )
     await c.property_store.upsert_lease(lease)
-    return CreateLeaseResponse(lease_id=lid, unit_id=body.unit_id, tenant_id=body.tenant_id, property_id=body.property_id)
+    return CreateLeaseResponse(
+        lease_id=lid, unit_id=body.unit_id, tenant_id=body.tenant_id, property_id=body.property_id
+    )
 
 
 @leases_router.patch("/{lease_id}")
@@ -178,13 +196,28 @@ maintenance_router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
 
 @maintenance_router.get("", response_model=MaintenanceListResult)
-async def list_requests(c: Ctr, property_id: str | None = None, unit_id: str | None = None, manager_id: str | None = None, status: str | None = None) -> MaintenanceListResult:
-    return await c.maintenance_resolver.list_maintenance(property_id=property_id, unit_id=unit_id, manager_id=manager_id, status=status)
+async def list_requests(
+    c: Ctr,
+    property_id: str | None = None,
+    unit_id: str | None = None,
+    manager_id: str | None = None,
+    status: str | None = None,
+) -> MaintenanceListResult:
+    return await c.maintenance_resolver.list_maintenance(
+        property_id=property_id, unit_id=unit_id, manager_id=manager_id, status=status
+    )
 
 
 @maintenance_router.get("/summary", response_model=MaintenanceSummaryResult)
-async def maintenance_summary(c: Ctr, property_id: str | None = None, unit_id: str | None = None, manager_id: str | None = None) -> MaintenanceSummaryResult:
-    return await c.maintenance_resolver.maintenance_summary(property_id=property_id, unit_id=unit_id, manager_id=manager_id)
+async def maintenance_summary(
+    c: Ctr,
+    property_id: str | None = None,
+    unit_id: str | None = None,
+    manager_id: str | None = None,
+) -> MaintenanceSummaryResult:
+    return await c.maintenance_resolver.maintenance_summary(
+        property_id=property_id, unit_id=unit_id, manager_id=manager_id
+    )
 
 
 @maintenance_router.post("", response_model=CreateMaintenanceResponse, status_code=201)
@@ -196,13 +229,25 @@ async def create_maintenance(body: CreateMaintenanceRequest_, c: Ctr) -> CreateM
     if not unit:
         raise NotFoundError("Unit", body.unit_id)
     request_id = _maintenance_id(body.property_id, body.unit_id, body.title)
-    req = MaintenanceRequest(id=request_id, unit_id=body.unit_id, property_id=body.property_id, title=body.title, description=body.description, category=TradeCategory(body.category), priority=Priority(body.priority))
+    req = MaintenanceRequest(
+        id=request_id,
+        unit_id=body.unit_id,
+        property_id=body.property_id,
+        title=body.title,
+        description=body.description,
+        category=TradeCategory(body.category),
+        priority=Priority(body.priority),
+    )
     await c.property_store.upsert_maintenance_request(req)
-    return CreateMaintenanceResponse(request_id=request_id, title=body.title, property_id=body.property_id, unit_id=body.unit_id)
+    return CreateMaintenanceResponse(
+        request_id=request_id, title=body.title, property_id=body.property_id, unit_id=body.unit_id
+    )
 
 
 @maintenance_router.patch("/{request_id}")
-async def update_maintenance(request_id: str, body: UpdateMaintenanceRequest_, c: Ctr) -> UpdatedResponse:
+async def update_maintenance(
+    request_id: str, body: UpdateMaintenanceRequest_, c: Ctr
+) -> UpdatedResponse:
     req = await c.property_store.get_maintenance_request(request_id)
     if not req:
         raise NotFoundError("MaintenanceRequest", request_id)
@@ -347,23 +392,52 @@ class ActionItemListResponse(BaseModel):
 
 
 def _ai_resp(item: ActionItem) -> ActionItemResponse:
-    return ActionItemResponse(id=item.id, title=item.title, description=item.description, status=item.status.value, priority=item.priority.value, manager_id=item.manager_id, property_id=item.property_id, tenant_id=item.tenant_id, due_date=item.due_date.isoformat() if item.due_date else None, created_at=item.created_at.isoformat(), updated_at=item.updated_at.isoformat())
+    return ActionItemResponse(
+        id=item.id,
+        title=item.title,
+        description=item.description,
+        status=item.status.value,
+        priority=item.priority.value,
+        manager_id=item.manager_id,
+        property_id=item.property_id,
+        tenant_id=item.tenant_id,
+        due_date=item.due_date.isoformat() if item.due_date else None,
+        created_at=item.created_at.isoformat(),
+        updated_at=item.updated_at.isoformat(),
+    )
 
 
 actions_router = APIRouter(prefix="/actions", tags=["actions"])
 
 
 @actions_router.get("/items", response_model=ActionItemListResponse)
-async def list_action_items(c: Ctr, manager_id: str | None = None, property_id: str | None = None, tenant_id: str | None = None, status: str | None = None) -> ActionItemListResponse:
+async def list_action_items(
+    c: Ctr,
+    manager_id: str | None = None,
+    property_id: str | None = None,
+    tenant_id: str | None = None,
+    status: str | None = None,
+) -> ActionItemListResponse:
     ai_status = ActionItemStatus(status) if status else None
-    items = await c.property_store.list_action_items(manager_id=manager_id, property_id=property_id, tenant_id=tenant_id, status=ai_status)
+    items = await c.property_store.list_action_items(
+        manager_id=manager_id, property_id=property_id, tenant_id=tenant_id, status=ai_status
+    )
     items.sort(key=lambda i: i.created_at, reverse=True)
     return ActionItemListResponse(items=[_ai_resp(i) for i in items], total=len(items))
 
 
 @actions_router.post("/items", response_model=ActionItemResponse, status_code=201)
 async def create_action_item(body: ActionItemCreate, c: Ctr) -> ActionItemResponse:
-    item = ActionItem(id=f"action:{uuid.uuid4().hex[:12]}", title=body.title, description=body.description, priority=Priority(body.priority), manager_id=body.manager_id, property_id=body.property_id, tenant_id=body.tenant_id, due_date=body.due_date)
+    item = ActionItem(
+        id=f"action:{uuid.uuid4().hex[:12]}",
+        title=body.title,
+        description=body.description,
+        priority=Priority(body.priority),
+        manager_id=body.manager_id,
+        property_id=body.property_id,
+        tenant_id=body.tenant_id,
+        due_date=body.due_date,
+    )
     await c.property_store.upsert_action_item(item)
     return _ai_resp(item)
 
@@ -442,7 +516,17 @@ class BatchNoteResponse(BaseModel):
 
 
 def _note_resp(note: Note) -> NoteResponse:
-    return NoteResponse(id=note.id, content=note.content, entity_type=note.entity_type, entity_id=note.entity_id, provenance=note.provenance.value, source_doc=note.source_doc, created_by=note.created_by, created_at=note.created_at.isoformat(), updated_at=note.updated_at.isoformat())
+    return NoteResponse(
+        id=note.id,
+        content=note.content,
+        entity_type=note.entity_type,
+        entity_id=note.entity_id,
+        provenance=note.provenance.value,
+        source_doc=note.source_doc,
+        created_by=note.created_by,
+        created_at=note.created_at.isoformat(),
+        updated_at=note.updated_at.isoformat(),
+    )
 
 
 notes_router = APIRouter(prefix="/notes", tags=["notes"])
@@ -468,7 +552,17 @@ async def batch_notes(body: BatchNoteRequest, c: Ctr) -> BatchNoteResponse:
 @notes_router.post("", response_model=NoteResponse, status_code=201)
 async def create_note(body: NoteCreateRequest, c: Ctr) -> NoteResponse:
     now = datetime.now(UTC)
-    note = Note(id=f"note:{uuid.uuid4().hex[:12]}", content=body.content, entity_type=body.entity_type, entity_id=body.entity_id, provenance=body.provenance, source_doc=body.source_doc, created_by=body.created_by, created_at=now, updated_at=now)
+    note = Note(
+        id=f"note:{uuid.uuid4().hex[:12]}",
+        content=body.content,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        provenance=body.provenance,
+        source_doc=body.source_doc,
+        created_by=body.created_by,
+        created_at=now,
+        updated_at=now,
+    )
     result = await c.property_store.upsert_note(note)
     return _note_resp(result.entity)
 

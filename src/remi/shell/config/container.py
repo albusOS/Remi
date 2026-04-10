@@ -1,62 +1,51 @@
-"""REMI dependency injection container — pure wiring only.
+"""REMI dependency injection container — RE product composition root.
 
-Calls factory functions from the modules that own the things being built.
-Tool providers registered: ``AnalysisToolProvider`` (python, bash),
-``MemoryToolProvider`` (memory_store, memory_recall),
-``DelegationToolProvider`` (delegate_to_agent),
-``QueryToolProvider`` (query — in-process resolver dispatch),
-``DocumentToolProvider`` (document_list, document_query).
+Boots the Agent OS kernel via ``Kernel.boot()``, then layers the real
+estate product on top: domain stores, resolvers, tool providers, and
+domain schema.
 
-All domain data access goes through in-process tools (query, documents)
-or the ``remi`` CLI in sandbox mode. No pre-LLM routing.
-
-Only attributes read outside this module are stored as ``self.*``.
-Internal intermediaries are local variables.
+The kernel owns generic infrastructure (LLM, sandbox, memory, events,
+tasks, sessions, vectors, tools). This container adds product-specific
+wiring that makes it the REMI real estate platform.
 """
 
 from __future__ import annotations
 
 from remi.agent.context import build_context_builder
 from remi.agent.documents import ContentStore
-from remi.agent.events import DomainEvent, EventBuffer, EventBus, build_event_bus
+from remi.agent.events import EventBuffer, EventBus
 from remi.agent.graph import WorldModel
-from remi.agent.llm import LLMProviderFactory, build_provider_factory
-from remi.agent.memory import MemoryStore, build_memory_store
-from remi.agent.memory.recall import MemoryRecallService
-from remi.agent.observe import LLMUsageLedger, Tracer, TraceStore, build_trace_store
+from remi.agent.llm import LLMProviderFactory
+from remi.agent.observe import LLMUsageLedger
+from remi.agent.observe.types import TraceStore
 from remi.agent.profile import DomainProfile
-from remi.agent.runtime import AgentRuntime, RetryPolicy
-from remi.agent.sandbox import Sandbox, build_sandbox
-from remi.agent.sessions import build_chat_session_store
-from remi.agent.signals import (
-    DomainSchema,
-    load_domain_yaml,
-    set_domain_yaml_path,
-)
-from remi.agent.tasks import TaskSupervisor, build_task_pool
-from remi.agent.tools import (
-    AnalysisToolProvider,
-    DelegationToolProvider,
-    InMemoryToolCatalog,
-    MemoryToolProvider,
-)
+from remi.agent.runtime.runner import AgentRuntime
+from remi.agent.sandbox import Sandbox
+from remi.agent.serve import Kernel, KernelSettings
+from remi.agent.signals import DomainSchema, load_domain_yaml
+from remi.agent.tasks import TaskSupervisor
 from remi.agent.types import ChatSessionStore, ToolProvider, ToolRegistry
-from remi.agent.vectors import Embedder, VectorStore, build_embedder, build_vector_store
-from remi.agent.workflow import WorkflowRunner
+from remi.agent.vectors import Embedder, VectorStore
 from remi.agent.workforce import Workforce
 from remi.application.core import EventStore, PropertyStore
-from remi.application.ingestion import DocumentIngestService
-from remi.application.intelligence import (
-    DashboardResolver,
-    SearchService,
+from remi.application.ingestion import (
+    DocumentIngestService,
+    FormatRegistry,
+    InMemoryFormatRegistry,
 )
+from remi.application.intelligence import IntelligenceToolProvider, SearchService, TrendResolver
 from remi.application.operations import (
+    DelinquencyResolver,
     LeaseResolver,
     MaintenanceResolver,
+    OperationsToolProvider,
+    VacancyResolver,
 )
 from remi.application.portfolio import (
     AutoAssignService,
+    DashboardBuilder,
     ManagerResolver,
+    PortfolioToolProvider,
     PropertyResolver,
     RentRollResolver,
 )
@@ -68,123 +57,146 @@ from remi.application.stores import (
 )
 from remi.application.stores.indexer import AgentVectorSearch
 from remi.application.stores.world import build_re_world_model
-from remi.application.tools import DocumentToolProvider, QueryToolProvider
+from remi.application.ingestion.documents import DocumentToolProvider
+from remi.application.ingestion.tools import IngestionToolProvider
 from remi.shell.config.settings import RemiSettings
 
 
 class Container:
-    """REMI container — wires all services for the real estate product."""
+    """REMI container — boots kernel, layers RE product on top."""
 
     def __init__(self, settings: RemiSettings | None = None) -> None:
         self.settings = settings or RemiSettings()
 
-        # -- Register capabilities (before any agent/ factories run) ------------
+        # -- Register capabilities (agent manifests) ---------------------------
         from remi.shell.config.capabilities import ensure_capabilities_registered
-        from remi.types.paths import DOMAIN_YAML_PATH
+        from remi.types.paths import REMI_PACKAGE_DIR
 
         ensure_capabilities_registered()
-        set_domain_yaml_path(DOMAIN_YAML_PATH)
+        domain_yaml_path = REMI_PACKAGE_DIR / "shell" / "config" / "domain.yaml"
 
-        # -- Domain profile (operational config for agent layer) ---------------
+        # -- Domain schema + profile -------------------------------------------
+        raw_domain = load_domain_yaml(domain_yaml_path)
+        domain_schema: DomainSchema = DomainSchema.from_yaml(raw_domain)
         profile: DomainProfile = build_re_profile()
 
-        # -- Event bus + buffer (kernel infrastructure) -------------------------
-        self.event_bus: EventBus = build_event_bus(self.settings.event_bus)
-        self.event_buffer: EventBuffer = EventBuffer(capacity=8192)
+        # -- Boot the kernel (pass the registry capabilities already populated) -
+        from remi.agent.workflow.registry import default_registry
 
-        async def _buffer_sink(event: DomainEvent) -> None:
-            await self.event_buffer.append(event)
-
-        self.event_bus.subscribe("*", _buffer_sink)
-
-        # -- Core infrastructure (all via factories) ---------------------------
-        memory_store: MemoryStore = build_memory_store(self.settings)
-        recall_service = MemoryRecallService(memory_store)
-        self.tool_registry: ToolRegistry = InMemoryToolCatalog()
-        self.provider_factory: LLMProviderFactory = build_provider_factory(
-            self.settings.secrets,
+        kernel_settings = KernelSettings(
+            secrets=self.settings.secrets,
+            llm=self.settings.llm,
+            sandbox=self.settings.sandbox,
+            embeddings=self.settings.embeddings,
+            vectors=self.settings.vectors,
+            memory=self.settings.memory,
+            tracing=self.settings.tracing,
+            sessions=self.settings.sessions,
+            event_bus=self.settings.event_bus,
+            task_queue=self.settings.task_queue,
+            dsn=self.settings.state_store.dsn or self.settings.secrets.database_url,
+            max_retries=self.settings.execution.max_retries,
+            retry_delay_seconds=self.settings.execution.retry_delay_seconds,
+            api_url=self.settings.api.resolved_internal_url(),
+        )
+        self._kernel = Kernel.boot(
+            kernel_settings,
+            domain_schema=domain_schema,
+            registry=default_registry(),
         )
 
-        # -- Application stores (via StoreSuite) -------------------------------
-        self._chat_session_store: ChatSessionStore = build_chat_session_store(self.settings)
-        self._store_suite: StoreSuite = build_store_suite(self.settings)
+        # -- Expose kernel subsystems for product code -------------------------
+        self.event_bus: EventBus = self._kernel.event_bus
+        self.event_buffer: EventBuffer = self._kernel.event_buffer
+        self.tool_registry: ToolRegistry = self._kernel.tool_registry
+        self.provider_factory: LLMProviderFactory = self._kernel.provider_factory
+        self.sandbox: Sandbox = self._kernel.sandbox
+        self.vector_store: VectorStore = self._kernel.vector_store
+        self.embedder: Embedder = self._kernel.embedder
+        self.domain_schema: DomainSchema = domain_schema
+        self.trace_store: TraceStore = self._kernel.trace_store
+        self.usage_ledger: LLMUsageLedger = self._kernel.usage_ledger
+        self.chat_agent: AgentRuntime = self._kernel.runtime
+        self.task_supervisor: TaskSupervisor = self._kernel.supervisor
+        self.workforce: Workforce = self._kernel.workforce
+
+        # -- RE product stores -------------------------------------------------
+        dsn = kernel_settings.dsn
+        self._store_suite: StoreSuite = build_store_suite(
+            backend=self.settings.state_store.backend,
+            dsn=dsn,
+        )
         self.property_store: PropertyStore = self._store_suite.property_store
         self.content_store: ContentStore = self._store_suite.content_store
         self._bootstrap_pending = True
 
-        # -- Trace layer -------------------------------------------------------
-        self.trace_store: TraceStore = build_trace_store(self.settings)
-        self.usage_ledger: LLMUsageLedger = LLMUsageLedger()
-        tracer = Tracer(self.trace_store)
-
-        # -- Domain schema -----------------------------------------------------
-        raw_domain = load_domain_yaml()
-        self.domain_schema: DomainSchema = DomainSchema.from_yaml(raw_domain)
-
-        # -- Sandbox -----------------------------------------------------------
-        self.sandbox: Sandbox = build_sandbox(self.settings)
-
-        # -- Vectors -----------------------------------------------------------
-        self.vector_store: VectorStore = build_vector_store(self.settings)
-        self.embedder: Embedder = build_embedder(
-            self.settings.embeddings,
-            self.settings.secrets,
-        )
-
-        # -- Event store -------------------------------------------------------
+        # -- RE event store ----------------------------------------------------
         self.event_store: EventStore = InMemoryEventStore()
 
-        # -- Services ----------------------------------------------------------
-        self.workflow_runner = WorkflowRunner(
-            provider_factory=self.provider_factory,
-            default_provider=self.settings.llm.default_provider,
-            default_model=self.settings.llm.default_model,
-            usage_ledger=self.usage_ledger,
-            tool_registry=self.tool_registry,
-        )
+        # -- RE resolvers — portfolio ------------------------------------------
+        self.manager_resolver = ManagerResolver(property_store=self.property_store)
         self.property_resolver = PropertyResolver(property_store=self.property_store)
+        self.rent_roll_resolver = RentRollResolver(property_store=self.property_store)
+        self.dashboard_builder = DashboardBuilder(property_store=self.property_store)
+        self.auto_assign_service = AutoAssignService(property_store=self.property_store)
+
+        # -- RE resolvers — operations -----------------------------------------
         self.lease_resolver = LeaseResolver(property_store=self.property_store)
         self.maintenance_resolver = MaintenanceResolver(property_store=self.property_store)
-        self.manager_resolver = ManagerResolver(property_store=self.property_store)
-        self.rent_roll_resolver = RentRollResolver(property_store=self.property_store)
-        self.dashboard_resolver = DashboardResolver(
-            property_store=self.property_store,
-        )
-        self.auto_assign_service = AutoAssignService(
-            property_store=self.property_store,
-        )
+        self.delinquency_resolver = DelinquencyResolver(property_store=self.property_store)
+        self.vacancy_resolver = VacancyResolver(property_store=self.property_store)
 
-        # -- Search service ----------------------------------------------------
+        # -- RE resolvers — intelligence ----------------------------------------
         vector_search = AgentVectorSearch(self.vector_store, self.embedder)
         self.search_service = SearchService(vector_search)
+        self.trend_resolver = TrendResolver(property_store=self.property_store)
 
-        # -- Document ingestion ------------------------------------------------
+        # -- RE format registry ------------------------------------------------
+        self.format_registry: FormatRegistry = InMemoryFormatRegistry()
+
+        # -- RE document ingestion ---------------------------------------------
         self.document_ingest = DocumentIngestService(
             content_store=self.content_store,
             property_store=self.property_store,
-            workflow_runner=self.workflow_runner,
+            event_bus=self.event_bus,
             metadata_skip_patterns=profile.metadata_skip_patterns,
             section_labels=profile.section_labels,
         )
 
-        # -- World model --------------------------------------------------------
+        # -- RE world model (domain → kernel graph bridge) ---------------------
         self.world_model: WorldModel = build_re_world_model(self.property_store)
 
-        # -- Tool providers ----------------------------------------------------
-        kernel_providers: list[ToolProvider] = [
-            AnalysisToolProvider(self.sandbox),
-            MemoryToolProvider(memory_store),
-        ]
-        domain_providers: list[ToolProvider] = [
-            QueryToolProvider(
+        # -- Upgrade kernel context builder with RE world model ----------------
+        self.chat_agent.set_context_builder(build_context_builder(
+            domain=domain_schema,
+            world_model=self.world_model,
+            vector_store=self.vector_store,
+            embedder=self.embedder,
+            name_fields=profile.name_fields,
+            empty_state_label=profile.empty_state_label,
+        ))
+
+        # -- RE tool providers (per-slice) -------------------------------------
+        re_providers: list[ToolProvider] = [
+            PortfolioToolProvider(
                 manager_resolver=self.manager_resolver,
                 property_resolver=self.property_resolver,
                 rent_roll_resolver=self.rent_roll_resolver,
-                dashboard_resolver=self.dashboard_resolver,
+                dashboard_builder=self.dashboard_builder,
+                property_store=self.property_store,
+            ),
+            OperationsToolProvider(
                 lease_resolver=self.lease_resolver,
                 maintenance_resolver=self.maintenance_resolver,
+                delinquency_resolver=self.delinquency_resolver,
+                vacancy_resolver=self.vacancy_resolver,
+            ),
+            IntelligenceToolProvider(
                 search_service=self.search_service,
+                trend_resolver=self.trend_resolver,
                 property_store=self.property_store,
+                event_store=self.event_store,
+                event_bus=self.event_bus,
             ),
             DocumentToolProvider(
                 content_store=self.content_store,
@@ -192,57 +204,15 @@ class Container:
                 document_ingest=self.document_ingest,
                 vector_search=vector_search,
             ),
-        ]
-        for provider in kernel_providers + domain_providers:
-            provider.register(self.tool_registry)
-
-        # -- Chat agent --------------------------------------------------------
-        context_builder = build_context_builder(
-            domain=self.domain_schema,
-            world_model=self.world_model,
-            vector_store=self.vector_store,
-            embedder=self.embedder,
-            name_fields=profile.name_fields,
-            empty_state_label=profile.empty_state_label,
-        )
-        self.chat_agent = AgentRuntime(
-            provider_factory=self.provider_factory,
-            tool_registry=self.tool_registry,
-            sandbox=self.sandbox,
-            domain_tbox=self.domain_schema,
-            memory_store=memory_store,
-            tracer=tracer,
-            chat_session_store=self._chat_session_store,
-            retry_policy=RetryPolicy(
-                max_retries=self.settings.execution.max_retries,
-                delay_seconds=self.settings.execution.retry_delay_seconds,
+            IngestionToolProvider(
+                content_store=self.content_store,
+                property_store=self.property_store,
+                event_bus=self.event_bus,
+                format_registry=self.format_registry,
             ),
-            default_provider=self.settings.llm.default_provider,
-            default_model=self.settings.llm.default_model,
-            context_builder=context_builder,
-            usage_ledger=self.usage_ledger,
-            recall_service=recall_service,
-        )
-
-        # -- Wire workflow engine ↔ agent runtime (bidirectional) --------------
-        self.workflow_runner.set_agent_executor(self.chat_agent)
-
-        # -- Task supervisor (kernel multi-agent coordination) -----------------
-        task_pool = build_task_pool(self.settings.task_queue)
-        self.task_supervisor = TaskSupervisor(
-            executor=self.chat_agent,  # type: ignore[arg-type]
-            event_bus=self.event_bus,
-            pool=task_pool,
-        )
-
-        # -- Workforce (agent topology from manifests) -------------------------
-        self.workforce = Workforce.from_registry()
-
-        # -- Delegation tool (requires chat_agent → task_supervisor → workforce)
-        DelegationToolProvider(
-            self.task_supervisor,
-            workforce=self.workforce,
-        ).register(self.tool_registry)
+        ]
+        for provider in re_providers:
+            provider.register(self.tool_registry)
 
     async def ensure_bootstrapped(self) -> None:
         if self._bootstrap_pending:

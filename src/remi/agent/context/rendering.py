@@ -47,8 +47,7 @@ def render_domain_context(domain: DomainSchema | None, **_kwargs: object) -> str
 
     if relationships:
         rel_lines = [
-            f"- {r.source} —[{r.name}]→ {r.target}: {r.description}"
-            for r in relationships
+            f"- {r.source} —[{r.name}]→ {r.target}: {r.description}" for r in relationships
         ]
         parts.append("\n**Relationships:**")
         parts.append("\n".join(rel_lines))

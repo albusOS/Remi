@@ -26,6 +26,14 @@ function getGreeting(): string {
   return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
 }
 
+function useGreeting(): string {
+  const [greeting, setGreeting] = useState("Hey there.");
+  useEffect(() => {
+    setGreeting(getGreeting());
+  }, []);
+  return greeting;
+}
+
 const PROCESS_ICONS: Record<string, string> = {
   collections: "💰",
   leasing: "📋",
@@ -111,6 +119,7 @@ export function SessionEmptyState({
   managerName?: string;
 }) {
   const [schema, setSchema] = useState<DomainSchemaResponse | null>(null);
+  const greeting = useGreeting();
 
   useEffect(() => {
     api.domainSchema().then(setSchema).catch(() => {});
@@ -131,8 +140,8 @@ export function SessionEmptyState({
       <div className="flex flex-col items-center max-w-md w-full px-4 py-16">
         <div className="w-10 h-1 rounded-full bg-accent/40 mb-6" />
 
-        <h2 className="text-lg font-medium text-fg mb-1 tracking-tight">
-          {getGreeting()}
+        <h2 className="text-lg font-medium text-fg mb-1 tracking-tight" suppressHydrationWarning>
+          {greeting}
         </h2>
         <p className="text-sm text-fg-muted mb-10 text-center max-w-xs leading-relaxed">
           {managerName

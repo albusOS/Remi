@@ -1,45 +1,40 @@
-"""Portfolio — managers, properties, units, owners, rent-roll.
+"""Portfolio — managers, properties, units, owners, rent-roll, dashboard.
 
-Queries:
-    ManagerResolver        Director-level portfolio roll-up
+Resolvers:
+    ManagerResolver        Director-level portfolio roll-up per manager
     PropertyResolver       Property list, detail, cross-property units
     RentRollResolver       Detailed rent-roll assembly per property
-    property_ids_for_manager / property_ids_for_owner   Scope helpers
+    DashboardBuilder       Portfolio-wide dashboard overview
 
 Mutations:
     AutoAssignService      KB-tag-based property-to-manager assignment
 
-API:
-    managers_router        /managers CRUD + meeting briefs
-    properties_router      /properties CRUD + rent-roll
-    units_router           /units CRUD
-    owners_router          /owners listing
+Scope helpers:
+    property_ids_for_manager / property_ids_for_owner
+
+API routers are imported directly by the shell via ``capabilities.py``
+string references — they are NOT re-exported here to avoid barrel→api
+→dependencies circular imports.
 """
 
-from pathlib import Path
-
-from .api import managers_router, owners_router, properties_router, units_router
-from .mutations import AutoAssignService
-from .queries import (
-    ManagerResolver,
+from remi.application.portfolio.auto_assign import AutoAssignService
+from remi.application.portfolio.dashboard import DashboardBuilder
+from remi.application.portfolio.managers import ManagerResolver
+from remi.application.portfolio.properties import (
     PropertyResolver,
-    RentRollResolver,
     property_ids_for_manager,
     property_ids_for_owner,
 )
-
-MANIFEST_PATH = Path(__file__).parent / "app.yaml"
+from remi.application.portfolio.rent_roll import RentRollResolver
+from remi.application.portfolio.tools import PortfolioToolProvider
 
 __all__ = [
     "AutoAssignService",
-    "MANIFEST_PATH",
+    "DashboardBuilder",
     "ManagerResolver",
+    "PortfolioToolProvider",
     "PropertyResolver",
     "RentRollResolver",
-    "managers_router",
-    "owners_router",
-    "properties_router",
     "property_ids_for_manager",
     "property_ids_for_owner",
-    "units_router",
 ]

@@ -9,10 +9,12 @@ property surface the correction.
 ``Importance`` controls retention.  Routine observations decay after
 14 days, notable findings persist for 90 days, and critical learnings
 never expire.
+
+``RecallService`` is the port for pre-run memory recall. The concrete
+``MemoryRecallService`` implements it.
 """
 
-from __future__ import annotations
-
+import abc
 from datetime import datetime
 from enum import IntEnum, StrEnum, unique
 
@@ -68,3 +70,25 @@ class MemoryEntry(BaseModel, frozen=True):
     tags: list[str] = Field(default_factory=list)
     source: str = ""
     metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class RecallService(abc.ABC):
+    """Port for pre-run memory recall — retrieves and ranks memories.
+
+    The concrete ``MemoryRecallService`` implements this.  ``RunDeps``
+    should depend on this protocol, not the concrete class.
+    """
+
+    @abc.abstractmethod
+    async def recall(
+        self,
+        question: str | None = None,
+        *,
+        namespaces: list[str] | None = None,
+        entity_ids: list[str] | None = None,
+        tags: list[str] | None = None,
+        limit: int = 15,
+    ) -> list[MemoryEntry]: ...
+
+    @abc.abstractmethod
+    def render(self, entries: list[MemoryEntry]) -> str | None: ...

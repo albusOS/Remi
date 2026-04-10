@@ -113,10 +113,7 @@ def _parallel_groups(
     remaining = set(predecessors.keys())
 
     while remaining:
-        ready = sorted(
-            sid for sid in remaining
-            if all(p in level for p in predecessors[sid])
-        )
+        ready = sorted(sid for sid in remaining if all(p in level for p in predecessors[sid]))
         if not ready:
             raise ValueError("Cycle detected in workflow")
         for sid in ready:
@@ -136,9 +133,7 @@ def _build_inbound(
     workflow: WorkflowDef,
 ) -> dict[str, tuple[InboundBinding, ...]]:
     """Build the per-step inbound binding index from wires."""
-    inbound: dict[str, list[InboundBinding]] = {
-        s.id: [] for s in workflow.steps
-    }
+    inbound: dict[str, list[InboundBinding]] = {s.id: [] for s in workflow.steps}
     for wire in workflow.wires:
         inbound.setdefault(wire.target_step, []).append(
             InboundBinding(
@@ -150,9 +145,11 @@ def _build_inbound(
         )
 
     return {
-        sid: tuple(sorted(
-            bindings,
-            key=lambda b: (b.target_port, b.source_step, b.source_port),
-        ))
+        sid: tuple(
+            sorted(
+                bindings,
+                key=lambda b: (b.target_port, b.source_step, b.source_port),
+            )
+        )
         for sid, bindings in inbound.items()
     }

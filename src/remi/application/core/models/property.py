@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from remi.application.core.models._helpers import _utcnow
 from remi.application.core.models.address import Address
-from remi.application.core.models.enums import AssetClass, PropertyType
+from remi.application.core.models.enums import AssetClass, PropertyStatus, PropertyType
 
 
 class Property(BaseModel, frozen=True):
@@ -16,6 +16,7 @@ class Property(BaseModel, frozen=True):
     manager_id: str | None = None
     name: str
     address: Address
+    status: PropertyStatus = PropertyStatus.ACTIVE
     property_type: PropertyType = PropertyType.MULTI_FAMILY
     asset_class: AssetClass | None = None
     year_built: int | None = None

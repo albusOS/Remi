@@ -557,8 +557,13 @@ def apply_merge(existing_row: _T, incoming_dto: BaseModel) -> _T:
             continue
 
         if field_name in (
-            "status", "property_type", "category", "priority",
-            "unit_type", "owner_type", "asset_class",
+            "status",
+            "property_type",
+            "category",
+            "priority",
+            "unit_type",
+            "owner_type",
+            "asset_class",
         ):
             value = value.value if value is not None else None
 

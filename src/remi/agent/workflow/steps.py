@@ -19,12 +19,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, ValidationError
 
-from remi.agent.llm.factory import LLMProviderFactory
 from remi.agent.llm.types import (
     LLMResponse,
     Message,
+    ProviderFactory,
     TokenUsage,
     ToolCallRequest,
     ToolDefinition,
@@ -96,7 +95,7 @@ async def run_llm_step(
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
-    provider_factory: LLMProviderFactory,
+    provider_factory: ProviderFactory,
     usage_ledger: LLMUsageLedger | None,
     schema_registry: OutputSchemaRegistry,
     *,
@@ -107,7 +106,10 @@ async def run_llm_step(
     model = step.model or defaults.model
     provider = provider_factory.create(provider_name)
 
-    messages = _build_messages(step, workflow_input, step_outputs, context)
+    messages = _build_messages(
+        step, workflow_input, step_outputs, context, provider_name=provider_name,
+    )
+    used_prefill = step.response_format == "json" and provider_name == "anthropic"
 
     response = await provider.complete(
         model=model,
@@ -116,7 +118,7 @@ async def run_llm_step(
         max_tokens=step.max_tokens,
     )
 
-    value = _extract_value(response, step.response_format)
+    value = _extract_value(response, step.response_format, prefilled=used_prefill)
     _validate_output(value, step.output_schema, schema_registry, step.id)
     _record_usage(usage_ledger, step, provider_name, model, response, workflow_name)
 
@@ -134,7 +136,7 @@ async def run_llm_tools_step(
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
-    provider_factory: LLMProviderFactory,
+    provider_factory: ProviderFactory,
     usage_ledger: LLMUsageLedger | None,
     tool_definitions: list[ToolDefinition],
     tool_execute: ToolExecuteFn,
@@ -147,7 +149,10 @@ async def run_llm_tools_step(
     model = step.model or defaults.model
     provider = provider_factory.create(provider_name)
 
-    thread = _build_messages(step, workflow_input, step_outputs, context)
+    thread = _build_messages(
+        step, workflow_input, step_outputs, context, provider_name=provider_name,
+    )
+    used_prefill = step.response_format == "json" and provider_name == "anthropic"
     run_usage = TokenUsage()
     rounds_remaining = step.max_tool_rounds + 1
 
@@ -167,7 +172,9 @@ async def run_llm_tools_step(
         _record_usage(usage_ledger, step, provider_name, model, response, workflow_name)
 
         if not response.tool_calls:
-            value = _extract_value(response, step.response_format)
+            value = _extract_value(
+                response, step.response_format, prefilled=used_prefill,
+            )
             _validate_output(value, step.output_schema, schema_registry, step.id)
             return StepResult(step_id=step.id, value=value, usage=run_usage)
 
@@ -184,7 +191,7 @@ async def run_llm_tools_step(
         )
         thread.extend(tool_messages)
 
-    value = _extract_value(response, step.response_format)
+    value = _extract_value(response, step.response_format, prefilled=used_prefill)
     _validate_output(value, step.output_schema, schema_registry, step.id)
     return StepResult(step_id=step.id, value=value, usage=run_usage)
 
@@ -222,8 +229,24 @@ async def run_transform_step(
     step_outputs: dict[str, StepValue],
     tool_registry: ToolRegistry,
     port_data: dict[str, Any] | None = None,
+    workflow_input: str = "",
+    pipeline_ctx: dict[str, Any] | None = None,
 ) -> StepResult:
-    """Execute a tool from the shared registry as a transform step."""
+    """Execute a tool from the shared registry as a transform step.
+
+    When ``pipeline_ctx`` is provided (context_mode=accumulate), it is
+    the primary argument source — the full accumulated pipeline state.
+    Wire-routed ``port_data`` still wins for explicit overrides.
+
+    Argument resolution priority (accumulate mode):
+      1. ``pipeline_ctx`` (full accumulated context)
+      2. Wire-routed ``port_data``
+
+    Argument resolution priority (wires mode / legacy):
+      1. Parsed ``workflow_input`` (JSON → top-level args)
+      2. Dependency outputs keyed by step id
+      3. Wire-routed ``port_data``
+    """
     entry = tool_registry.get(step.tool)
     if entry is None:
         raise ValueError(
@@ -232,7 +255,24 @@ async def run_transform_step(
         )
     tool_fn = entry[0]
 
-    args: dict[str, Any] = {dep: step_outputs.get(dep, {}) for dep in step.depends_on}
+    args: dict[str, Any] = {}
+
+    if pipeline_ctx is not None:
+        args.update(pipeline_ctx)
+    else:
+        if workflow_input:
+            try:
+                parsed = json.loads(workflow_input)
+                if isinstance(parsed, dict):
+                    args.update(parsed)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        for dep in step.depends_on:
+            dep_val = step_outputs.get(dep, {})
+            if isinstance(dep_val, dict):
+                args.update(dep_val)
+
     if port_data:
         args.update(port_data)
 
@@ -292,10 +332,7 @@ async def run_for_each_step(
         for idx, item in enumerate(items):
             await _run_one(idx, item)
     else:
-        tasks = [
-            asyncio.create_task(_run_one(idx, item))
-            for idx, item in enumerate(items)
-        ]
+        tasks = [asyncio.create_task(_run_one(idx, item)) for idx, item in enumerate(items)]
         await asyncio.gather(*tasks)
 
     return StepResult(
@@ -332,10 +369,12 @@ def _resolve_items(path: str, step_outputs: dict[str, StepValue]) -> Any:
 async def run_gate_step(
     step: WorkflowNode,
     step_outputs: dict[str, StepValue],
+    *,
+    pipeline_ctx: dict[str, Any] | None = None,
 ) -> StepResult:
     """Evaluate a gate condition against prior step outputs."""
     condition = getattr(step, "condition", "")
-    passed = evaluate_condition(condition, step_outputs)
+    passed = evaluate_condition(condition, step_outputs, pipeline_ctx)
     return StepResult(
         step_id=step.id,
         value={"passed": passed},
@@ -353,8 +392,15 @@ def _build_messages(
     workflow_input: str,
     step_outputs: dict[str, StepValue],
     context: dict[str, str] | None,
+    *,
+    provider_name: str = "",
 ) -> list[Message]:
-    """Build the LLM message list for a step."""
+    """Build the LLM message list for a step.
+
+    When ``response_format == "json"`` and the provider is Anthropic,
+    appends an assistant prefill message containing ``{`` — the
+    canonical Anthropic technique for forcing valid JSON output.
+    """
     messages: list[Message] = []
     if step.system_prompt:
         resolved_system = resolve_template(
@@ -372,13 +418,29 @@ def _build_messages(
         context,
     )
     messages.append(Message(role="user", content=user_content))
+
+    if step.response_format == "json" and provider_name == "anthropic":
+        messages.append(Message(role="assistant", content="{"))
+
     return messages
 
 
-def _extract_value(response: LLMResponse, response_format: str) -> StepValue:
-    """Pull the value out of an LLM response."""
+def _extract_value(
+    response: LLMResponse,
+    response_format: str,
+    *,
+    prefilled: bool = False,
+) -> StepValue:
+    """Pull the value out of an LLM response.
+
+    When *prefilled* is True the assistant turn was primed with ``{`` so
+    Anthropic's response is everything after that opening brace.  We
+    prepend it back before parsing.
+    """
     raw = response.content or ""
     if response_format == "json":
+        if prefilled and not raw.lstrip().startswith("{"):
+            raw = "{" + raw
         return parse_json_output(raw)
     return raw
 

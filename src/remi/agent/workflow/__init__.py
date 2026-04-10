@@ -16,11 +16,18 @@ Public API::
 from remi.agent.workflow.engine import WorkflowRunner
 from remi.agent.workflow.loader import load_manifest_runtime, load_workflow
 from remi.agent.workflow.plan import build_execution_plan
-from remi.agent.workflow.registry import all_manifests, get_manifest_path, register_manifest
+from remi.agent.workflow.registry import (
+    ManifestRegistry,
+    all_manifests,
+    get_manifest_kind,
+    get_manifest_path,
+    register_manifest,
+)
 from remi.agent.workflow.resolve import evaluate_condition
 from remi.agent.workflow.types import (
     AgentStepNode,
     BackoffStrategy,
+    ContextMode,
     EventCallback,
     ExecutionPlan,
     ForEachNode,
@@ -51,6 +58,7 @@ from remi.agent.workflow.types import (
 __all__ = [
     "AgentStepNode",
     "BackoffStrategy",
+    "ContextMode",
     "EventCallback",
     "ExecutionPlan",
     "ForEachNode",
@@ -58,6 +66,7 @@ __all__ = [
     "InboundBinding",
     "LLMNode",
     "LLMToolsNode",
+    "ManifestRegistry",
     "NodeBase",
     "NodeCompleted",
     "NodeEvent",
@@ -80,6 +89,7 @@ __all__ = [
     "all_manifests",
     "build_execution_plan",
     "evaluate_condition",
+    "get_manifest_kind",
     "get_manifest_path",
     "load_manifest_runtime",
     "load_workflow",

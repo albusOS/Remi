@@ -3,6 +3,12 @@
 A Task wraps a TaskSpec with runtime state: when it started, when it
 finished, what it produced, and how many resources it consumed. The
 supervisor owns Task instances; parent agents hold handles to them.
+
+Lifecycle::
+
+    pending → running → done | failed | cancelled
+                ↓
+         waiting_on_human → running  (resumed with human answers)
 """
 
 from __future__ import annotations
@@ -11,15 +17,17 @@ import asyncio
 import enum
 import time
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import uuid4
 
 from remi.agent.tasks.result import TaskResult
-from remi.agent.tasks.spec import TaskSpec
+from remi.agent.tasks.spec import HumanQuestion, TaskSpec
 
 
 class TaskStatus(enum.Enum):
     PENDING = "pending"
     RUNNING = "running"
+    WAITING_ON_HUMAN = "waiting_on_human"
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -30,7 +38,8 @@ class Task:
     """A supervised unit of delegated work with lifecycle tracking.
 
     Created by the supervisor when a TaskSpec is submitted. Transitions
-    through ``pending → running → done|failed|cancelled``.
+    through ``pending → running → done|failed|cancelled``, with an
+    optional ``waiting_on_human`` suspension when the task needs user input.
     """
 
     id: str
@@ -40,10 +49,11 @@ class Task:
     created_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
     finished_at: float | None = None
+    human_questions: list[HumanQuestion] = field(default_factory=list)
+    human_answers: dict[str, Any] = field(default_factory=dict)
 
-    _done_event: asyncio.Event = field(
-        default_factory=asyncio.Event, repr=False, compare=False
-    )
+    _done_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False, compare=False)
+    _human_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False, compare=False)
 
     @staticmethod
     def create(spec: TaskSpec) -> Task:
@@ -63,6 +73,23 @@ class Task:
     def mark_running(self) -> None:
         self.status = TaskStatus.RUNNING
         self.started_at = time.monotonic()
+
+    def mark_waiting_on_human(self, questions: list[HumanQuestion]) -> None:
+        """Suspend the task until a human provides answers."""
+        self.status = TaskStatus.WAITING_ON_HUMAN
+        self.human_questions = questions
+        self._human_event.clear()
+
+    def supply_human_answers(self, answers: dict[str, Any]) -> None:
+        """Resume a suspended task with the human's answers."""
+        self.human_answers.update(answers)
+        self.status = TaskStatus.RUNNING
+        self._human_event.set()
+
+    async def wait_for_human(self, timeout: float | None = None) -> dict[str, Any]:
+        """Block until human answers arrive. Used by the tool implementation."""
+        await asyncio.wait_for(self._human_event.wait(), timeout=timeout)
+        return self.human_answers
 
     def mark_done(self, result: TaskResult) -> None:
         self.status = TaskStatus.DONE

@@ -1,10 +1,7 @@
-"""Embedder implementations and factory.
+"""Embedder port default + factory.
 
-Supported providers:
-  openai   — text-embedding-3-small / text-embedding-3-large (default)
-
-NoopEmbedder: deterministic hash-based fallback for tests and offline dev.
-              Logs a warning at construction time in non-test environments.
+``NoopEmbedder`` is the zero-dep deterministic fallback for tests and offline
+dev.  External provider adapters live in ``remi.agent.vectors.adapters``.
 
 ``build_embedder`` selects the right implementation from settings.
 """
@@ -12,78 +9,20 @@ NoopEmbedder: deterministic hash-based fallback for tests and offline dev.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import math
-import os
-from typing import Any
 
 import structlog
 
+from remi.agent.llm.types import SecretsSettings
+from remi.agent.vectors.types import EmbeddingsSettings
 from remi.agent.vectors.types import Embedder
-from remi.types.config import EmbeddingsSettings, SecretsSettings
 
 _log = structlog.get_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# OpenAI
-# ---------------------------------------------------------------------------
-
-
-class OpenAIEmbedder(Embedder):
-    """Embeds text using OpenAI's embedding API.
-
-    Requires the ``openai`` package and a valid API key.
-    Batches requests for efficiency (OpenAI supports up to 2048 inputs per call).
-    """
-
-    def __init__(
-        self,
-        model: str = "text-embedding-3-small",
-        api_key: str | None = None,
-        dimensions: int = 1536,
-    ) -> None:
-        self._model = model
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-        self._dimensions = dimensions
-        self._client: Any = None
-
-    def _get_client(self) -> Any:
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-            except ImportError as exc:
-                raise RuntimeError(
-                    "OpenAIEmbedder requires the 'openai' package. "
-                    "Install with: pip install 'remi[openai]'"
-                ) from exc
-            self._client = AsyncOpenAI(api_key=self._api_key)
-        return self._client
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        client = self._get_client()
-        cleaned = [t[:8191] for t in texts]
-        _log.debug("embedding_batch", count=len(cleaned), model=self._model)
-        response = await client.embeddings.create(
-            input=cleaned,
-            model=self._model,
-            dimensions=self._dimensions,
-        )
-        return [item.embedding for item in response.data]
-
-    async def embed_one(self, text: str) -> list[float]:
-        results = await self.embed([text])
-        return results[0]
-
-    @property
-    def dimension(self) -> int:
-        return self._dimensions
-
-
-# ---------------------------------------------------------------------------
-# Noop (tests / offline dev)
-# ---------------------------------------------------------------------------
+_ADAPTERS: dict[str, tuple[str, str]] = {
+    "openai": ("remi.agent.vectors.adapters.openai_embedder", "OpenAIEmbedder"),
+}
 
 
 class NoopEmbedder(Embedder):
@@ -130,17 +69,16 @@ class NoopEmbedder(Embedder):
         return raw
 
 
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
-
-
 def build_embedder(cfg: EmbeddingsSettings, secrets: SecretsSettings) -> Embedder:
     """Select and construct an embedder from settings."""
     provider = cfg.provider.lower()
 
-    if provider == "openai" and secrets.openai_api_key:
-        return OpenAIEmbedder(
+    adapter = _ADAPTERS.get(provider)
+    if adapter is not None and secrets.openai_api_key:
+        module_path, class_name = adapter
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
+        return cls(
             model=cfg.model,
             api_key=secrets.openai_api_key,
             dimensions=cfg.dimensions,

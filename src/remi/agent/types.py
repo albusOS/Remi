@@ -175,24 +175,47 @@ class ToolRegistry(abc.ABC):
     ``ToolProvider`` implementations call ``register()`` at startup.
     The workflow engine and legacy paths consume ``get()`` /
     ``list_definitions()``.
+
+    Tools can be registered with a ``namespace`` to scope them to a
+    specific workspace. Tools without a namespace are global (kernel
+    tools like ``bash``, ``python``, ``memory_*``). Lookup methods
+    accept an optional ``namespace`` — when provided, both namespaced
+    and global tools are visible; when omitted, only global tools.
     """
 
     @abc.abstractmethod
-    def register(self, name: str, fn: ToolFn, definition: ToolDefinition) -> None: ...
+    def register(
+        self,
+        name: str,
+        fn: ToolFn,
+        definition: ToolDefinition,
+        *,
+        namespace: str = "",
+    ) -> None: ...
 
     @abc.abstractmethod
-    def get(self, name: str) -> tuple[ToolFn, ToolDefinition] | None: ...
+    def get(
+        self,
+        name: str,
+        *,
+        namespace: str = "",
+    ) -> tuple[ToolFn, ToolDefinition] | None: ...
 
     @abc.abstractmethod
-    def list_tools(self) -> list[ToolDefinition]: ...
+    def list_tools(self, *, namespace: str = "") -> list[ToolDefinition]: ...
 
     @abc.abstractmethod
-    def list_definitions(self, names: list[str] | None = None) -> list[ToolDefinition]:
-        """Return tool definitions, optionally filtered by name."""
+    def list_definitions(
+        self,
+        names: list[str] | None = None,
+        *,
+        namespace: str = "",
+    ) -> list[ToolDefinition]:
+        """Return tool definitions, optionally filtered by name and namespace."""
         ...
 
     @abc.abstractmethod
-    def has(self, name: str) -> bool: ...
+    def has(self, name: str, *, namespace: str = "") -> bool: ...
 
 
 class ToolCatalog(ToolRegistry):
@@ -211,6 +234,7 @@ class ToolCatalog(ToolRegistry):
         self,
         name: str,
         *,
+        namespace: str = "",
         agent_config: dict[str, Any] | None = None,
         agent_description: str | None = None,
         inject: dict[str, str] | None = None,
@@ -222,6 +246,10 @@ class ToolCatalog(ToolRegistry):
         ----------
         name:
             Registered tool name.
+        namespace:
+            Workspace tool namespace. When set, looks up namespaced tools
+            first, then falls back to global tools. When empty, only
+            global tools are visible.
         agent_config:
             Per-agent config dict merged into arguments before the base
             ``ToolFn``.  Comes from ``ToolRef.config``.
@@ -239,7 +267,7 @@ class ToolCatalog(ToolRegistry):
         ...
 
     @abc.abstractmethod
-    def list_names(self) -> list[str]: ...
+    def list_names(self, *, namespace: str = "") -> list[str]: ...
 
 
 class ToolProvider(abc.ABC):
@@ -248,7 +276,12 @@ class ToolProvider(abc.ABC):
     Each provider owns its dependencies — it receives them at construction
     time and registers tools with their closures fully bound.  The container
     builds providers, then calls ``register`` on each one.
+
+    Providers may pass a ``namespace`` to ``registry.register()`` to scope
+    their tools to a specific workspace. Kernel providers (bash, python,
+    memory) register globally (empty namespace). Domain providers
+    (ServiceM8, Xero, Hike POS) register under their workspace namespace.
     """
 
     @abc.abstractmethod
-    def register(self, registry: ToolRegistry) -> None: ...
+    def register(self, registry: ToolRegistry, *, namespace: str = "") -> None: ...

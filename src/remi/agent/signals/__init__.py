@@ -12,7 +12,6 @@ from remi.agent.signals.tbox import (
     ProcessDef,
     RelationshipDef,
     load_domain_yaml,
-    set_domain_yaml_path,
 )
 
 __all__ = [
@@ -23,5 +22,4 @@ __all__ = [
     "ProcessDef",
     "RelationshipDef",
     "load_domain_yaml",
-    "set_domain_yaml_path",
 ]

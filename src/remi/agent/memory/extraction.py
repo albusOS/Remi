@@ -17,7 +17,7 @@ import json
 
 import structlog
 
-from remi.agent.llm.types import LLMProvider, LLMRequest, Message
+from remi.agent.llm.types import LLMProvider, Message
 from remi.agent.memory.store import MemoryStore
 from remi.agent.memory.types import IMPORTANCE_TTL, Importance, MemoryNamespace
 
@@ -84,6 +84,7 @@ async def extract_episode(
     store: MemoryStore,
     provider: LLMProvider,
     *,
+    model: str,
     run_id: str = "",
     agent_name: str = "",
 ) -> int:
@@ -99,21 +100,21 @@ async def extract_episode(
     if len(conversation) < 100:
         return 0
 
-    request = LLMRequest(
-        model="",
-        messages=[
-            Message(role="system", content=_EXTRACTION_SYSTEM),
-            Message(
-                role="user",
-                content=f"Extract memories from this agent session:\n\n{conversation}",
-            ),
-        ],
-        temperature=0.2,
-        max_tokens=2048,
-    )
+    messages = [
+        Message(role="system", content=_EXTRACTION_SYSTEM),
+        Message(
+            role="user",
+            content=f"Extract memories from this agent session:\n\n{conversation}",
+        ),
+    ]
 
     try:
-        response = await provider.complete(request)
+        response = await provider.complete(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=2048,
+        )
     except Exception:
         logger.warning("episode_extraction_llm_failed", run_id=run_id, exc_info=True)
         return 0

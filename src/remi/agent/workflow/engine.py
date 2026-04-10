@@ -20,8 +20,7 @@ from typing import Any, Protocol
 
 import structlog
 
-from remi.agent.llm.factory import LLMProviderFactory
-from remi.agent.llm.types import ToolDefinition
+from remi.agent.llm.types import ProviderFactory, ToolDefinition
 from remi.agent.observe.usage import LLMUsageLedger
 from remi.agent.types import ToolRegistry
 from remi.agent.workflow.plan import build_execution_plan
@@ -37,6 +36,7 @@ from remi.agent.workflow.steps import (
 )
 from remi.agent.workflow.types import (
     AgentStepNode,
+    ContextMode,
     EventCallback,
     ForEachNode,
     GateNode,
@@ -78,9 +78,7 @@ def _route_port_data(
         if src_output is None:
             continue
         if isinstance(src_output, dict):
-            routed[binding.target_port] = src_output.get(
-                binding.source_port, src_output
-            )
+            routed[binding.target_port] = src_output.get(binding.source_port, src_output)
         else:
             routed[binding.target_port] = src_output
     return routed
@@ -124,7 +122,7 @@ class WorkflowRunner:
 
     def __init__(
         self,
-        provider_factory: LLMProviderFactory,
+        provider_factory: ProviderFactory,
         default_provider: str,
         default_model: str,
         tool_registry: ToolRegistry,
@@ -142,6 +140,20 @@ class WorkflowRunner:
         """Late-bind the agent executor (breaks the circular dep with AgentRuntime)."""
         self._agent_executor = executor
 
+    async def run_workflow(
+        self,
+        workflow_name: str,
+        workflow_input: str,
+        *,
+        context: dict[str, str] | None = None,
+        task_id: str | None = None,
+    ) -> "WorkflowResult":
+        """Load and run a workflow by name — satisfies ``WorkflowExecutor``."""
+        from remi.agent.workflow.loader import load_workflow
+
+        wf = load_workflow(workflow_name)
+        return await self.run(wf, workflow_input, context=context, task_id=task_id)
+
     async def run(
         self,
         workflow: WorkflowDef,
@@ -153,6 +165,7 @@ class WorkflowRunner:
         tool_execute: ToolExecuteFn | None = None,
         output_schemas: OutputSchemaRegistry | None = None,
         on_event: EventCallback | None = None,
+        task_id: str | None = None,
     ) -> WorkflowResult:
         """Execute the workflow and return accumulated results."""
         skip = skip_steps or set()
@@ -174,6 +187,7 @@ class WorkflowRunner:
 
         plan = build_execution_plan(workflow)
         semaphore = asyncio.Semaphore(defaults.max_concurrency)
+        accumulate = workflow.context_mode == ContextMode.ACCUMULATE
 
         step_outputs: dict[str, StepValue] = {}
         step_results: dict[str, StepResult] = {}
@@ -181,12 +195,25 @@ class WorkflowRunner:
         completion_events: dict[str, asyncio.Event] = {
             s.id: asyncio.Event() for s in workflow.steps
         }
+        pipeline_ctx: dict[str, Any] = {}
+        ctx_lock = asyncio.Lock()
+
+        if accumulate and workflow_input:
+            import json
+
+            try:
+                parsed = json.loads(workflow_input)
+                if isinstance(parsed, dict):
+                    pipeline_ctx.update(parsed)
+            except (ValueError, TypeError):
+                pass
 
         _log.info(
             "workflow_start",
             workflow=workflow.name,
             step_count=len(workflow.steps),
             wire_count=len(workflow.wires),
+            context_mode=workflow.context_mode.value,
             skipped=list(skip) if skip else [],
             max_concurrency=defaults.max_concurrency,
         )
@@ -235,9 +262,14 @@ class WorkflowRunner:
                     reason="gate",
                     gated_deps=sorted(dep for dep in required_deps if dep in gated_steps),
                 )
-                _emit(on_event, NodeSkipped(
-                    workflow=workflow.name, node_id=step_id, reason="gate",
-                ))
+                _emit(
+                    on_event,
+                    NodeSkipped(
+                        workflow=workflow.name,
+                        node_id=step_id,
+                        reason="gate",
+                    ),
+                )
                 completion_events[step_id].set()
                 return
 
@@ -251,13 +283,19 @@ class WorkflowRunner:
                     step=step_id,
                     reason="explicit",
                 )
-                _emit(on_event, NodeSkipped(
-                    workflow=workflow.name, node_id=step_id, reason="explicit",
-                ))
+                _emit(
+                    on_event,
+                    NodeSkipped(
+                        workflow=workflow.name,
+                        node_id=step_id,
+                        reason="explicit",
+                    ),
+                )
                 completion_events[step_id].set()
                 return
 
-            if node.when and not evaluate_condition(node.when, step_outputs):
+            cond_ctx = pipeline_ctx if accumulate else None
+            if node.when and not evaluate_condition(node.when, step_outputs, cond_ctx):
                 sr = StepResult(step_id=step_id, value={}, skipped=True)
                 step_results[step_id] = sr
                 step_outputs[step_id] = {}
@@ -268,9 +306,14 @@ class WorkflowRunner:
                     reason="when",
                     condition=node.when,
                 )
-                _emit(on_event, NodeSkipped(
-                    workflow=workflow.name, node_id=step_id, reason="when",
-                ))
+                _emit(
+                    on_event,
+                    NodeSkipped(
+                        workflow=workflow.name,
+                        node_id=step_id,
+                        reason="when",
+                    ),
+                )
                 completion_events[step_id].set()
                 return
 
@@ -280,6 +323,11 @@ class WorkflowRunner:
                 step_outputs,
             )
 
+            step_pipeline_ctx: dict[str, Any] | None = None
+            if accumulate:
+                async with ctx_lock:
+                    step_pipeline_ctx = dict(pipeline_ctx)
+
             async with semaphore:
                 _log.info(
                     "step_started",
@@ -287,9 +335,14 @@ class WorkflowRunner:
                     step=step_id,
                     kind=node.kind,
                 )
-                _emit(on_event, NodeStarted(
-                    workflow=workflow.name, node_id=step_id, kind=node.kind,
-                ))
+                _emit(
+                    on_event,
+                    NodeStarted(
+                        workflow=workflow.name,
+                        node_id=step_id,
+                        kind=node.kind,
+                    ),
+                )
                 sr = await _dispatch_with_retry(
                     node=node,
                     workflow_input=workflow_input,
@@ -306,10 +359,16 @@ class WorkflowRunner:
                     workflow_name=workflow.name,
                     on_event=on_event,
                     agent_executor=self._agent_executor,
+                    pipeline_ctx=step_pipeline_ctx,
+                    task_id=task_id,
                 )
 
             step_results[step_id] = sr
             step_outputs[step_id] = sr.value
+
+            if accumulate and isinstance(sr.value, dict):
+                async with ctx_lock:
+                    pipeline_ctx.update(sr.value)
 
             if sr.gated:
                 gated_steps.add(step_id)
@@ -323,9 +382,14 @@ class WorkflowRunner:
                 prompt_tokens=sr.usage.prompt_tokens,
                 completion_tokens=sr.usage.completion_tokens,
             )
-            _emit(on_event, NodeCompleted(
-                workflow=workflow.name, node_id=step_id, usage=sr.usage,
-            ))
+            _emit(
+                on_event,
+                NodeCompleted(
+                    workflow=workflow.name,
+                    node_id=step_id,
+                    usage=sr.usage,
+                ),
+            )
             completion_events[step_id].set()
 
         tasks = [asyncio.create_task(execute_step(s.id)) for s in workflow.steps]
@@ -341,9 +405,14 @@ class WorkflowRunner:
                     error=str(result),
                     exc_info=result,
                 )
-                _emit(on_event, NodeFailed(
-                    workflow=workflow.name, node_id=step_id, error=str(result),
-                ))
+                _emit(
+                    on_event,
+                    NodeFailed(
+                        workflow=workflow.name,
+                        node_id=step_id,
+                        error=str(result),
+                    ),
+                )
                 if not completion_events[step_id].is_set():
                     gated_steps.add(step_id)
                     step_outputs[step_id] = {}
@@ -380,7 +449,7 @@ async def _dispatch_with_retry(
     port_data: dict[str, Any],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
-    provider_factory: LLMProviderFactory,
+    provider_factory: ProviderFactory,
     usage_ledger: LLMUsageLedger | None,
     tool_definitions: list[ToolDefinition] | None,
     tool_execute: ToolExecuteFn | None,
@@ -389,6 +458,8 @@ async def _dispatch_with_retry(
     workflow_name: str,
     on_event: EventCallback | None,
     agent_executor: AgentStepExecutor | None = None,
+    pipeline_ctx: dict[str, Any] | None = None,
+    task_id: str | None = None,
 ) -> StepResult:
     """Dispatch a node with optional retry policy."""
     policy = node.retry
@@ -411,6 +482,8 @@ async def _dispatch_with_retry(
                 tool_registry=tool_registry,
                 workflow_name=workflow_name,
                 agent_executor=agent_executor,
+                pipeline_ctx=pipeline_ctx,
+                task_id=task_id,
             )
         except Exception as exc:
             if policy and attempt < max_attempts:
@@ -425,12 +498,15 @@ async def _dispatch_with_retry(
                     error=str(exc),
                     exc_info=True,
                 )
-                _emit(on_event, NodeRetrying(
-                    workflow=workflow_name,
-                    node_id=node.id,
-                    attempt=attempt,
-                    error=str(exc),
-                ))
+                _emit(
+                    on_event,
+                    NodeRetrying(
+                        workflow=workflow_name,
+                        node_id=node.id,
+                        attempt=attempt,
+                        error=str(exc),
+                    ),
+                )
                 if delay > 0:
                     await asyncio.sleep(delay)
                 continue
@@ -449,6 +525,7 @@ def _resolve_tools_for_step(
     tool_definitions: list[ToolDefinition] | None,
     tool_execute: ToolExecuteFn | None,
     tool_registry: ToolRegistry,
+    task_id: str | None = None,
 ) -> tuple[list[ToolDefinition], ToolExecuteFn]:
     """Resolve tool definitions and executor for an llm_tools step.
 
@@ -456,6 +533,9 @@ def _resolve_tools_for_step(
     step's declared tool names and use the caller's executor. Otherwise,
     auto-build both from the shared ``ToolRegistry`` using flat name
     lookups (workflow steps don't carry per-tool ``ToolRef`` config).
+
+    ``task_id`` is injected as ``_task_id`` into every tool call so that
+    tools like ``ask_human`` can suspend the correct supervisor task.
     """
     step_tool_names = list(node.tools)
 
@@ -469,12 +549,17 @@ def _resolve_tools_for_step(
     if step_tool_names and tool_registry is not None:
         resolved_defs = tool_registry.list_definitions(names=step_tool_names)
         if resolved_defs:
+            _task_id = task_id
+
             async def _registry_execute(name: str, arguments: dict[str, Any]) -> Any:
                 entry = tool_registry.get(name)
                 if entry is None:
                     return {"error": f"Tool '{name}' not found in registry"}
                 fn, _ = entry
-                return await fn(arguments)
+                merged = dict(arguments)
+                if _task_id:
+                    merged.setdefault("_task_id", _task_id)
+                return await fn(merged)
 
             return resolved_defs, _registry_execute
 
@@ -497,7 +582,7 @@ async def _dispatch_step(
     port_data: dict[str, Any],
     context: dict[str, str] | None,
     defaults: WorkflowDefaults,
-    provider_factory: LLMProviderFactory,
+    provider_factory: ProviderFactory,
     usage_ledger: LLMUsageLedger | None,
     tool_definitions: list[ToolDefinition] | None,
     tool_execute: ToolExecuteFn | None,
@@ -505,6 +590,8 @@ async def _dispatch_step(
     tool_registry: ToolRegistry,
     workflow_name: str,
     agent_executor: AgentStepExecutor | None = None,
+    pipeline_ctx: dict[str, Any] | None = None,
+    task_id: str | None = None,
 ) -> StepResult:
     """Route a node to its executor based on kind."""
 
@@ -523,7 +610,11 @@ async def _dispatch_step(
 
     if isinstance(node, LLMToolsNode):
         resolved_defs, resolved_execute = _resolve_tools_for_step(
-            node, tool_definitions, tool_execute, tool_registry,
+            node,
+            tool_definitions,
+            tool_execute,
+            tool_registry,
+            task_id=task_id,
         )
 
         return await run_llm_tools_step(
@@ -541,13 +632,16 @@ async def _dispatch_step(
         )
 
     if isinstance(node, TransformNode):
-        return await run_transform_step(node, step_outputs, tool_registry, port_data)
+        return await run_transform_step(
+            node, step_outputs, tool_registry, port_data, workflow_input,
+            pipeline_ctx=pipeline_ctx,
+        )
 
     if isinstance(node, ForEachNode):
         return await run_for_each_step(node, step_outputs, tool_registry)
 
     if isinstance(node, GateNode):
-        return await run_gate_step(node, step_outputs)
+        return await run_gate_step(node, step_outputs, pipeline_ctx=pipeline_ctx)
 
     if isinstance(node, AgentStepNode):
         return await _run_agent_step(node, workflow_input, step_outputs, agent_executor)

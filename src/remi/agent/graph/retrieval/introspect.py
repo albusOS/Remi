@@ -232,5 +232,3 @@ def _links_for_type(type_name: str, link_defs: list[LinkTypeDef]) -> list[str]:
         elif link.target_type == type_name and link.source_type != "*":
             results.append(f"{link.source_type} -[{link.name}]-> {type_name}")
     return results
-
-

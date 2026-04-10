@@ -24,7 +24,7 @@ import json
 
 import structlog
 
-from remi.agent.llm.types import LLMProvider, LLMRequest, Message
+from remi.agent.llm.types import LLMProvider, Message
 
 logger = structlog.get_logger(__name__)
 
@@ -134,6 +134,8 @@ async def summarize_old_exchanges(
     thread: list[Message],
     provider: LLMProvider,
     context_budget: int,
+    *,
+    model: str,
 ) -> list[Message]:
     """Replace old exchanges with LLM-generated summaries.
 
@@ -153,24 +155,22 @@ async def summarize_old_exchanges(
         if not text.strip():
             continue
 
-        request = LLMRequest(
-            model="",
-            messages=[
-                Message(role="system", content=_SUMMARIZE_SYSTEM),
-                Message(role="user", content=text[:8000]),
-            ],
-            temperature=0.1,
-            max_tokens=512,
-        )
-
         try:
-            response = await provider.complete(request)
+            response = await provider.complete(
+                model=model,
+                messages=[
+                    Message(role="system", content=_SUMMARIZE_SYSTEM),
+                    Message(role="user", content=text[:8000]),
+                ],
+                temperature=0.1,
+                max_tokens=512,
+            )
             summary = (response.content or "").strip()
             if summary:
                 summaries.append(summary)
         except Exception:
             logger.warning("compaction_summarize_failed", batch=i, exc_info=True)
-            summaries.append(f"[Earlier exchanges {i+1}-{i+len(batch)} — summary unavailable]")
+            summaries.append(f"[Earlier exchanges {i + 1}-{i + len(batch)} — summary unavailable]")
 
     summary_msgs = [
         Message(
@@ -197,6 +197,8 @@ async def compact_thread(
     thread: list[Message],
     provider: LLMProvider,
     context_budget: int,
+    *,
+    model: str,
 ) -> list[Message]:
     """Aggressively compact the thread into a single session briefing.
 
@@ -212,18 +214,16 @@ async def compact_thread(
     if not text.strip():
         return thread
 
-    request = LLMRequest(
-        model="",
-        messages=[
-            Message(role="system", content=_COMPACT_SYSTEM),
-            Message(role="user", content=text[:12000]),
-        ],
-        temperature=0.1,
-        max_tokens=768,
-    )
-
     try:
-        response = await provider.complete(request)
+        response = await provider.complete(
+            model=model,
+            messages=[
+                Message(role="system", content=_COMPACT_SYSTEM),
+                Message(role="user", content=text[:12000]),
+            ],
+            temperature=0.1,
+            max_tokens=768,
+        )
         briefing = (response.content or "").strip()
     except Exception:
         logger.warning("compaction_compact_failed", exc_info=True)

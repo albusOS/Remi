@@ -57,7 +57,7 @@ export function TrendsTab({ managerId }: { managerId: string }) {
   const occupancy = data?.occupancy;
   const rent = data?.rent;
 
-  const noData = !delinquency?.periods.length && !occupancy?.periods.length && !rent?.periods.length;
+  const noData = !delinquency?.periods?.length && !occupancy?.periods?.length && !rent?.periods?.length;
 
   if (noData) {
     return (
@@ -89,9 +89,9 @@ export function TrendsTab({ managerId }: { managerId: string }) {
     median_rent: p.median_rent,
   }));
 
-  const latestDeliq = delinquency?.periods.at(-1);
-  const latestOcc = occupancy?.periods.at(-1);
-  const latestRent = rent?.periods.at(-1);
+  const latestDeliq = delinquency?.periods?.at(-1);
+  const latestOcc = occupancy?.periods?.at(-1);
+  const latestRent = rent?.periods?.at(-1);
 
   return (
     <div className="space-y-6">

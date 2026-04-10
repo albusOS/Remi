@@ -6,7 +6,7 @@ import asyncio
 
 import typer
 
-from remi.shell.cli.output import emit_error, emit_success
+from remi.application.cli_output import emit_error, emit_success
 
 cli_group = typer.Typer(
     name="portfolio",
@@ -48,7 +48,7 @@ def managers(
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.manager_resolver.list_managers())
+    result = _run(c.manager_resolver.list_manager_summaries())
     if as_json:
         emit_success(
             [m.model_dump(mode="json") for m in result],
@@ -77,12 +77,12 @@ def properties(
     result = _run(c.property_resolver.list_properties(manager_id=manager_id))
     if as_json:
         emit_success(
-            [p.model_dump(mode="json") for p in result.items],
+            [p.model_dump(mode="json") for p in result],
             command="remi portfolio properties",
         )
         return
-    for p in result.items:
-        typer.echo(f"  {p.name:<40} {p.unit_count} units")
+    for p in result:
+        typer.echo(f"  {p.name:<40} {p.total_units} units")
 
 
 @cli_group.command(name="rent-roll")
@@ -100,7 +100,7 @@ def rent_roll(
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.rent_roll_resolver.get_rent_roll(property_id))
+    result = _run(c.rent_roll_resolver.build_rent_roll(property_id))
     if as_json:
         emit_success(result.model_dump(mode="json"), command="remi portfolio rent-roll")
         return
@@ -134,26 +134,32 @@ def manager_review(
     result = {"summary": summary.model_dump(mode="json")}
 
     if summary.total_delinquent_balance > 0:
-        board = _run(c.dashboard_resolver.delinquency_board(manager_id=manager_id))
+        board = _run(c.delinquency_resolver.delinquency_board(manager_id=manager_id))
         result["delinquency"] = board.model_dump(mode="json")
 
     if summary.metrics.expiring_leases_90d > 0:
-        cal = _run(c.dashboard_resolver.lease_expiration_calendar(
-            days=90, manager_id=manager_id,
-        ))
+        cal = _run(
+            c.lease_resolver.expiring_leases(
+                days=90,
+                manager_id=manager_id,
+            )
+        )
         result["lease_expirations"] = cal.model_dump(mode="json")
 
     if summary.metrics.vacant > 0:
-        vac = _run(c.dashboard_resolver.vacancy_tracker(manager_id=manager_id))
+        vac = _run(c.vacancy_resolver.vacancy_tracker(manager_id=manager_id))
         result["vacancies"] = vac.model_dump(mode="json")
 
     action_items = _run(c.property_store.list_action_items(manager_id=manager_id))
     if action_items:
         result["action_items"] = [ai.model_dump(mode="json") for ai in action_items]
 
-    notes = _run(c.property_store.list_notes(
-        entity_type="PropertyManager", entity_id=manager_id,
-    ))
+    notes = _run(
+        c.property_store.list_notes(
+            entity_type="PropertyManager",
+            entity_id=manager_id,
+        )
+    )
     if notes:
         result["notes"] = [n.model_dump(mode="json") for n in notes]
 
@@ -170,19 +176,27 @@ def rankings(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/managers/rankings", {
-            "sort_by": sort_by,
-            "ascending": str(ascending).lower(),
-            "limit": limit,
-        })
+        data = get(
+            "/managers/rankings",
+            {
+                "sort_by": sort_by,
+                "ascending": str(ascending).lower(),
+                "limit": limit,
+            },
+        )
         emit_success(data.get("rankings", data), command="remi portfolio rankings")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.manager_resolver.rank_managers(
-        sort_by=sort_by,
-        ascending=ascending,
-        limit=limit,
-    ))
-    emit_success(result.model_dump(mode="json"), command="remi portfolio rankings")
+    result = _run(
+        c.manager_resolver.rank_managers(
+            sort_by=sort_by,
+            ascending=ascending,
+            limit=limit,
+        )
+    )
+    emit_success(
+        [r.model_dump(mode="json") for r in result],
+        command="remi portfolio rankings",
+    )

@@ -32,6 +32,12 @@ class OwnerType(StrEnum):
     OTHER = "other"
 
 
+class PropertyStatus(StrEnum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DEACTIVATED = "deactivated"
+
+
 class PropertyType(StrEnum):
     SINGLE_FAMILY = "single_family"
     MULTI_FAMILY = "multi_family"

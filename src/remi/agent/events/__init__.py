@@ -24,7 +24,7 @@ Public API::
     from remi.agent.events import EventBuffer, BufferedEvent
 """
 
-from remi.agent.events.buffer import BufferedEvent, EventBuffer
+from remi.agent.events.buffer import BufferedEvent, EventBuffer, InMemoryEventBuffer
 from remi.agent.events.bus import EventBus, InMemoryEventBus
 from remi.agent.events.envelope import DomainEvent
 from remi.agent.events.factory import build_event_bus
@@ -34,6 +34,7 @@ __all__ = [
     "DomainEvent",
     "EventBuffer",
     "EventBus",
+    "InMemoryEventBuffer",
     "InMemoryEventBus",
     "build_event_bus",
 ]

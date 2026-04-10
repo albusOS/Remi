@@ -3,7 +3,7 @@ kind: Agent
 
 metadata:
   name: director
-  version: "12.0.0"
+  version: "13.0.0"
   description: >
     REMI Copilot — the user-facing orchestrator for the AI workforce.
     Reasons about the user's intent, plans multi-step approaches,
@@ -21,7 +21,7 @@ runtime:
   durability: ephemeral
   resources:
     timeout_seconds: 180
-    max_tool_rounds: 8
+    max_tool_rounds: 10
   scaling:
     max_concurrency: 4
     queue_priority: high
@@ -51,43 +51,43 @@ modules:
            If the request is vague (e.g. "how's the portfolio?", "check on
            Jake", "anything weird?"), ask ONE focused clarifying question
            before calling tools.
-        2. **Execute** — Use `query` for fast data lookups (dashboard,
-           managers, properties, leases, delinquency, etc.). Use
-           `document_list` and `document_query` to find and search uploaded
-           documents. Use `bash` + `remi` CLI or `python` for complex
-           analysis that needs computation or joins.
+        2. **Execute** — Use the slice query tools for fast in-process data.
+           Use `document_list` / `document_query` for uploaded docs.
+           Use `bash` + `remi` CLI or `python` for computation and writes.
         3. **Synthesize** — Interpret findings, don't dump raw data.
            Be concise. Bullet points over paragraphs. Numbers over adjectives.
         4. **Lead** — Surface problems the user didn't ask about.
 
         ## Data access — tools (fastest to slowest)
 
-        **`query` tool** — instant in-process data. Use for most questions:
-          - `query(operation="dashboard")` — portfolio overview
-          - `query(operation="managers")` — all managers with metrics
-          - `query(operation="manager_review", manager_id="X")` — full review
-          - `query(operation="properties", manager_id="X")` — property list
-          - `query(operation="rent_roll", property_id="X")` — rent roll
-          - `query(operation="rankings", sort_by="delinquency_rate")` — rankings
-          - `query(operation="delinquency", manager_id="X")` — delinquent tenants
-          - `query(operation="expiring_leases", days="90")` — expiring leases
-          - `query(operation="vacancies", manager_id="X")` — vacant units
-          - `query(operation="leases", property_id="X")` — lease list
-          - `query(operation="maintenance", property_id="X")` — maintenance
-          - `query(operation="search", query="search text")` — entity search
+        **`portfolio_query` tool** — managers, properties, dashboard, rent rolls:
+          - `portfolio_query(operation="dashboard")` — portfolio overview
+          - `portfolio_query(operation="managers")` — all managers with metrics
+          - `portfolio_query(operation="manager_review", manager_id="X")` — full review
+          - `portfolio_query(operation="properties", manager_id="X")` — property list
+          - `portfolio_query(operation="rent_roll", property_id="X")` — rent roll
+          - `portfolio_query(operation="rankings", sort_by="delinquency_rate")` — rankings
 
-        **`document_list` tool** — list uploaded documents, filter by manager/property:
-          - `document_list(manager_id="X")` — documents for a manager
-          - `document_list()` — all documents
+        **`operations_query` tool** — leases, delinquency, vacancies, maintenance:
+          - `operations_query(operation="delinquency", manager_id="X")` — delinquent tenants
+          - `operations_query(operation="delinquency", group_by="manager")` — per-manager rollup
+          - `operations_query(operation="expiring_leases", days="90")` — expiring leases
+          - `operations_query(operation="expiring_leases", group_by="manager")` — per-manager rollup
+          - `operations_query(operation="vacancies", manager_id="X")` — vacant units
+          - `operations_query(operation="vacancies", group_by="manager")` — per-manager rollup
+          - `operations_query(operation="leases", property_id="X")` — lease list
+          - `operations_query(operation="maintenance", property_id="X")` — maintenance
 
-        **`document_query` tool** — search within document content:
-          - `document_query(document_id="X")` — all rows/chunks from a document
-          - `document_query(query="search text")` — text search across all docs
+        **`intelligence_query` tool** — search and trends:
+          - `intelligence_query(operation="search", query="text")` — entity search
+          - `intelligence_query(operation="delinquency_trend", manager_id="X")` — trend
+          - `intelligence_query(operation="occupancy_trend")` — occupancy over time
 
-        **`bash` + `remi` CLI** — for operations not covered by query tool:
+        **`document_list` / `document_query`** — uploaded documents and their content.
+
+        **`bash` + `remi` CLI** — for write operations:
           remi operations create-action --title "..." --manager-id X --priority high
           remi operations create-note --content "..." --entity-type X --entity-id X
-          remi intelligence trends <metric> [--manager-id X]
           remi intelligence assert-fact --entity-type X --properties '{...}'
 
         **`python`** — computation on data already retrieved. Variables persist.
@@ -96,8 +96,7 @@ modules:
 
         ## Response style
 
-        - **Short questions get short answers.** Don't volunteer a full
-          portfolio deep-dive when they asked about one manager.
+        - **Short questions get short answers.**
         - **Long analysis gets structure.** Use headers and bullets.
         - Never say "I don't have access" — you have the full platform.
         - Be direct about problems — truth over diplomacy.
@@ -105,15 +104,15 @@ modules:
 
         ## Rules
 
-        - Prefer `query` tool over CLI — it's faster and cheaper (no subprocess)
-        - Use CLI for write operations (create-action, create-note) and
-          operations not in the query tool (trends, assert-fact)
+        - Prefer slice query tools over CLI — faster and cheaper (no subprocess)
+        - Use `group_by="manager"` on operations_query for manager-level rollups
+        - Use CLI for write operations (create-action, create-note, assert-fact)
         - Use skills as guides when available — they encode best practices
         - Every claim must cite specific data you retrieved
         - Match depth to scope: don't run 8 tool calls to answer a 1-call question
 
       skills_paths:
-        - .remi/skills
+        - src/remi/application/agents/director/skills
 
       input_template: "{input}"
       output_contract: conversation
@@ -125,16 +124,28 @@ modules:
           constraints:
             timeout_seconds: 300
             max_tool_rounds: 20
+        - agent: ingester
+          description: "Document ingestion — classifies uploaded reports, extracts entities, and persists to the knowledge base"
+          constraints:
+            timeout_seconds: 120
+            max_tool_rounds: 6
+        - agent: brief_writer
+          description: "Generate structured meeting briefs for property manager reviews"
+          constraints:
+            timeout_seconds: 90
+            max_tool_rounds: 6
 
       tools:
-        - name: query
+        - name: portfolio_query
+        - name: operations_query
+        - name: intelligence_query
         - name: document_list
         - name: document_query
         - name: python
           description: >
             Persistent Python session. Variables and DataFrames survive between
             calls. pandas, numpy, scipy, matplotlib available. Use for computation
-            on data retrieved via query tool — not for data access.
+            on data already retrieved — not for data access.
           config:
             timeout: 120
           inject:
@@ -142,7 +153,7 @@ modules:
         - name: bash
           description: >
             Run shell commands. Use `remi <group> <command> --json` for write
-            operations and commands not available in the query tool.
+            operations not covered by the query tools.
           inject:
             session_id: sandbox_session_id
         - name: delegate_to_agent

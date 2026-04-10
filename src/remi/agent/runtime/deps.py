@@ -1,14 +1,13 @@
 """Runtime context — typed execution environment passed to modules."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from remi.agent.context.builder import ContextBuilder
-from remi.agent.memory import MemoryStore
-from remi.agent.memory.recall import MemoryRecallService
-from remi.agent.llm.factory import LLMProviderFactory
+from remi.agent.isolation import WorkspaceContext
+from remi.agent.llm.types import ProviderFactory
+from remi.agent.memory.store import MemoryStore
+from remi.agent.memory.types import RecallService
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
 from remi.agent.signals import DomainTBox
@@ -25,12 +24,12 @@ class OnEventCallback(Protocol):
 class RunDeps:
     """Typed dependencies injected once per container lifetime."""
 
-    provider_factory: LLMProviderFactory | None = None
+    provider_factory: ProviderFactory | None = None
     tool_registry: ToolRegistry | None = None
     tracer: Tracer | None = None
     usage_ledger: LLMUsageLedger | None = None
     memory_store: MemoryStore | None = None
-    recall_service: MemoryRecallService | None = None
+    recall_service: RecallService | None = None
     domain_tbox: DomainTBox | None = None
     context_builder: ContextBuilder | None = None
     default_provider: str = ""
@@ -64,6 +63,9 @@ class ScopeContext:
     tool_scope: dict[str, str] = field(default_factory=dict)
 
 
+_DEFAULT_WORKSPACE_CTX = WorkspaceContext()
+
+
 @dataclass(frozen=True)
 class RuntimeContext:
     """Immutable execution context threaded through agent runs.
@@ -71,33 +73,37 @@ class RuntimeContext:
     ``deps`` carries typed container-lifetime dependencies.
     ``params`` carries typed per-request parameters.
     ``scope`` carries domain-supplied focus context (typed).
+    ``workspace`` carries the workspace isolation context — scopes memory,
+    tools, credentials, and delegation boundaries.
     ``extras`` remains as a narrow escape hatch for dynamic/experimental data.
 
-    ``workspace_id`` is a forward-compatible field for multi-tenancy.
-    Currently all runs use ``"default"``. When multi-workspace support
-    arrives, this field will scope memory, store access, and CLI commands
-    to a specific tenant. It is threaded through now so the runtime
-    signature does not change later.
+    ``workspace_id`` is derived from ``workspace.workspace_id`` for
+    backward compatibility with code that reads it directly.
     """
 
     app_id: str = "remi"
     run_id: str = ""
-    workspace_id: str = "default"
     environment: str = "development"
     deps: RunDeps = field(default_factory=RunDeps)
     params: RunParams = field(default_factory=RunParams)
     scope: ScopeContext = field(default_factory=ScopeContext)
+    workspace: WorkspaceContext = field(default_factory=WorkspaceContext)
     extras: dict[str, Any] = field(default_factory=dict)
 
-    def with_extras(self, **kwargs: Any) -> RuntimeContext:
+    @property
+    def workspace_id(self) -> str:
+        """Backward-compatible accessor for the workspace id."""
+        return str(self.workspace.workspace_id)
+
+    def with_extras(self, **kwargs: Any) -> Self:
         merged = {**self.extras, **kwargs}
         return RuntimeContext(
             app_id=self.app_id,
             run_id=self.run_id,
-            workspace_id=self.workspace_id,
             environment=self.environment,
             deps=self.deps,
             params=self.params,
             scope=self.scope,
+            workspace=self.workspace,
             extras=merged,
         )

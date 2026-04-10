@@ -1,0 +1,154 @@
+apiVersion: remi/v1
+kind: Workflow
+
+metadata:
+  name: ingester
+  version: "3.0.0"
+  description: >
+    Document ingestion pipeline — deterministic steps enforced by the
+    workflow engine with a single LLM node for unknown column mappings.
+    Uses context_mode: accumulate so each step's output merges into a
+    shared pipeline context. One optional wire handles the LLM/gate
+    dependency without cascade-gating.
+  tags: [ingestion, extraction, internal]
+  domain: real-estate
+  audience: system
+  chat: false
+
+runtime:
+  placement: worker
+  isolation: none
+  durability: ephemeral
+  resources:
+    timeout_seconds: 180
+    max_tokens: 30000
+  scaling:
+    max_concurrency: 4
+    queue_priority: normal
+
+defaults:
+  provider: anthropic
+  model: claude-haiku-4-20250414
+  max_concurrency: 1
+
+context_mode: accumulate
+
+# -----------------------------------------------------------------------
+# Pipeline steps — the engine enforces ordering via depends_on. Each
+# transform step receives the full accumulated context dict as its args.
+# context_mode: accumulate merges each step's dict output back into the
+# shared context for all downstream steps.
+# -----------------------------------------------------------------------
+
+steps:
+  # 1. Analyze: read document structure, resolve manager from metadata
+  - id: analyze
+    kind: transform
+    tool: ingest_analyze
+
+  # 2. Format lookup: check if we already know this column layout
+  - id: format_lookup
+    kind: transform
+    tool: ingest_format_lookup
+    depends_on: [analyze]
+
+  # 3. Gate: did the format registry miss? If so, we need the LLM.
+  - id: format_miss_gate
+    kind: gate
+    condition: not context.match
+    depends_on: [format_lookup]
+
+  # 4. LLM classification: only runs on format miss.
+  #    Narrow scope — determine report_type, primary_entity_type, and
+  #    build a column_map from the sample rows.
+  - id: classify_and_map
+    kind: llm_tools
+    depends_on: [format_miss_gate]
+    temperature: 0.0
+    max_tokens: 4096
+    max_tool_rounds: 4
+    tools: ingest_analyze, ingest_preview
+    system_prompt: |
+      You are a column-mapping specialist for property management reports.
+      You receive a document that the format registry could not match.
+
+      Your ONLY job: determine report_type, primary_entity_type, and build a column_map.
+
+      ## Available information
+
+      The document has already been analyzed. Here is the analysis:
+      {steps.analyze}
+
+      ## Column mapping rules
+
+        - Property address → "property_address"
+        - Unit / apartment number → "unit_number"
+        - Resident / tenant name → "tenant_name"
+        - Site manager name (directories) → "name"
+        - Beds/baths combined ("BD/BA", "Bed/Bath", "BD / BA") → "_bd_ba"
+        - Unit count → "_unit_count"
+        - Tags (AppFolio) → "_manager_tag"
+        - Lease start / "Lease From" → "start_date"
+        - Lease end / "Lease To" / "Lease Expires" → "end_date" or "lease_expires"
+        - Monthly rent / current rent → "monthly_rent"
+        - Balance owed / amount receivable → "balance_total"
+        - 0–30 day bucket → "balance_0_30"
+        - 30+ day bucket → "balance_30_plus"
+        - Last payment date → "last_payment_date"
+        - Unknown columns → "_<lower_snake_of_header>"
+
+      ## Entity types
+
+        - Rent roll / occupancy / vacancy → "Unit"
+        - Delinquency / balance aging → "BalanceObservation"
+        - Lease expiration calendar → "Lease"
+        - Work orders / maintenance → "MaintenanceRequest"
+        - Property directory (manager→property) → "PropertyManager"
+        - Owner directory → "Owner"
+        - Vendor directory → "Vendor"
+
+      ## Output
+
+      After building your column_map, call ingest_preview to validate it.
+      If accepted_rows is 0, revise and retry once.
+
+      When done, respond with ONLY a JSON object (no markdown fences):
+      {"report_type": "...", "primary_entity_type": "...", "column_map": {...}, "platform": "appfolio"}
+    input_template: >
+      Classify this document and build a column_map.
+      Document ID: {steps.analyze.document_id}
+      Columns: {steps.analyze.columns}
+      Sample rows: {steps.analyze.sample_rows}
+    response_format: json
+
+  # 5. Resolve: batch-resolve addresses and manager tags against the store.
+  - id: resolve
+    kind: transform
+    tool: ingest_resolve
+    depends_on: [format_lookup]
+
+  # 6. Run: execute the deterministic map/validate/persist pipeline.
+  #    Waits for resolve (always) and classify_and_map (optional — only
+  #    ran on format miss). The optional wire prevents cascade-gating.
+  - id: run
+    kind: transform
+    tool: ingest_run
+    depends_on: [resolve]
+
+  # 7. Save format: record the mapping for next time (only on format miss)
+  - id: save_format
+    kind: transform
+    tool: ingest_format_save
+    depends_on: [run]
+    when: not context.match
+
+  # 8. Finalize: update document record and publish completion event
+  - id: finalize
+    kind: transform
+    tool: ingest_finalize
+    depends_on: [run]
+
+# One optional wire: run waits for classify_and_map when it executes,
+# but doesn't cascade-gate when the format was a hit.
+wires:
+  - {source: classify_and_map.column_map, target: run.column_map, optional: true}

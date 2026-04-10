@@ -18,9 +18,10 @@ import structlog
 import yaml
 
 from remi.agent.context.builder import ContextBuilder
-from remi.agent.llm.factory import LLMProviderFactory
-from remi.agent.memory import MemoryStore
-from remi.agent.memory.recall import MemoryRecallService
+from remi.agent.isolation import WorkspaceContext
+from remi.agent.llm.types import ProviderFactory
+from remi.agent.memory.store import MemoryStore
+from remi.agent.memory.types import RecallService
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
 from remi.agent.runtime.base import ModuleOutput
@@ -30,10 +31,10 @@ from remi.agent.runtime.node import AgentNode
 from remi.agent.runtime.retry import RetryPolicy
 from remi.agent.runtime.sessions import AgentSessions
 from remi.agent.sandbox.types import Sandbox
-from remi.agent.signals import DomainTBox
-from remi.agent.types import ChatSessionStore
+from remi.agent.signals import DomainSchema, DomainTBox
+from remi.agent.types import ChatSessionStore, ToolRegistry
 from remi.agent.types import Message as ChatMessage
-from remi.agent.types import ToolRegistry
+from remi.agent.workflow.loader import load_manifest_runtime
 from remi.agent.workflow.registry import get_manifest_path
 from remi.types.errors import SessionNotFoundError
 from remi.types.ids import new_run_id
@@ -59,24 +60,24 @@ class AgentRuntime:
 
     def __init__(
         self,
-        provider_factory: LLMProviderFactory,
+        provider_factory: ProviderFactory,
         tool_registry: ToolRegistry,
         sandbox: Sandbox,
-        domain_tbox: DomainTBox,
         memory_store: MemoryStore,
         tracer: Tracer,
         chat_session_store: ChatSessionStore,
         retry_policy: RetryPolicy,
         default_provider: str,
         default_model: str,
+        domain_tbox: DomainTBox | None = None,
         context_builder: ContextBuilder | None = None,
         usage_ledger: LLMUsageLedger | None = None,
-        recall_service: MemoryRecallService | None = None,
+        recall_service: RecallService | None = None,
     ) -> None:
         self._provider_factory = provider_factory
         self._tool_registry = tool_registry
         self._sandbox = sandbox
-        self._domain_tbox = domain_tbox
+        self._domain_tbox = domain_tbox or DomainSchema()
         self._memory_store = memory_store
         self._tracer = tracer
         self._retry = retry_policy
@@ -88,10 +89,16 @@ class AgentRuntime:
 
         self.sessions = AgentSessions(chat_session_store)
 
+    def set_context_builder(self, builder: ContextBuilder) -> None:
+        """Replace the context builder after construction.
+
+        Products call this to inject a richer context builder that
+        includes a domain-specific world model, profile fields, etc.
+        """
+        self._context_builder = builder
+
     def get_runtime_config(self, agent_name: str) -> RuntimeConfig:
         """Return the ``RuntimeConfig`` for a registered agent manifest."""
-        from remi.agent.workflow.loader import load_manifest_runtime
-
         return load_manifest_runtime(agent_name)
 
     # -- Public API --------------------------------------------------------
@@ -103,20 +110,42 @@ class AgentRuntime:
         *,
         session_id: str | None = None,
         on_event: EventCallback | None = None,
-        manager_id: str | None = None,
+        scope: ScopeContext | None = None,
+        mode: str = "agent",
+        task_id: str | None = None,
     ) -> tuple[str | None, str]:
         """Run an agent. Returns ``(answer, run_id)``.
 
         Session-aware calls go through the multi-turn chat path.
         Everything else goes through the single-shot agent loop.
+
+        ``scope`` carries domain-supplied focus context (e.g. which manager
+        the user has selected). It is injected as a system message and
+        propagated into tool inject values so the LLM stays oriented.
+
+        ``mode`` is forwarded to ``run_chat_agent`` so that delegated
+        tasks (which always pass ``mode="agent"``) match the protocol
+        declared by ``AgentExecutor``.
+
+        ``task_id`` is the supervisor task ID for this run. When set it
+        is injected into the tool context so that ``ask_human`` can
+        suspend the correct task.
         """
         if session_id is not None:
             return await self._ask_session(
-                session_id, question, on_event=on_event,
+                session_id,
+                question,
+                on_event=on_event,
+                scope=scope,
             )
 
         return await self._ask_agent(
-            agent_name, question, on_event=on_event,
+            agent_name,
+            question,
+            on_event=on_event,
+            mode=mode,
+            scope=scope,
+            task_id=task_id,
         )
 
     async def run_chat_agent(
@@ -185,6 +214,9 @@ class AgentRuntime:
         question: str,
         *,
         on_event: EventCallback | None,
+        mode: str = "agent",
+        scope: ScopeContext | None = None,
+        task_id: str | None = None,
     ) -> tuple[str | None, str]:
         """Single-shot agent loop with sandbox and tools."""
         run_id = new_run_id()
@@ -194,8 +226,9 @@ class AgentRuntime:
         sandbox_sid = f"ask-{run_id}"
         await self._ensure_sandbox_session(sandbox_sid)
 
-        params = RunParams(mode="agent", sandbox_session_id=sandbox_sid, on_event=on_event)
-        ctx = self._build_context(run_id=run_id, params=params)
+        params = RunParams(mode=mode, sandbox_session_id=sandbox_sid, on_event=on_event)
+        extra = {"task_id": task_id} if task_id else None
+        ctx = self._build_context(run_id=run_id, params=params, scope=scope, extra=extra)
 
         try:
             config_dict, _runtime_cfg = self._load_agent_config(agent_name)
@@ -220,6 +253,7 @@ class AgentRuntime:
         question: str,
         *,
         on_event: EventCallback | None,
+        scope: ScopeContext | None = None,
     ) -> tuple[str | None, str]:
         """Session-aware multi-turn — always uses the agent loop."""
         session = await self.sessions.get(session_id)
@@ -240,6 +274,7 @@ class AgentRuntime:
             sandbox_session_id=session.sandbox_session_id,
             provider=session.provider,
             model=session.model,
+            scope=scope,
         )
 
         await self.sessions.append_message(
@@ -259,8 +294,6 @@ class AgentRuntime:
         app_path = get_manifest_path(agent_name)
         if not app_path.exists():
             raise ValueError(f"Unknown agent: {agent_name!r} (looked in {app_path})")
-        from remi.agent.workflow.loader import load_manifest_runtime
-
         runtime_cfg = load_manifest_runtime(agent_name, manifest_path=app_path)
         with open(app_path) as f:
             data: dict[str, Any] = yaml.safe_load(f)
@@ -293,12 +326,21 @@ class AgentRuntime:
         merged_extras = {"sandbox": self._sandbox}
         if extra:
             merged_extras.update(extra)
+
+        workspace = merged_extras.pop("workspace_context", None)
+        if workspace is not None and not isinstance(workspace, WorkspaceContext):
+            workspace = None
+        if workspace is None:
+            workspace = WorkspaceContext()
+        merged_extras["workspace_context"] = workspace
+
         return RuntimeContext(
             app_id="remi",
             run_id=run_id or new_run_id(),
             deps=deps,
             params=params or RunParams(),
             scope=scope or ScopeContext(),
+            workspace=workspace,
             extras=merged_extras,
         )
 

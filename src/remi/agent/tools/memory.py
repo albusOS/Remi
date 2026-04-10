@@ -18,8 +18,7 @@ from remi.agent.memory import Importance, MemoryNamespace, MemoryStore
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 
 _NAMESPACE_HINT = (
-    f"One of: {', '.join(ns.value for ns in MemoryNamespace)}. "
-    "Defaults to 'episodic'."
+    f"One of: {', '.join(ns.value for ns in MemoryNamespace)}. Defaults to 'episodic'."
 )
 
 
@@ -80,12 +79,18 @@ class MemoryToolProvider(ToolProvider):
                 args=[
                     ToolArg(
                         name="key",
-                        description="Short identifier for this memory (e.g. 'oak-st-manager-correction')",
+                        description=(
+                            "Short identifier for this memory"
+                            " (e.g. 'oak-st-manager-correction')"
+                        ),
                         required=True,
                     ),
                     ToolArg(
                         name="content",
-                        description="The information to remember — be specific and include conclusions",
+                        description=(
+                            "The information to remember"
+                            " — be specific and include conclusions"
+                        ),
                         required=True,
                     ),
                     ToolArg(name="namespace", description=_NAMESPACE_HINT),
@@ -164,7 +169,10 @@ class MemoryToolProvider(ToolProvider):
                 args=[
                     ToolArg(
                         name="query",
-                        description="Text search query (e.g. 'delinquent properties' or 'manager corrections')",
+                        description=(
+                            "Text search query (e.g. 'delinquent"
+                            " properties' or 'manager corrections')"
+                        ),
                     ),
                     ToolArg(name="namespace", description=_NAMESPACE_HINT),
                     ToolArg(

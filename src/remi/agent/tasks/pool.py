@@ -97,10 +97,12 @@ class LocalTaskPool(TaskPool):
                 agent=task.spec.agent_name,
                 timeout=task.spec.constraints.timeout_seconds,
             )
-            task.mark_failed(TaskResult.failure(
-                f"Task timed out after {task.spec.constraints.timeout_seconds}s",
-                run_id=task.id,
-            ))
+            task.mark_failed(
+                TaskResult.failure(
+                    f"Task timed out after {task.spec.constraints.timeout_seconds}s",
+                    run_id=task.id,
+                )
+            )
         except asyncio.CancelledError:
             task.mark_cancelled()
         except Exception as exc:

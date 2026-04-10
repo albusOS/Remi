@@ -1,4 +1,4 @@
-"""Sandbox execution ports — ABC and result types.
+"""Sandbox execution ports — ABC, result types, and settings.
 
 Defines the ``Sandbox`` interface and its associated DTOs. Concrete
 backends (e.g. ``LocalSandbox``) implement this ABC. Consumers depend
@@ -12,6 +12,26 @@ from datetime import UTC, datetime
 from enum import StrEnum, unique
 
 from pydantic import BaseModel, Field
+
+
+class SandboxSettings(BaseModel):
+    """Sandbox execution configuration.
+
+    ``backend`` selects the execution engine:
+    - ``local``  — subprocess on the host (default; fine for single-server dev/prod)
+    - ``docker`` — spawn an isolated container per session (requires Docker socket)
+    """
+
+    backend: str = "local"
+    default_timeout: int = 30
+    max_output_bytes: int = 100_000
+    session_ttl_seconds: int = 3600
+
+    image: str = "remi-sandbox:latest"
+    network: str = "remi_sandbox"
+    memory_limit: str = "512m"
+    cpu_quota: int = 50_000
+    pids_limit: int = 64
 
 
 def _utcnow() -> datetime:

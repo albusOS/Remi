@@ -7,24 +7,33 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from remi.application.portfolio.models import (
-    AutoAssignResult,
-    DashboardOverview,
+from remi.agent.signals import DomainSchema
+from remi.application.core.events import ChangeSet
+from remi.application.dependencies import Ctr
+from remi.application.operations.views import (
     DelinquencyBoard,
-    DelinquencyTrend,
     LeaseCalendar,
-    MaintenanceTrend,
-    NeedsManagerResult,
-    OccupancyTrend,
-    RentTrend,
     VacancyTracker,
 )
-from remi.application.portfolio.queries import property_ids_for_owner
-from remi.application.portfolio.models import RentRollResult
-from remi.application.dependencies import Ctr
+from remi.application.portfolio.views import (
+    AutoAssignResult,
+    DashboardOverview,
+    NeedsManagerResult,
+    RentRollResult,
+)
+
+from .views import (
+    DelinquencyTrend,
+    MaintenanceTrend,
+    OccupancyTrend,
+    RentTrend,
+)
+from remi.application.portfolio.properties import property_ids_for_owner
+from remi.application.intelligence.assertions import add_context as _add_context
+from remi.application.intelligence.assertions import assert_fact as _assert_fact
 from remi.types.errors import NotFoundError
 
-from .models import (
+from .views import (
     GraphEdge,
     GraphNode,
     ObjectResponse,
@@ -52,21 +61,29 @@ dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @dashboard_router.get("/overview", response_model=DashboardOverview)
-async def overview(c: Ctr, manager_id: str | None = None, owner_id: str | None = None) -> DashboardOverview:
+async def overview(
+    c: Ctr, manager_id: str | None = None, owner_id: str | None = None
+) -> DashboardOverview:
     pids = await property_ids_for_owner(c.property_store, owner_id) if owner_id else None
-    return await c.dashboard_resolver.dashboard_overview(manager_id=manager_id, property_ids=pids)
+    return await c.dashboard_builder.dashboard_overview(manager_id=manager_id, property_ids=pids)
 
 
 @dashboard_router.get("/delinquency", response_model=DelinquencyBoard)
-async def delinquency(c: Ctr, manager_id: str | None = None, owner_id: str | None = None) -> DelinquencyBoard:
+async def delinquency(
+    c: Ctr, manager_id: str | None = None, owner_id: str | None = None
+) -> DelinquencyBoard:
     pids = await property_ids_for_owner(c.property_store, owner_id) if owner_id else None
-    return await c.dashboard_resolver.delinquency_board(manager_id=manager_id, property_ids=pids)
+    return await c.delinquency_resolver.delinquency_board(manager_id=manager_id, property_ids=pids)
 
 
 @dashboard_router.get("/leases/expiring", response_model=LeaseCalendar)
-async def leases_expiring(c: Ctr, days: int = 90, manager_id: str | None = None, owner_id: str | None = None) -> LeaseCalendar:
+async def leases_expiring(
+    c: Ctr, days: int = 90, manager_id: str | None = None, owner_id: str | None = None
+) -> LeaseCalendar:
     pids = await property_ids_for_owner(c.property_store, owner_id) if owner_id else None
-    return await c.dashboard_resolver.lease_expiration_calendar(days=days, manager_id=manager_id, property_ids=pids)
+    return await c.lease_resolver.expiring_leases(
+        days=days, manager_id=manager_id, property_ids=pids
+    )
 
 
 @dashboard_router.get("/rent-roll/{property_id}", response_model=RentRollResult)
@@ -78,34 +95,56 @@ async def rent_roll(property_id: str, c: Ctr) -> RentRollResult:
 
 
 @dashboard_router.get("/vacancies", response_model=VacancyTracker)
-async def vacancies(c: Ctr, manager_id: str | None = None, owner_id: str | None = None) -> VacancyTracker:
+async def vacancies(
+    c: Ctr, manager_id: str | None = None, owner_id: str | None = None
+) -> VacancyTracker:
     pids = await property_ids_for_owner(c.property_store, owner_id) if owner_id else None
-    return await c.dashboard_resolver.vacancy_tracker(manager_id=manager_id, property_ids=pids)
+    return await c.vacancy_resolver.vacancy_tracker(manager_id=manager_id, property_ids=pids)
 
 
 @dashboard_router.get("/needs-manager", response_model=NeedsManagerResult)
 async def needs_manager(c: Ctr) -> NeedsManagerResult:
-    return await c.dashboard_resolver.needs_manager()
+    return await c.dashboard_builder.needs_manager()
 
 
 @dashboard_router.get("/trends/delinquency", response_model=DelinquencyTrend)
-async def delinquency_trend(c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12) -> DelinquencyTrend:
-    return await c.dashboard_resolver.delinquency_trend(manager_id=manager_id, property_id=property_id, periods=periods)
+async def delinquency_trend(
+    c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12
+) -> DelinquencyTrend:
+    return await c.trend_resolver.delinquency_trend(
+        manager_id=manager_id, property_id=property_id, periods=periods
+    )
 
 
 @dashboard_router.get("/trends/occupancy", response_model=OccupancyTrend)
-async def occupancy_trend(c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12) -> OccupancyTrend:
-    return await c.dashboard_resolver.occupancy_trend(manager_id=manager_id, property_id=property_id, periods=periods)
+async def occupancy_trend(
+    c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12
+) -> OccupancyTrend:
+    return await c.trend_resolver.occupancy_trend(
+        manager_id=manager_id, property_id=property_id, periods=periods
+    )
 
 
 @dashboard_router.get("/trends/rent", response_model=RentTrend)
-async def rent_trend(c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12) -> RentTrend:
-    return await c.dashboard_resolver.rent_trend(manager_id=manager_id, property_id=property_id, periods=periods)
+async def rent_trend(
+    c: Ctr, manager_id: str | None = None, property_id: str | None = None, periods: int = 12
+) -> RentTrend:
+    return await c.trend_resolver.rent_trend(
+        manager_id=manager_id, property_id=property_id, periods=periods
+    )
 
 
 @dashboard_router.get("/trends/maintenance", response_model=MaintenanceTrend)
-async def maintenance_trend(c: Ctr, manager_id: str | None = None, property_id: str | None = None, unit_id: str | None = None, periods: int = 12) -> MaintenanceTrend:
-    return await c.dashboard_resolver.maintenance_trend(manager_id=manager_id, property_id=property_id, unit_id=unit_id, periods=periods)
+async def maintenance_trend(
+    c: Ctr,
+    manager_id: str | None = None,
+    property_id: str | None = None,
+    unit_id: str | None = None,
+    periods: int = 12,
+) -> MaintenanceTrend:
+    return await c.trend_resolver.maintenance_trend(
+        manager_id=manager_id, property_id=property_id, unit_id=unit_id, periods=periods
+    )
 
 
 @dashboard_router.post("/auto-assign", response_model=AutoAssignResult)
@@ -156,20 +195,25 @@ class AddContextRequest(BaseModel):
 
 @knowledge_router.post("/assert")
 async def assert_fact(body: AssertFactRequest, c: Ctr) -> dict[str, str]:
-    from remi.application.tools.assertions import _assert_fact
     return await _assert_fact(
-        c.property_store, c.event_store, c.event_bus,
-        entity_type=body.entity_type, entity_id=body.entity_id,
-        properties=body.properties, related_to=body.related_to, relation_type=body.relation_type,
+        c.property_store,
+        c.event_store,
+        c.event_bus,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        properties=body.properties,
+        related_to=body.related_to,
+        relation_type=body.relation_type,
     )
 
 
 @knowledge_router.post("/context")
 async def add_context(body: AddContextRequest, c: Ctr) -> dict[str, str]:
-    from remi.application.tools.assertions import _add_context
     return await _add_context(
         c.property_store,
-        entity_type=body.entity_type, entity_id=body.entity_id, context=body.context,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        context=body.context,
     )
 
 
@@ -181,19 +225,29 @@ events_router = APIRouter(prefix="/events", tags=["events"])
 
 
 def _changeset_to_dict(cs: object) -> dict[str, Any]:
-    from remi.application.core.events import ChangeSet
     assert isinstance(cs, ChangeSet)
     return {
-        "id": cs.id, "source": cs.source.value, "source_detail": cs.source_detail,
-        "adapter_name": cs.adapter_name, "report_type": cs.report_type,
-        "document_id": cs.document_id, "timestamp": cs.timestamp.isoformat(),
-        "summary": cs.summary(), "total_changes": cs.total_changes, "is_empty": cs.is_empty,
+        "id": cs.id,
+        "source": cs.source.value,
+        "source_detail": cs.source_detail,
+        "adapter_name": cs.adapter_name,
+        "report_type": cs.report_type,
+        "document_id": cs.document_id,
+        "timestamp": cs.timestamp.isoformat(),
+        "summary": cs.summary(),
+        "total_changes": cs.total_changes,
+        "is_empty": cs.is_empty,
         "events": [
             {
-                "entity_type": ev.entity_type, "entity_id": ev.entity_id,
-                "change_type": ev.change_type.value, "source": ev.source.value,
+                "entity_type": ev.entity_type,
+                "entity_id": ev.entity_id,
+                "change_type": ev.change_type.value,
+                "source": ev.source.value,
                 "timestamp": ev.timestamp.isoformat(),
-                "fields": [{"field": fc.field, "old_value": fc.old_value, "new_value": fc.new_value} for fc in ev.fields],
+                "fields": [
+                    {"field": fc.field, "old_value": fc.old_value, "new_value": fc.new_value}
+                    for fc in ev.fields
+                ],
             }
             for ev in cs.events
         ],
@@ -216,9 +270,15 @@ async def get_changeset(changeset_id: str, c: Ctr) -> dict[str, Any]:
 
 
 @events_router.get("/entity/{entity_id}")
-async def entity_history(entity_id: str, c: Ctr, limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+async def entity_history(
+    entity_id: str, c: Ctr, limit: int = Query(50, ge=1, le=200)
+) -> dict[str, Any]:
     changesets = await c.event_store.list_by_entity(entity_id, limit=limit)
-    return {"entity_id": entity_id, "count": len(changesets), "changesets": [_changeset_to_dict(cs) for cs in changesets]}
+    return {
+        "entity_id": entity_id,
+        "count": len(changesets),
+        "changesets": [_changeset_to_dict(cs) for cs in changesets],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +289,12 @@ ontology_router = APIRouter(prefix="/ontology", tags=["ontology"])
 
 
 @ontology_router.get("/search/{type_name}", response_model=SearchResponse)
-async def search_objects(type_name: str, c: Ctr, order_by: str | None = Query(None), limit: int = Query(50, ge=1, le=1000)) -> SearchResponse:
+async def search_objects(
+    type_name: str,
+    c: Ctr,
+    order_by: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=1000),
+) -> SearchResponse:
     results = await c.world_model.search_objects("", object_type=type_name, limit=limit)
     objects = [r.model_dump(mode="json") for r in results]
     return SearchResponse(count=len(objects), objects=objects)
@@ -251,9 +316,17 @@ async def get_object(type_name: str, object_id: str, c: Ctr) -> ObjectResponse:
 
 
 @ontology_router.get("/related/{object_id}", response_model=RelatedResponse)
-async def get_related(object_id: str, c: Ctr, link_type: str | None = Query(None), direction: str = Query("both"), max_depth: int = Query(1, ge=1, le=10)) -> RelatedResponse:
+async def get_related(
+    object_id: str,
+    c: Ctr,
+    link_type: str | None = Query(None),
+    direction: str = Query("both"),
+    max_depth: int = Query(1, ge=1, le=10),
+) -> RelatedResponse:
     links = await c.world_model.get_links(object_id, direction=direction, link_type=link_type)
-    return RelatedResponse(object_id=object_id, count=len(links), links=[gl.model_dump(mode="json") for gl in links])
+    return RelatedResponse(
+        object_id=object_id, count=len(links), links=[gl.model_dump(mode="json") for gl in links]
+    )
 
 
 @ontology_router.get("/schema", response_model=SchemaListResponse)
@@ -280,7 +353,9 @@ def _label(obj: object, field: str = "name") -> str:
     return str(val)[:80]
 
 
-def _node(type_name: str, obj: object, label_field: str, display_fields: tuple[str, ...]) -> GraphNode:
+def _node(
+    type_name: str, obj: object, label_field: str, display_fields: tuple[str, ...]
+) -> GraphNode:
     label = _label(obj, label_field)
     props = {}
     for f in display_fields:
@@ -296,15 +371,18 @@ def _edge(source_id: str, link_type: str, target_id: str) -> GraphEdge | None:
     return None
 
 
-async def _build_snapshot(ps: Any, *, manager_id: str | None = None, owner_id: str | None = None) -> SnapshotResponse:
-    from remi.application.core.protocols import PropertyStore as _PS
+async def _build_snapshot(
+    ps: Any, *, manager_id: str | None = None, owner_id: str | None = None
+) -> SnapshotResponse:
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
     counts: dict[str, int] = {}
     edge_counts: dict[str, int] = {}
     node_ids: set[str] = set()
 
-    def add(type_name: str, items: list[object], label_field: str, display: tuple[str, ...]) -> None:
+    def add(
+        type_name: str, items: list[object], label_field: str, display: tuple[str, ...]
+    ) -> None:
         added = 0
         for obj in items:
             n = _node(type_name, obj, label_field, display)
@@ -366,7 +444,12 @@ async def _build_snapshot(ps: Any, *, manager_id: str | None = None, owner_id: s
 
     documents = await ps.list_documents()
     if manager_id or owner_id:
-        documents = [d for d in documents if (d.manager_id and d.manager_id in {m.id for m in managers}) or (d.property_id and d.property_id in prop_ids)]
+        documents = [
+            d
+            for d in documents
+            if (d.manager_id and d.manager_id in {m.id for m in managers})
+            or (d.property_id and d.property_id in prop_ids)
+        ]
     add("Document", documents, "filename", ("filename", "report_type", "kind", "row_count"))
 
     for p in properties:
@@ -388,22 +471,42 @@ async def _build_snapshot(ps: Any, *, manager_id: str | None = None, owner_id: s
             link(d.id, "DOCUMENTS", d.property_id)
         if d.manager_id:
             link(d.id, "DOCUMENTS", d.manager_id)
-    all_entities = list(managers) + list(owners) + list(properties) + list(units) + list(leases) + list(tenants) + list(vendors) + list(maint)
+    all_entities = (
+        list(managers)
+        + list(owners)
+        + list(properties)
+        + list(units)
+        + list(leases)
+        + list(tenants)
+        + list(vendors)
+        + list(maint)
+    )
     for ent in all_entities:
         doc_id = getattr(ent, "source_document_id", None)
         if doc_id:
             link(ent.id, "EXTRACTED_FROM", doc_id)
 
-    return SnapshotResponse(nodes=nodes, edges=edges, counts=counts, edge_counts=edge_counts, total_nodes=len(nodes), total_edges=len(edges))
+    return SnapshotResponse(
+        nodes=nodes,
+        edges=edges,
+        counts=counts,
+        edge_counts=edge_counts,
+        total_nodes=len(nodes),
+        total_edges=len(edges),
+    )
 
 
 @ontology_router.get("/snapshot", response_model=SnapshotResponse)
-async def graph_snapshot(c: Ctr, manager_id: str | None = Query(None), owner_id: str | None = Query(None)) -> SnapshotResponse:
+async def graph_snapshot(
+    c: Ctr, manager_id: str | None = Query(None), owner_id: str | None = Query(None)
+) -> SnapshotResponse:
     return await _build_snapshot(c.property_store, manager_id=manager_id, owner_id=owner_id)
 
 
 @ontology_router.get("/subgraph/{entity_id}", response_model=SubgraphResponse)
-async def graph_subgraph(entity_id: str, c: Ctr, depth: int = Query(2, ge=1, le=4)) -> SubgraphResponse:
+async def graph_subgraph(
+    entity_id: str, c: Ctr, depth: int = Query(2, ge=1, le=4)
+) -> SubgraphResponse:
     full = await _build_snapshot(c.property_store)
     adj: dict[str, set[str]] = {}
     for e in full.edges:
@@ -424,11 +527,7 @@ async def graph_subgraph(entity_id: str, c: Ctr, depth: int = Query(2, ge=1, le=
     return SubgraphResponse(center_id=entity_id, nodes=sub_nodes, edges=sub_edges)
 
 
-def _build_operational_graph() -> OperationalGraphResponse:
-    from remi.agent.signals import DomainSchema, load_domain_yaml
-
-    raw = load_domain_yaml()
-    domain = DomainSchema.from_yaml(raw)
+def _build_operational_graph(domain: DomainSchema) -> OperationalGraphResponse:
     nodes: list[OperationalNode] = []
     edges_list: list[OperationalEdge] = []
     seen_ids: set[str] = set()
@@ -440,13 +539,15 @@ def _build_operational_graph() -> OperationalGraphResponse:
 
     for et in domain.entity_types:
         nid = f"entity:{et.name}"
-        add_node(OperationalNode(
-            id=nid,
-            kind="entity_type",
-            label=et.name,
-            process="",
-            properties={"description": et.description, "key_fields": ", ".join(et.key_fields)},
-        ))
+        add_node(
+            OperationalNode(
+                id=nid,
+                kind="entity_type",
+                label=et.name,
+                process="",
+                properties={"description": et.description, "key_fields": ", ".join(et.key_fields)},
+            )
+        )
 
     for rel in domain.relationships:
         src = f"entity:{rel.source}"
@@ -457,13 +558,15 @@ def _build_operational_graph() -> OperationalGraphResponse:
     for proc in domain.processes:
         pid = f"process:{proc.name}"
         process_names.append(proc.name)
-        add_node(OperationalNode(
-            id=pid,
-            kind="process",
-            label=proc.name.replace("_", " ").title(),
-            process=proc.name,
-            properties={"description": proc.description},
-        ))
+        add_node(
+            OperationalNode(
+                id=pid,
+                kind="process",
+                label=proc.name.replace("_", " ").title(),
+                process=proc.name,
+                properties={"description": proc.description},
+            )
+        )
         for entity_name in proc.involves:
             eid = f"entity:{entity_name}"
             edges_list.append(OperationalEdge(source_id=pid, target_id=eid, link_type="INVOLVES"))
@@ -472,8 +575,8 @@ def _build_operational_graph() -> OperationalGraphResponse:
 
 
 @ontology_router.get("/graph/operational", response_model=OperationalGraphResponse)
-async def operational_graph() -> OperationalGraphResponse:
-    return _build_operational_graph()
+async def operational_graph(c: Ctr) -> OperationalGraphResponse:
+    return _build_operational_graph(c.domain_schema)
 
 
 class DomainSchemaResponse(BaseModel):
@@ -485,12 +588,9 @@ class DomainSchemaResponse(BaseModel):
 
 
 @ontology_router.get("/domain-schema", response_model=DomainSchemaResponse)
-async def domain_schema_endpoint() -> DomainSchemaResponse:
+async def domain_schema_endpoint(c: Ctr) -> DomainSchemaResponse:
     """Serve the domain schema for frontend consumption."""
-    from remi.agent.signals import DomainSchema, load_domain_yaml
-
-    raw = load_domain_yaml()
-    schema = DomainSchema.from_yaml(raw)
+    schema = c.domain_schema
     return DomainSchemaResponse(
         entity_types=[et.model_dump() for et in schema.entity_types],
         relationships=[r.model_dump() for r in schema.relationships],

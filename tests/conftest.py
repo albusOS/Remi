@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from remi.agent.signals import DomainSchema, load_domain_yaml, set_domain_yaml_path
+from remi.agent.signals import DomainSchema, load_domain_yaml
 from remi.application.core.models import (
     Address,
     Property,
@@ -20,12 +20,11 @@ def _configure_agent_paths() -> None:
     from remi.shell.config.capabilities import ensure_capabilities_registered
 
     ensure_capabilities_registered()
-    set_domain_yaml_path(DOMAIN_YAML_PATH)
 
 
 @pytest.fixture
 def domain_schema() -> DomainSchema:
-    raw = load_domain_yaml()
+    raw = load_domain_yaml(DOMAIN_YAML_PATH)
     return DomainSchema.from_yaml(raw)
 
 

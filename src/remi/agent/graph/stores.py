@@ -22,7 +22,6 @@ from typing import Any
 from remi.agent.graph.types import (
     GraphLink,
     GraphObject,
-    KnowledgeLink,
     ObjectTypeDef,
 )
 
@@ -80,7 +79,10 @@ class EntityStore(abc.ABC):
 
     @abc.abstractmethod
     async def put_entity(
-        self, id: str, type_name: str, properties: dict[str, Any],
+        self,
+        id: str,
+        type_name: str,
+        properties: dict[str, Any],
     ) -> None:
         """Upsert a node. Merges properties on conflict."""
         ...
@@ -122,5 +124,3 @@ class EntityStore(abc.ABC):
     ) -> list[GraphLink]:
         """Return edges connected to *entity_id*."""
         ...
-
-

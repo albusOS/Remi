@@ -1,31 +1,47 @@
-"""Intelligence — dashboard, search, ontology, knowledge, events.
+"""Intelligence — search, trends, assertions, analytics.
 
-Queries:
-    DashboardResolver      Five typed dashboard views over PropertyStore
+Resolvers:
     SearchService          Hybrid keyword + semantic search
+    TrendResolver          Cross-slice time-series analytics
 
-API:
-    dashboard_router       /dashboard views and trends
-    search_router          /search typeahead
-    knowledge_router       /knowledge assert + context
-    events_router          /events change history
-    ontology_router        /ontology schema + graph + snapshot
+Mutations:
+    assert_fact            Record a user-asserted fact
+    add_context            Attach user context to an entity
+
+Read models:
+    SearchHit / SearchApiResponse
+    TrendPeriod, DelinquencyTrend, OccupancyTrend, RentTrend, MaintenanceTrend
+
+API routers are imported directly by the shell via ``capabilities.py``
+string references — they are NOT re-exported here to avoid barrel→api
+→dependencies circular imports.
 """
 
-from pathlib import Path
-
-from .api import dashboard_router, events_router, knowledge_router, ontology_router, search_router
-from .queries import DashboardResolver, SearchService
-
-MANIFEST_PATH = Path(__file__).parent / "app.yaml"
+from remi.application.intelligence.assertions import add_context, assert_fact
+from remi.application.intelligence.search import SearchService
+from remi.application.intelligence.tools import IntelligenceToolProvider
+from remi.application.intelligence.trends import TrendResolver
+from remi.application.intelligence.views import (
+    DelinquencyTrend,
+    MaintenanceTrend,
+    OccupancyTrend,
+    RentTrend,
+    SearchApiResponse,
+    SearchHit,
+    TrendPeriod,
+)
 
 __all__ = [
-    "DashboardResolver",
-    "MANIFEST_PATH",
+    "DelinquencyTrend",
+    "IntelligenceToolProvider",
+    "MaintenanceTrend",
+    "OccupancyTrend",
+    "RentTrend",
+    "SearchApiResponse",
+    "SearchHit",
     "SearchService",
-    "dashboard_router",
-    "events_router",
-    "knowledge_router",
-    "ontology_router",
-    "search_router",
+    "TrendPeriod",
+    "TrendResolver",
+    "add_context",
+    "assert_fact",
 ]

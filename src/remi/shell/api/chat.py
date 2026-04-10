@@ -12,16 +12,25 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from remi.application.dependencies import Ctr
+from remi.agent.runtime.deps import ScopeContext
+from remi.shell.config.container import Container
+from remi.types.errors import NotFoundError
 
 logger = structlog.get_logger("remi.api.chat")
+
+
+def _get_container(request: Request) -> Container:
+    return request.app.state.container  # type: ignore[return-value]
+
+
+_Ctr = Annotated[Container, Depends(_get_container)]
 
 router = APIRouter(prefix="/agents", tags=["ai"])
 
@@ -41,13 +50,29 @@ class AskRequest(BaseModel):
 async def ask_agent(
     agent_name: str,
     body: AskRequest,
-    c: Ctr,
+    c: _Ctr,
 ) -> StreamingResponse:
     """Stream an agent response as newline-delimited JSON events.
 
     Each line is a JSON object with ``event`` and ``data`` keys:
     ``delta``, ``tool_call``, ``tool_result``, ``phase``, ``done``.
     """
+    scope: ScopeContext | None = None
+    if body.manager_id:
+        manager = await c.property_store.get_manager(body.manager_id)
+        name = manager.name if manager else body.manager_id
+        scope = ScopeContext(
+            entity_id=body.manager_id,
+            entity_type="PropertyManager",
+            scope_message=(
+                f"You are currently scoped to {name}'s portfolio "
+                f"(manager_id: {body.manager_id!r}). "
+                f"Unless the user explicitly asks about another manager, "
+                f"pass manager_id={body.manager_id!r} to all query operations."
+            ),
+            tool_scope={"manager_id": body.manager_id},
+        )
+
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def _on_event(event_type: str, data: dict[str, Any]) -> None:
@@ -61,7 +86,7 @@ async def ask_agent(
                 body.question,
                 session_id=body.session_id,
                 on_event=_on_event,
-                manager_id=body.manager_id,
+                scope=scope,
             )
         except Exception:
             logger.warning("ask_stream_failed", agent=agent_name, exc_info=True)
@@ -100,7 +125,7 @@ class CreateSessionRequest(BaseModel):
 @router.post("/sessions")
 async def create_session(
     body: CreateSessionRequest,
-    c: Ctr,
+    c: _Ctr,
 ) -> dict[str, Any]:
     session = await c.chat_agent.sessions.create(
         body.agent,
@@ -111,7 +136,7 @@ async def create_session(
 
 
 @router.get("/sessions")
-async def list_sessions(c: Ctr) -> dict[str, Any]:
+async def list_sessions(c: _Ctr) -> dict[str, Any]:
     all_sessions = await c.chat_agent.sessions.list()
     return {
         "count": len(all_sessions),
@@ -122,10 +147,8 @@ async def list_sessions(c: Ctr) -> dict[str, Any]:
 @router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
-    c: Ctr,
+    c: _Ctr,
 ) -> dict[str, Any]:
-    from remi.types.errors import NotFoundError
-
     session = await c.chat_agent.sessions.get(session_id)
     if session is None:
         raise NotFoundError("Session", session_id)
@@ -135,7 +158,7 @@ async def get_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    c: Ctr,
+    c: _Ctr,
 ) -> dict[str, Any]:
     deleted = await c.chat_agent.sessions.delete(session_id)
     return {"deleted": deleted, "session_id": session_id}

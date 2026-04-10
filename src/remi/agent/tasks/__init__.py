@@ -8,7 +8,7 @@ that makes multi-agent coordination first-class.
 Public API::
 
     from remi.agent.tasks import (
-        TaskSpec, TaskConstraints,
+        TaskSpec, TaskConstraints, HumanQuestion, HumanQuestionOption,
         Task, TaskStatus,
         TaskResult, TaskUsage,
         TaskSupervisor, AgentExecutor,
@@ -19,13 +19,21 @@ Public API::
 from remi.agent.tasks.factory import build_task_pool
 from remi.agent.tasks.pool import LocalTaskPool, TaskPool
 from remi.agent.tasks.result import TaskResult, TaskUsage
-from remi.agent.tasks.spec import TaskConstraints, TaskSpec
-from remi.agent.tasks.supervisor import AgentExecutor, TaskSupervisor
+from remi.agent.tasks.spec import (
+    HumanQuestion,
+    HumanQuestionOption,
+    TaskConstraints,
+    TaskSpec,
+)
+from remi.agent.tasks.supervisor import AgentExecutor, TaskSupervisor, WorkflowExecutor
 from remi.agent.tasks.task import Task, TaskStatus
 
 __all__ = [
     "AgentExecutor",
+    "HumanQuestion",
+    "HumanQuestionOption",
     "LocalTaskPool",
+    "WorkflowExecutor",
     "Task",
     "TaskConstraints",
     "TaskPool",

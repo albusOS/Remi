@@ -10,6 +10,9 @@ ModuleId = NewType("ModuleId", str)
 RunId = NewType("RunId", str)
 EdgeId = NewType("EdgeId", str)
 ActorId = NewType("ActorId", str)
+WorkspaceId = NewType("WorkspaceId", str)
+
+DEFAULT_WORKSPACE = WorkspaceId("default")
 
 
 def new_run_id() -> RunId:

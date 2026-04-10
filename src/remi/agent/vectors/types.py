@@ -1,4 +1,4 @@
-"""Vector subsystem ports — ABCs and DTOs for embeddings, vector storage, and search.
+"""Vector subsystem ports — ABCs, DTOs, and settings for embeddings and vector storage.
 
 All interfaces and data types for the embedding/retrieval pipeline live here.
 Adapter implementations: ``agent.vectors.embedder``, ``agent.vectors.store``.
@@ -144,3 +144,22 @@ class Embedder(abc.ABC):
     @abc.abstractmethod
     def dimension(self) -> int:
         """The dimensionality of vectors this embedder produces."""
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+
+class VectorStoreSettings(BaseModel):
+    """Vector store backend — ``memory`` for dev, ``postgres`` for pgvector."""
+
+    backend: str = "memory"
+
+
+class EmbeddingsSettings(BaseModel):
+    """Embedding provider config — separate from LLM inference config."""
+
+    provider: str = "openai"
+    model: str = "text-embedding-3-small"
+    dimensions: int = 1536

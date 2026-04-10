@@ -18,7 +18,6 @@ import structlog
 
 from remi.agent.config import AgentConfig
 from remi.agent.context.builder import _find_tail_inject_point
-from remi.agent.skills import FilesystemSkillDiscovery, SkillMetadata
 from remi.agent.context.frame import WorldState
 from remi.agent.context.rendering import render_domain_context
 from remi.agent.llm.types import LLMProvider, estimate_cost
@@ -34,6 +33,7 @@ from remi.agent.runtime.conversation.thread import (
 from remi.agent.runtime.deps import OnEventCallback, RuntimeContext, ScopeContext
 from remi.agent.runtime.loop import run_agent_loop
 from remi.agent.runtime.tool_executor import ToolExecutor, resolve_agent_tools
+from remi.agent.skills import FilesystemSkillDiscovery, SkillMetadata
 from remi.agent.workspace import inject_workspace, load_workspace
 from remi.agent.workspace.flush import flush_before_trim
 
@@ -54,9 +54,8 @@ def _render_skills_catalog(skills: list[SkillMetadata]) -> str:
         lines.append(f"- **{s.name}**{tags}: {s.description}")
     lines.append("")
     lines.append(
-        "When a task matches a skill, run the skill's Python code using "
-        "`import remi` in the sandbox. Skills describe step-by-step "
-        "workflows using the platform module."
+        "When a task matches a skill, follow the skill's commands and "
+        "workflows using the `remi` CLI via the `bash` tool."
     )
     return "\n".join(lines)
 
@@ -85,14 +84,14 @@ class AgentNode(BaseModule):
         effective_provider = (
             context.params.provider_name
             or context.extras.get("provider_name")
-            or cfg.provider_for_mode(mode)
+            or cfg.provider
             or context.deps.default_provider
             or context.extras.get("default_provider")
         )
         effective_model = (
             context.params.model_name
             or context.extras.get("model_name")
-            or cfg.model_for_mode(mode)
+            or cfg.model
             or context.deps.default_model
             or context.extras.get("default_model")
         )
@@ -111,8 +110,6 @@ class AgentNode(BaseModule):
             update={
                 "provider": effective_provider,
                 "model": effective_model,
-                "system_prompt": cfg.system_prompt_for_mode(mode),
-                "max_iterations": cfg.max_iterations_for_mode(mode),
             }
         )
 
@@ -132,9 +129,7 @@ class AgentNode(BaseModule):
 
         domain = context.deps.domain_tbox or context.extras.get("domain_tbox")
         world = WorldState.from_schema(domain)
-        domain_priming = (
-            render_domain_context(domain) if domain is not None else ""
-        )
+        domain_priming = render_domain_context(domain) if domain is not None else ""
 
         thread = build_initial_thread(
             cfg,
@@ -144,6 +139,18 @@ class AgentNode(BaseModule):
         )
 
         max_tool_rounds: int | None = None
+        token_budget: int | None = None
+        try:
+            from remi.agent.workflow.loader import load_manifest_runtime
+
+            runtime_cfg = load_manifest_runtime(cfg.name)
+            if runtime_cfg.resources.max_tool_rounds is not None:
+                max_tool_rounds = runtime_cfg.resources.max_tool_rounds
+            if runtime_cfg.resources.max_tokens is not None:
+                token_budget = runtime_cfg.resources.max_tokens
+        except (ValueError, FileNotFoundError):
+            pass
+
         user_question = _extract_user_question(thread)
 
         # Skip expensive graph/memory injection when the agent has no tools
@@ -189,9 +196,7 @@ class AgentNode(BaseModule):
             discovered = discovery.discover()
             skills_text = _render_skills_catalog(discovered)
             if skills_text:
-                _insert_before_last_user(
-                    thread, Message(role="system", content=skills_text)
-                )
+                _insert_before_last_user(thread, Message(role="system", content=skills_text))
             context = context.with_extras(skill_discovery=discovery)
 
         trace_cm = (
@@ -222,9 +227,7 @@ class AgentNode(BaseModule):
                     pass
 
             recall_service = context.deps.recall_service
-            scope_entity_ids = (
-                [context.scope.entity_id] if context.scope.entity_id else None
-            )
+            scope_entity_ids = [context.scope.entity_id] if context.scope.entity_id else None
 
             async def _recall_memory() -> str | None:
                 if not (needs_memory and recall_service and cfg.memory.auto_load):
@@ -272,6 +275,7 @@ class AgentNode(BaseModule):
                 tracer=tracer,
                 log=log,
                 max_tool_rounds=max_tool_rounds,
+                max_tokens=token_budget,
                 routing_provider=routing_provider,
                 usage_ledger=usage_ledger,
                 memory=memory,
@@ -333,7 +337,10 @@ class AgentNode(BaseModule):
 
             if memory and cfg.memory.auto_save and thread:
                 asyncio.create_task(
-                    _safe_extract(thread, memory, provider, context.run_id, cfg.name or ""),
+                    _safe_extract(
+                        thread, memory, provider, context.run_id, cfg.name or "",
+                        model=cfg.model or "",
+                    ),
                 )
 
             run_metadata: dict[str, Any] = {
@@ -358,11 +365,18 @@ async def _safe_extract(
     provider: LLMProvider,
     run_id: str,
     agent_name: str,
+    *,
+    model: str,
 ) -> None:
     """Fire-and-forget episode extraction — never raises."""
     try:
         await extract_episode(
-            thread, store, provider, run_id=run_id, agent_name=agent_name,
+            thread,
+            store,
+            provider,
+            model=model,
+            run_id=run_id,
+            agent_name=agent_name,
         )
     except Exception:
         logger.warning("episode_extraction_background_failed", run_id=run_id, exc_info=True)

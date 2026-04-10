@@ -60,6 +60,8 @@ export const api = {
   deleteDocument: documentsApi.delete,
   correctRow: documentsApi.correctRow,
   correctEntity: documentsApi.correctEntity,
+  getWaitingTask: documentsApi.getWaitingTask,
+  supplyHumanAnswers: documentsApi.supplyHumanAnswers,
 
   search: searchApi.search,
   listOwners: ownersApi.list,

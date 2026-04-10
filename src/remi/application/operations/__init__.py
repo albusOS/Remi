@@ -1,31 +1,45 @@
-"""Operations — leases, maintenance, tenants, actions, notes.
+"""Operations — leases, maintenance, delinquency, vacancies.
 
-Queries:
+Resolvers:
     LeaseResolver          Lease list, expiring leases, tenant detail
     MaintenanceResolver    Maintenance list and summary
+    DelinquencyResolver    Delinquency board from balance observations
+    VacancyResolver        Vacant/notice units with market rent at risk
 
-API:
-    leases_router          /leases CRUD
-    maintenance_router     /maintenance CRUD
-    tenants_router         /tenants CRUD
-    actions_router         /actions CRUD
-    notes_router           /notes CRUD
+Read models:
+    DelinquencyBoard / DelinquentTenant    Delinquency read-model
+    LeaseCalendar / ExpiringLease          Lease expiration calendar
+    VacancyTracker / VacantUnit            Vacancy read-model
+
+API routers are imported directly by the shell via ``capabilities.py``
+string references — they are NOT re-exported here to avoid barrel→api
+→dependencies circular imports.
 """
 
-from pathlib import Path
-
-from .api import actions_router, leases_router, maintenance_router, notes_router, tenants_router
-from .queries import LeaseResolver, MaintenanceResolver
-
-MANIFEST_PATH = Path(__file__).parent / "app.yaml"
+from remi.application.operations.delinquency import DelinquencyResolver
+from remi.application.operations.leases import LeaseResolver
+from remi.application.operations.maintenance import MaintenanceResolver
+from remi.application.operations.tools import OperationsToolProvider
+from remi.application.operations.vacancies import VacancyResolver
+from remi.application.operations.views import (
+    DelinquencyBoard,
+    DelinquentTenant,
+    ExpiringLease,
+    LeaseCalendar,
+    VacancyTracker,
+    VacantUnit,
+)
 
 __all__ = [
+    "DelinquencyBoard",
+    "DelinquencyResolver",
+    "DelinquentTenant",
+    "ExpiringLease",
+    "LeaseCalendar",
     "LeaseResolver",
-    "MANIFEST_PATH",
     "MaintenanceResolver",
-    "actions_router",
-    "leases_router",
-    "maintenance_router",
-    "notes_router",
-    "tenants_router",
+    "OperationsToolProvider",
+    "VacancyResolver",
+    "VacancyTracker",
+    "VacantUnit",
 ]

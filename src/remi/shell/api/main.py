@@ -6,10 +6,13 @@ It creates its own Container in the lifespan and manages the full lifecycle.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,6 +24,7 @@ from remi.shell.config.capabilities import (
     ensure_capabilities_registered,
     resolve_routers,
 )
+from remi.shell.config.container import Container
 from remi.shell.config.settings import RemiSettings, load_settings
 
 
@@ -51,12 +55,6 @@ def _add_cors(application: FastAPI, settings: RemiSettings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    import asyncio
-
-    import structlog
-
-    from remi.shell.config.container import Container
-
     settings: RemiSettings = app.state.settings
     configure_logging(level=settings.logging.level, format=settings.logging.format)
     log = structlog.get_logger("remi.server")
@@ -116,9 +114,7 @@ def create_app() -> FastAPI:
 
 def _attach_health(application: FastAPI) -> None:
     """Add ``/health`` endpoint for live assessment."""
-    import time as _time
-
-    _boot_time = _time.time()
+    _boot_time = time.time()
 
     @application.get("/health", tags=["ops"])
     async def health() -> dict[str, Any]:
@@ -127,7 +123,7 @@ def _attach_health(application: FastAPI) -> None:
         if container is not None:
             traces = await container.trace_store.list_traces(limit=1000)
             trace_count = len(traces)
-        uptime_s = round(_time.time() - _boot_time)
+        uptime_s = round(time.time() - _boot_time)
 
         llm_calls = 0
         llm_cost_usd = 0.0

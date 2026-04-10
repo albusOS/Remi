@@ -12,6 +12,31 @@ from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
+class HumanQuestionOption:
+    """One option in a multiple-choice question posed to a human."""
+
+    id: str
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class HumanQuestion:
+    """A structured question that an agent tool poses to a human.
+
+    Used by the ``ask_human`` tool to suspend a task until the user
+    provides answers. The frontend renders these inline in the upload
+    flow or chat UI.
+    """
+
+    id: str
+    prompt: str
+    kind: str = "select"  # select | text | confirm
+    options: list[HumanQuestionOption] = field(default_factory=list)
+    default: str | None = None
+    required: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class TaskConstraints:
     """Resource budget and permission boundaries for a delegated task.
 

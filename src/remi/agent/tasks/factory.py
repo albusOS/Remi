@@ -9,11 +9,19 @@ from __future__ import annotations
 
 import structlog
 
+from pydantic import BaseModel
+
 from remi.agent.tasks.pool import LocalTaskPool, TaskPool
-from remi.types.config import TaskQueueSettings
+
+
+class TaskQueueSettings(BaseModel):
+    """Task execution backend — ``local`` or ``redis``."""
+
+    backend: str = "local"
+    url: str = ""
+    max_concurrency: int = 4
 
 logger = structlog.get_logger(__name__)
-
 
 def build_task_pool(settings: TaskQueueSettings) -> TaskPool:
     """Construct the task pool backend selected by settings."""
@@ -25,12 +33,10 @@ def build_task_pool(settings: TaskQueueSettings) -> TaskPool:
 
     if backend == "redis":
         raise NotImplementedError(
-            "Redis task pool backend is defined as a protocol extension point. "
-            "Implement ``RedisTaskPool(TaskPool)`` in ``agent/tasks/redis.py`` "
-            "and register it here when distributed workers are needed."
+            "Redis task pool is not yet implemented. Use backend='local' for now. "
+            "Add remi.agent.tasks.adapters.redis.RedisTaskPool when ready."
         )
 
     raise ValueError(
-        f"Unknown task pool backend: {backend!r}. "
-        f"Supported: local, redis"
+        f"Unknown task pool backend: {backend!r}. Supported: local, redis (planned)"
     )

@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Body, File, Form, Query, UploadFile
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from remi.agent.events import DomainEvent
+from remi.agent.tasks import TaskConstraints, TaskSpec
+from remi.agent.tasks.task import TaskStatus
+from remi.application.core.models import Document
+from remi.application.dependencies import Ctr
 from remi.application.ingestion.models import (
     ChunkItem,
-    CorrectRowRequest,
-    CorrectRowResponse,
     DeleteResponse,
     DocumentChunksResponse,
     DocumentDetail,
@@ -23,9 +31,6 @@ from remi.application.ingestion.models import (
     TagUpdateRequest,
     UploadResponse,
 )
-from remi.agent.events import DomainEvent
-from remi.application.core.models import Document
-from remi.application.dependencies import Ctr
 from remi.types.errors import DomainError, NotFoundError
 
 _log = structlog.get_logger(__name__)
@@ -75,7 +80,54 @@ def _list_item(doc: Document) -> DocumentListItem:
     )
 
 
-@router.post("/upload", response_model=UploadResponse)
+def _dispatch_ingestion(c: Ctr, doc_id: str) -> None:
+    """Submit an ingestion task to the agent OS via the task supervisor.
+
+    Fire-and-forget from the caller's perspective — the upload response
+    returns before ingestion starts.  Failures are logged and published
+    to the event bus so frontends can show errors.
+    """
+    spec = TaskSpec(
+        agent_name="ingester",
+        objective=f"Ingest document {doc_id}: classify, extract entities, finalize.",
+        input_data={"document_id": doc_id},
+        constraints=TaskConstraints(timeout_seconds=180, max_tool_rounds=12),
+        metadata={"source": "upload_api", "document_id": doc_id},
+    )
+
+    async def _publish_and_spawn() -> None:
+        try:
+            await c.event_bus.publish(
+                DomainEvent(
+                    topic="ingestion.started",
+                    source="upload_api",
+                    payload={"document_id": doc_id},
+                )
+            )
+        except Exception:
+            _log.warning("event_publish_failed", topic="ingestion.started", exc_info=True)
+        await c.task_supervisor.spawn(spec)
+
+    bg = asyncio.create_task(_publish_and_spawn(), name=f"ingest:{doc_id}")
+    bg.add_done_callback(lambda t: _on_dispatch_done(t, doc_id))
+
+
+def _on_dispatch_done(task: "asyncio.Task[None]", doc_id: str) -> None:
+    """Log any unhandled error from the background dispatch task."""
+    if task.cancelled():
+        _log.warning("ingestion_dispatch_cancelled", document_id=doc_id)
+        return
+    exc = task.exception()
+    if exc is not None:
+        _log.error(
+            "ingestion_dispatch_failed",
+            document_id=doc_id,
+            error=str(exc),
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+@router.post("/upload", response_model=UploadResponse, status_code=202)
 async def upload_document(
     c: Ctr,
     file: UploadFile = File(...),
@@ -84,24 +136,22 @@ async def upload_document(
     property_id: str | None = Form(default=None),
     lease_id: str | None = Form(default=None),
     document_type: str | None = Form(default=None),
-) -> UploadResponse:
+) -> UploadResponse | JSONResponse:
     """Upload a file to the knowledge base.
 
-    Accepts CSV, Excel, PDF, Word, text files, and images. Tabular files
-    (CSV/Excel) trigger entity extraction. Other files are stored as
-    reference documents and embedded for semantic search.
-
-    Scope params (unit_id, property_id, lease_id, document_type) attach
-    the document to specific domain entities in the knowledge graph.
+    Returns 202 Accepted immediately. For tabular files, dispatches an
+    ingestion task to the agent OS — the ingester agent handles entity
+    extraction. Progress is pushed via EventBus (``ingestion.started``,
+    ``ingestion.complete``).
     """
-    content = await file.read()
+    raw_content = await file.read()
     filename = file.filename or "unknown"
     content_type = (file.content_type or "").lower()
 
     try:
         result = await c.document_ingest.ingest_upload(
             filename,
-            content,
+            raw_content,
             content_type,
             manager=manager,
             unit_id=unit_id,
@@ -113,6 +163,10 @@ async def upload_document(
         raise DomainError(str(exc)) from exc
 
     doc = result.doc
+
+    if result.status == "processing":
+        _dispatch_ingestion(c, doc.id)
+
     review_schemas = _review_items_to_schemas(result.review_items)
 
     dup_info: DuplicateInfo | None = None
@@ -130,7 +184,7 @@ async def upload_document(
         for w in result.validation_warnings
     ]
 
-    response = UploadResponse(
+    return UploadResponse(
         id=doc.id,
         filename=doc.filename,
         content_type=doc.content_type,
@@ -138,6 +192,7 @@ async def upload_document(
         row_count=doc.row_count,
         columns=[],
         report_type=result.report_type,
+        status=result.status,
         chunk_count=doc.chunk_count,
         page_count=doc.page_count,
         tags=doc.tags,
@@ -156,29 +211,100 @@ async def upload_document(
         duplicate=dup_info,
     )
 
-    if result.duplicate_of is None:
-        try:
-            await c.event_bus.publish(DomainEvent(
-                topic="ingestion.complete",
-                source="ingestion.api",
-                payload={
-                    "document_id": doc.id,
-                    "filename": doc.filename,
-                    "kind": doc.kind,
-                    "report_type": result.report_type,
-                    "entities_extracted": result.entities_extracted,
-                    "relationships_extracted": result.relationships_extracted,
-                    "chunk_count": doc.chunk_count,
-                    "tags": doc.tags,
-                    "graph_changed": (
-                        result.entities_extracted > 0 or result.relationships_extracted > 0
-                    ),
-                },
-            ))
-        except Exception:
-            _log.warning("event_publish_failed", topic="ingestion.complete", exc_info=True)
 
-    return response
+class HumanQuestionOptionSchema(BaseModel):
+    id: str
+    label: str
+
+
+class HumanQuestionSchema(BaseModel):
+    id: str
+    prompt: str
+    kind: str
+    options: list[HumanQuestionOptionSchema]
+    default: str | None
+    required: bool
+
+
+class WaitingTaskResponse(BaseModel):
+    status: str
+    task_id: str | None = None
+    questions: list[HumanQuestionSchema] = []
+
+
+@router.get("/tasks/waiting", response_model=WaitingTaskResponse)
+async def get_waiting_task(
+    c: Ctr,
+    document_id: str = Query(..., description="Document ID to check for a pending human question"),
+) -> WaitingTaskResponse:
+    """Return the task waiting on human input for a given document, if any.
+
+    The frontend polls this after uploading a file with ``status: processing``
+    to discover whether the ingester has paused with a question.
+    Returns ``{"status": "waiting_on_human", "task_id": "...", "questions": [...]}``
+    when paused, or ``{"status": "running"}`` / ``{"status": "done"}`` otherwise.
+    """
+    tasks = c.task_supervisor.list_tasks(status=TaskStatus.WAITING_ON_HUMAN)
+    for task in tasks:
+        if task.spec.metadata.get("document_id") == document_id:
+            questions = [
+                HumanQuestionSchema(
+                    id=q.id,
+                    prompt=q.prompt,
+                    kind=q.kind,
+                    options=[HumanQuestionOptionSchema(id=o.id, label=o.label) for o in q.options],
+                    default=q.default,
+                    required=q.required,
+                )
+                for q in task.human_questions
+            ]
+            return WaitingTaskResponse(
+                status="waiting_on_human",
+                task_id=task.id,
+                questions=questions,
+            )
+
+    all_tasks = c.task_supervisor.list_tasks()
+    for task in all_tasks:
+        if task.spec.metadata.get("document_id") == document_id:
+            if task.is_terminal:
+                return WaitingTaskResponse(status="done")
+            return WaitingTaskResponse(status="running")
+
+    return WaitingTaskResponse(status="unknown")
+
+
+class HumanAnswerRequest(BaseModel):
+    """Payload for supplying answers to a task.waiting_on_human question."""
+
+    task_id: str
+    answers: dict[str, Any]
+
+
+class HumanAnswerResponse(BaseModel):
+    task_id: str
+    resumed: bool
+
+
+@router.post("/tasks/answer", response_model=HumanAnswerResponse)
+async def supply_human_answer(
+    c: Ctr,
+    body: HumanAnswerRequest = Body(...),
+) -> HumanAnswerResponse | JSONResponse:
+    """Supply answers to a task that is waiting on human input.
+
+    The frontend calls this when the user answers questions posed by
+    the ``ask_human`` tool during ingestion or any other agent task.
+    """
+    resumed = await c.task_supervisor.supply_human_answers(
+        body.task_id, body.answers,
+    )
+    if not resumed:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Task {body.task_id} not found or not waiting on human input"},
+        )
+    return HumanAnswerResponse(task_id=body.task_id, resumed=True)
 
 
 @router.get("", response_model=DocumentListResponse)
@@ -296,64 +422,6 @@ async def update_tags(
     return TagsResponse(tags=body.tags)
 
 
-@router.post("/{document_id}/correct-row", response_model=CorrectRowResponse)
-async def correct_row(
-    document_id: str,
-    c: Ctr,
-    body: CorrectRowRequest = Body(...),
-) -> CorrectRowResponse:
-    """Re-submit a corrected row that was previously rejected or ambiguous.
-
-    The human reviews a rejected row, fixes the problematic field(s), and
-    sends it back. The row goes through validation and persistence as if
-    it were part of the original upload.
-    """
-    doc = await c.property_store.get_document(document_id)
-    if doc is None:
-        raise NotFoundError("Document", document_id)
-
-    content = await c.content_store.get(document_id)
-    if content is None:
-        raise NotFoundError("Document content", document_id)
-
-    from remi.application.core.models.enums import ReportType
-    from remi.application.ingestion.models import IngestionResult
-    from remi.application.ingestion.validation import validate_rows
-
-    _rt_raw = body.report_type or doc.report_type.value
-    try:
-        report_type = ReportType(_rt_raw)
-    except ValueError:
-        report_type = ReportType.UNKNOWN
-
-    result = IngestionResult(document_id=document_id)
-    result.report_type = report_type
-    rows = validate_rows([body.row_data], result)
-
-    if rows:
-        ingestion_result = await c.document_ingest._ingestion.ingest_mapped_rows(
-            content,
-            report_type=report_type,
-            rows=rows,
-            manager=doc.manager_id,
-        )
-        return CorrectRowResponse(
-            accepted=True,
-            entities_created=ingestion_result.entities_created,
-            relationships_created=ingestion_result.relationships_created,
-            review_items=_review_items_to_schemas(ingestion_result.review_items),
-        )
-
-    warnings = [
-        f"row {w.row_index} ({w.row_type}).{w.field}: {w.issue}" for w in result.validation_warnings
-    ]
-    return CorrectRowResponse(
-        accepted=False,
-        validation_warnings=warnings,
-        review_items=_review_items_to_schemas(result.review_items),
-    )
-
-
 @router.delete("/{document_id}", response_model=DeleteResponse)
 async def delete_document(
     document_id: str,
@@ -364,3 +432,50 @@ async def delete_document(
         raise NotFoundError("Document", document_id)
     await c.property_store.delete_document(document_id)
     return DeleteResponse(deleted=True, id=document_id)
+
+
+# ---------------------------------------------------------------------------
+# Format registry endpoints
+# ---------------------------------------------------------------------------
+
+
+class FormatListItem(BaseModel):
+    id: str
+    manager_id: str
+    report_type: str
+    column_signature: str
+    primary_entity_type: str
+    confirmed_by_human: bool
+    use_count: int
+    last_used: str
+
+
+class FormatListResponse(BaseModel):
+    formats: list[FormatListItem]
+
+
+@router.get("/formats", response_model=FormatListResponse)
+async def list_formats(
+    c: Ctr,
+    manager_id: str | None = Query(default=None),
+    confirmed_only: bool = Query(default=False),
+) -> FormatListResponse:
+    """List known ingestion formats from the registry."""
+    formats = await c.format_registry.list_all(
+        manager_id=manager_id,
+        confirmed_only=confirmed_only,
+    )
+    items = [
+        FormatListItem(
+            id=f.id,
+            manager_id=f.manager_id,
+            report_type=f.report_type,
+            column_signature=f.column_signature,
+            primary_entity_type=f.primary_entity_type,
+            confirmed_by_human=f.confirmed_by_human,
+            use_count=f.use_count,
+            last_used=f.last_used.isoformat(),
+        )
+        for f in formats
+    ]
+    return FormatListResponse(formats=items)

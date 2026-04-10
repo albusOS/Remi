@@ -1,13 +1,12 @@
-"""Storage protocols for the domain layer.
+"""Storage and service protocols for the domain layer.
 
 ``PropertyStore`` is the single storage port for all domain entities.
+``DocumentIngester`` is the port for document ingestion.
 
 Infrastructure ports (TextIndexer, VectorSearch) decouple the
 application layer from ``agent/`` primitives.  Implementations
 live in ``application/stores/``.
 """
-
-from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
@@ -343,3 +342,51 @@ class VectorSearch(abc.ABC):
         min_score: float = 0.0,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[TextSearchHit]: ...
+
+
+# ---------------------------------------------------------------------------
+# Document ingestion port
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class UploadResult:
+    """Result of a document upload through the ingestion pipeline."""
+
+    doc: Document
+    report_type: str = "unknown"
+    status: str = "complete"
+    entities_extracted: int = 0
+    relationships_extracted: int = 0
+    ambiguous_rows: int = 0
+    rows_accepted: int = 0
+    rows_rejected: int = 0
+    rows_skipped: int = 0
+    observations_captured: int = 0
+    validation_warnings: list[object] = field(default_factory=list)
+    review_items: list[object] = field(default_factory=list)
+    pipeline_warnings: list[str] = field(default_factory=list)
+    duplicate_of: Document | None = None
+
+
+class DocumentIngester(abc.ABC):
+    """Port for document ingestion Phase 1 — parse, dedup, save.
+
+    Phase 2 (entity extraction) is handled by the ingestion agent
+    via the kernel's task supervisor. This protocol covers only the
+    synchronous upload path.
+    """
+
+    @abc.abstractmethod
+    async def ingest_upload(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        *,
+        manager: str | None = None,
+        unit_id: str | None = None,
+        property_id: str | None = None,
+        lease_id: str | None = None,
+        document_type: str | None = None,
+    ) -> UploadResult: ...

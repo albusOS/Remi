@@ -43,33 +43,35 @@ _BLOCKED_COMMANDS = [
 # Process-spawning libraries: blocked because the exec wrapper neuters
 # subprocess/os.system at runtime, and allowing the import would let
 # agent code re-import a fresh copy.
-BLOCKED_IMPORTS: frozenset[str] = frozenset({
-    # Network
-    "httpx",
-    "requests",
-    "aiohttp",
-    "urllib3",
-    "httplib2",
-    "pycurl",
-    "grpc",
-    "grpcio",
-    "websockets",
-    "websocket",
-    "socket",
-    "paramiko",
-    "fabric",
-    "ftplib",
-    "smtplib",
-    "imaplib",
-    "poplib",
-    "telnetlib",
-    "xmlrpc",
-    # Process spawning
-    "subprocess",
-    "multiprocessing",
-    "pty",
-    "ctypes",
-})
+BLOCKED_IMPORTS: frozenset[str] = frozenset(
+    {
+        # Network
+        "httpx",
+        "requests",
+        "aiohttp",
+        "urllib3",
+        "httplib2",
+        "pycurl",
+        "grpc",
+        "grpcio",
+        "websockets",
+        "websocket",
+        "socket",
+        "paramiko",
+        "fabric",
+        "ftplib",
+        "smtplib",
+        "imaplib",
+        "poplib",
+        "telnetlib",
+        "xmlrpc",
+        # Process spawning
+        "subprocess",
+        "multiprocessing",
+        "pty",
+        "ctypes",
+    }
+)
 
 
 def build_subprocess_env(extra: dict[str, str] | None = None) -> dict[str, str]:

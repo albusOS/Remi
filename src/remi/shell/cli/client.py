@@ -37,9 +37,7 @@ def get(path: str, params: dict[str, Any] | None = None) -> Any:
         body = e.read().decode() if e.fp else ""
         raise RuntimeError(f"HTTP {e.code}: {body}") from e
     except URLError as exc:
-        raise ConnectionError(
-            f"Cannot reach REMI API at {url}"
-        ) from exc
+        raise ConnectionError(f"Cannot reach REMI API at {url}") from exc
 
 
 def post(path: str, body: dict[str, Any] | None = None) -> Any:
@@ -56,9 +54,51 @@ def post(path: str, body: dict[str, Any] | None = None) -> Any:
         body_text = e.read().decode() if e.fp else ""
         raise RuntimeError(f"HTTP {e.code}: {body_text}") from e
     except URLError as exc:
-        raise ConnectionError(
-            f"Cannot reach REMI API at {url}"
-        ) from exc
+        raise ConnectionError(f"Cannot reach REMI API at {url}") from exc
+
+
+def post_file(
+    path: str,
+    filepath: str,
+    file_bytes: bytes,
+    content_type: str = "application/octet-stream",
+    fields: dict[str, str] | None = None,
+) -> Any:
+    """Multipart file upload to the running REMI API."""
+    import uuid
+
+    boundary = uuid.uuid4().hex
+    body_parts: list[bytes] = []
+
+    if fields:
+        for k, v in fields.items():
+            body_parts.append(
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{k}"\r\n\r\n'
+                f"{v}\r\n".encode()
+            )
+
+    body_parts.append(
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filepath}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n".encode()
+    )
+    body_parts.append(file_bytes)
+    body_parts.append(f"\r\n--{boundary}--\r\n".encode())
+
+    data = b"".join(body_parts)
+    url = _url(path)
+    req = Request(url, data=data, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    req.add_header("Accept", "application/json")
+    try:
+        with urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode())
+    except HTTPError as e:
+        body_text = e.read().decode() if e.fp else ""
+        raise RuntimeError(f"HTTP {e.code}: {body_text}") from e
+    except URLError as exc:
+        raise ConnectionError(f"Cannot reach REMI API at {url}") from exc
 
 
 def _url(path: str, params: dict[str, Any] | None = None) -> str:

@@ -7,7 +7,7 @@ import uuid
 
 import typer
 
-from remi.shell.cli.output import emit_error, emit_success
+from remi.application.cli_output import emit_error, emit_success
 
 cli_group = typer.Typer(
     name="operations",
@@ -42,24 +42,30 @@ def leases(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/leases", {
-            "property_id": property_id,
-            "manager_id": manager_id,
-            "status": status,
-        })
+        data = get(
+            "/leases",
+            {
+                "property_id": property_id,
+                "manager_id": manager_id,
+                "status": status,
+            },
+        )
         emit_success(data, command="remi operations leases")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.lease_resolver.list_leases(
-        property_id=property_id, status=status,
-    ))
+    result = _run(
+        c.lease_resolver.list_leases(
+            property_id=property_id,
+            status=status,
+        )
+    )
     if as_json:
         emit_success(result.model_dump(mode="json"), command="remi operations leases")
         return
-    typer.echo(f"Leases: {result.total}")
-    for le in result.items:
+    typer.echo(f"Leases: {result.count}")
+    for le in result.leases:
         typer.echo(f"  {le.tenant:<30} ${le.rent:>8,.0f}  {le.status}")
 
 
@@ -73,24 +79,27 @@ def maintenance(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/maintenance", {
-            "property_id": property_id,
-            "manager_id": manager_id,
-        })
+        data = get(
+            "/maintenance",
+            {
+                "property_id": property_id,
+                "manager_id": manager_id,
+            },
+        )
         emit_success(data, command="remi operations maintenance")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    result = _run(c.maintenance_resolver.list_requests(property_id=property_id))
+    result = _run(c.maintenance_resolver.list_maintenance(property_id=property_id))
     if as_json:
         emit_success(
             result.model_dump(mode="json"),
             command="remi operations maintenance",
         )
         return
-    typer.echo(f"Maintenance requests: {result.total}")
-    for req in result.items:
+    typer.echo(f"Maintenance requests: {result.count}")
+    for req in result.requests:
         typer.echo(f"  {req.title:<40} {req.status}  {req.priority}")
 
 
@@ -108,7 +117,7 @@ def delinquency(
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    board = _run(c.dashboard_resolver.delinquency_board(manager_id=manager_id))
+    board = _run(c.delinquency_resolver.delinquency_board(manager_id=manager_id))
     emit_success(board.model_dump(mode="json"), command="remi operations delinquency")
 
 
@@ -121,17 +130,24 @@ def expiring_leases(
     if _is_remote():
         from remi.shell.cli.client import get
 
-        data = get("/dashboard/expiring-leases", {
-            "days": days, "manager_id": manager_id,
-        })
+        data = get(
+            "/dashboard/leases/expiring",
+            {
+                "days": days,
+                "manager_id": manager_id,
+            },
+        )
         emit_success(data, command="remi operations expiring-leases")
         return
 
     c = _container()
     _run(c.ensure_bootstrapped())
-    calendar = _run(c.dashboard_resolver.lease_expiration_calendar(
-        days=days, manager_id=manager_id,
-    ))
+    calendar = _run(
+        c.lease_resolver.expiring_leases(
+            days=days,
+            manager_id=manager_id,
+        )
+    )
     emit_success(
         calendar.model_dump(mode="json"),
         command="remi operations expiring-leases",
@@ -151,14 +167,17 @@ def create_action(
     if _is_remote():
         from remi.shell.cli.client import post
 
-        data = post("/actions", {
-            "title": title,
-            "manager_id": manager_id,
-            "priority": priority,
-            "description": description or None,
-            "tenant_id": tenant_id,
-            "property_id": property_id,
-        })
+        data = post(
+            "/actions/items",
+            {
+                "title": title,
+                "manager_id": manager_id,
+                "priority": priority,
+                "description": description or "",
+                "tenant_id": tenant_id,
+                "property_id": property_id,
+            },
+        )
         emit_success(data, command="remi operations create-action")
         return
 
@@ -176,7 +195,7 @@ def create_action(
     item = ActionItem(
         id=f"ai-{uuid.uuid4().hex[:8]}",
         title=title,
-        description=description or None,
+        description=description or "",
         manager_id=manager_id,
         priority=p,
         tenant_id=tenant_id,
@@ -199,7 +218,8 @@ def create_action(
 def create_note(
     content: str = typer.Option(..., help="Note content"),
     entity_type: str = typer.Option(
-        ..., help="Entity type: PropertyManager, Property, Tenant, etc.",
+        ...,
+        help="Entity type: PropertyManager, Property, Tenant, etc.",
     ),
     entity_id: str = typer.Option(..., help="Entity ID"),
 ) -> None:
@@ -207,11 +227,14 @@ def create_note(
     if _is_remote():
         from remi.shell.cli.client import post
 
-        data = post("/notes", {
-            "content": content,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-        })
+        data = post(
+            "/notes",
+            {
+                "content": content,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+            },
+        )
         emit_success(data, command="remi operations create-note")
         return
 

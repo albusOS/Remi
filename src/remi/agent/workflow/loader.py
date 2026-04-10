@@ -27,6 +27,7 @@ from pydantic import TypeAdapter, ValidationError
 from remi.agent.runtime.config import RuntimeConfig
 from remi.agent.workflow.registry import get_manifest_path
 from remi.agent.workflow.types import (
+    ContextMode,
     Wire,
     WorkflowDef,
     WorkflowDefaults,
@@ -107,9 +108,16 @@ def load_workflow(name: str, *, manifest_path: Path | None = None) -> WorkflowDe
     wires = _parse_wires(data.get("wires") or [])
     runtime = _parse_runtime(data)
 
+    raw_ctx_mode = data.get("context_mode", "wires")
+    try:
+        ctx_mode = ContextMode(raw_ctx_mode)
+    except ValueError:
+        ctx_mode = ContextMode.WIRES
+
     return WorkflowDef(
         name=name,
         defaults=defaults,
+        context_mode=ctx_mode,
         steps=tuple(steps),
         wires=tuple(wires),
         runtime=runtime,
@@ -207,16 +215,17 @@ def _parse_wires(raw_wires: list[object]) -> list[Wire]:
         target = str(raw.get("target", ""))
         if "." not in source or "." not in target:
             raise ValueError(
-                f"Wire endpoints must be 'step.port', got "
-                f"source={source!r} target={target!r}"
+                f"Wire endpoints must be 'step.port', got source={source!r} target={target!r}"
             )
         src_step, src_port = source.split(".", 1)
         tgt_step, tgt_port = target.split(".", 1)
-        wires.append(Wire(
-            source_step=src_step,
-            source_port=src_port,
-            target_step=tgt_step,
-            target_port=tgt_port,
-            optional=bool(raw.get("optional", False)),
-        ))
+        wires.append(
+            Wire(
+                source_step=src_step,
+                source_port=src_port,
+                target_step=tgt_step,
+                target_port=tgt_port,
+                optional=bool(raw.get("optional", False)),
+            )
+        )
     return wires

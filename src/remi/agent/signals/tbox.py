@@ -56,15 +56,9 @@ class DomainSchema(BaseModel, frozen=True):
     def from_yaml(cls, raw: dict[str, Any]) -> DomainSchema:
         schema = raw.get("schema", {})
 
-        entity_types = [
-            EntityTypeDef(**et) for et in schema.get("entity_types", [])
-        ]
-        relationships = [
-            RelationshipDef(**r) for r in schema.get("relationships", [])
-        ]
-        processes = [
-            ProcessDef(**p) for p in schema.get("processes", [])
-        ]
+        entity_types = [EntityTypeDef(**et) for et in schema.get("entity_types", [])]
+        relationships = [RelationshipDef(**r) for r in schema.get("relationships", [])]
+        processes = [ProcessDef(**p) for p in schema.get("processes", [])]
 
         return cls(
             entity_types=entity_types,
@@ -84,17 +78,11 @@ class DomainSchema(BaseModel, frozen=True):
 
     def relationships_for(self, entity_name: str) -> list[RelationshipDef]:
         """Return relationships where entity_name is source or target."""
-        return [
-            r for r in self.relationships
-            if r.source == entity_name or r.target == entity_name
-        ]
+        return [r for r in self.relationships if r.source == entity_name or r.target == entity_name]
 
     def processes_involving(self, entity_name: str) -> list[ProcessDef]:
         """Return processes that involve a given entity type."""
-        return [
-            p for p in self.processes
-            if entity_name in p.involves
-        ]
+        return [p for p in self.processes if entity_name in p.involves]
 
 
 # Keep the old name as an alias during transition
@@ -102,28 +90,15 @@ DomainTBox = DomainSchema
 MutableTBox = DomainSchema
 
 
-_domain_yaml_path: Path | None = None
-
-
-def set_domain_yaml_path(path: Path) -> None:
-    """Configure the path to domain.yaml.
-
-    Called once at startup by the composition root (container).
-    """
-    global _domain_yaml_path
-    _domain_yaml_path = path
-
-
-def load_domain_yaml(*, path: Path | None = None) -> dict[str, Any]:
+def load_domain_yaml(path: Path) -> dict[str, Any]:
     """Load domain.yaml and return the raw parsed dict.
 
     Use ``DomainSchema.from_yaml(raw)`` to get a typed schema.
     """
     import yaml
 
-    resolved = path or _domain_yaml_path
-    if resolved is None or not resolved.exists():
+    if not path.exists():
         return {}
-    with open(resolved) as fh:
+    with open(path) as fh:
         data: dict[str, Any] = yaml.safe_load(fh) or {}
     return data

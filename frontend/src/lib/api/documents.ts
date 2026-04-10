@@ -1,5 +1,5 @@
 import { get, post, patch, del, upload as uploadForm, qs } from "./client";
-import type { DocumentMeta, UploadResult, CorrectRowResponse } from "@/lib/types";
+import type { DocumentMeta, UploadResult, CorrectRowResponse, WaitingTask } from "@/lib/types";
 
 export const documentsApi = {
   list: (params?: { q?: string; kind?: string; tags?: string; sort?: string; limit?: number }) =>
@@ -37,4 +37,13 @@ export const documentsApi = {
 
   correctEntity: (entityType: string, entityId: string, corrections: Record<string, unknown>) =>
     post<Record<string, unknown>>("/api/v1/knowledge/correct", { entity_type: entityType, entity_id: entityId, corrections }),
+
+  getWaitingTask: (documentId: string) =>
+    get<WaitingTask>(`/api/v1/documents/tasks/waiting?document_id=${encodeURIComponent(documentId)}`),
+
+  supplyHumanAnswers: (taskId: string, answers: Record<string, string>) =>
+    post<{ task_id: string; resumed: boolean }>("/api/v1/documents/tasks/answer", {
+      task_id: taskId,
+      answers,
+    }),
 };

@@ -24,8 +24,8 @@ import re
 import structlog
 
 from remi.agent.config import AgentConfig, PhaseConfig
-from remi.agent.memory import MemoryStore
 from remi.agent.llm.types import LLMProvider, LLMRequest, TokenUsage, ToolCallRequest
+from remi.agent.memory import MemoryStore
 from remi.agent.observe.types import Tracer
 from remi.agent.observe.usage import LLMUsageLedger
 from remi.agent.runtime.conversation.compaction import (
@@ -268,6 +268,7 @@ async def run_agent_loop(
     tracer: Tracer | None,
     log: structlog.stdlib.BoundLogger,
     max_tool_rounds: int | None = None,
+    max_tokens: int | None = None,
     routing_provider: LLMProvider | None = None,
     usage_ledger: LLMUsageLedger | None = None,
     memory: MemoryStore | None = None,
@@ -279,6 +280,10 @@ async def run_agent_loop(
     ``context_budget`` is the model's context window in tokens.  When > 0,
     the loop checks for compaction before each LLM call and summarizes
     old exchanges if the thread is approaching the limit.
+
+    ``max_tokens`` is a cumulative token budget for the entire run.
+    When exceeded the loop forces a final synthesis call (same path as
+    tool-round exhaustion) and returns.
 
     Returns the updated thread and cumulative token usage.
     """
@@ -361,9 +366,9 @@ async def run_agent_loop(
         if context_budget > 0:
             level = should_compact(thread, context_budget)
             if level == CompactionLevel.COMPACT:
-                thread = await compact_thread(thread, provider, context_budget)
+                thread = await compact_thread(thread, provider, context_budget, model=cfg.model)
             elif level == CompactionLevel.SUMMARIZE:
-                thread = await summarize_old_exchanges(thread, provider, context_budget)
+                thread = await summarize_old_exchanges(thread, provider, context_budget, model=cfg.model)
 
         log.debug(
             "iteration_start",
@@ -421,6 +426,19 @@ async def run_agent_loop(
             has_content=bool(response.content),
             effective_model=request.model,
         )
+
+        if max_tokens is not None and run_usage.total_tokens >= max_tokens:
+            log.warning(
+                "token_budget_exceeded",
+                total_tokens=run_usage.total_tokens,
+                budget=max_tokens,
+                iteration=total_iterations,
+            )
+            content = response.content or ""
+            _remove_previous_scratchpad(thread)
+            thread.append(Message(role="assistant", content=content))
+            produced_answer = bool(content)
+            break
 
         if not response.tool_calls:
             content = response.content or ""

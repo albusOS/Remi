@@ -18,9 +18,10 @@ writes; reads take a snapshot under the lock and return immediately.
 
 from __future__ import annotations
 
+import abc
 import asyncio
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from remi.agent.events.envelope import DomainEvent
 
@@ -33,13 +34,49 @@ class BufferedEvent:
     event: DomainEvent
 
 
-class EventBuffer:
-    """Bounded in-memory event log with cursor-based reads.
+class EventBuffer(abc.ABC):
+    """Bounded event log with cursor-based reads.
 
-    ``append`` assigns a monotonic sequence number; ``read_after`` returns
-    all events with ``seq > after``.  The caller's ``after`` value is the
-    cursor — ``0`` means "everything currently in the buffer."
+    Implementations store recent domain events and expose them via
+    monotonic sequence cursors.  ``read_after(cursor)`` returns events
+    newer than the cursor; ``append`` assigns the next cursor value.
+
+    The in-memory implementation (``InMemoryEventBuffer``) uses a
+    ``collections.deque`` ring buffer.  A Redis Streams implementation
+    can replace it without changing consumers.
     """
+
+    @property
+    @abc.abstractmethod
+    def latest_seq(self) -> int: ...
+
+    @abc.abstractmethod
+    async def append(self, event: DomainEvent) -> int:
+        """Store an event and return its sequence number."""
+
+    @abc.abstractmethod
+    async def read_after(
+        self,
+        after: int,
+        limit: int = 100,
+    ) -> list[BufferedEvent]:
+        """Return up to ``limit`` events with seq > ``after``."""
+
+    @abc.abstractmethod
+    async def wait_for_events(self, after: int, timeout: float = 0) -> bool:
+        """Wait until new events exist beyond ``after``, or timeout."""
+
+    @property
+    @abc.abstractmethod
+    def size(self) -> int: ...
+
+    @property
+    @abc.abstractmethod
+    def capacity(self) -> int: ...
+
+
+class InMemoryEventBuffer(EventBuffer):
+    """Bounded in-memory ring buffer implementation of ``EventBuffer``."""
 
     def __init__(self, capacity: int = 4096) -> None:
         self._capacity = capacity
@@ -53,7 +90,6 @@ class EventBuffer:
         return self._seq
 
     async def append(self, event: DomainEvent) -> int:
-        """Store an event and return its sequence number."""
         async with self._lock:
             self._seq += 1
             self._buf.append(BufferedEvent(seq=self._seq, event=event))
@@ -65,7 +101,6 @@ class EventBuffer:
         after: int,
         limit: int = 100,
     ) -> list[BufferedEvent]:
-        """Return up to ``limit`` events with seq > ``after``."""
         async with self._lock:
             snapshot = list(self._buf)
 
@@ -78,11 +113,6 @@ class EventBuffer:
         return result
 
     async def wait_for_events(self, after: int, timeout: float = 0) -> bool:
-        """Wait until new events exist beyond ``after``, or timeout.
-
-        Returns True if events are available, False on timeout.
-        Used for optional long-poll support.
-        """
         if self._seq > after:
             return True
         if timeout <= 0:

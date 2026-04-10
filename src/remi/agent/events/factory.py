@@ -10,8 +10,16 @@ from __future__ import annotations
 
 import structlog
 
+from pydantic import BaseModel
+
 from remi.agent.events.bus import EventBus, InMemoryEventBus
-from remi.types.config import EventBusSettings
+
+
+class EventBusSettings(BaseModel):
+    """Event bus backend — ``memory`` for single-process, ``redis`` for cross-process."""
+
+    backend: str = "memory"
+    url: str = ""
 
 logger = structlog.get_logger(__name__)
 
@@ -31,7 +39,4 @@ def build_event_bus(settings: EventBusSettings) -> EventBus:
             "and register it here when Redis pub/sub is needed."
         )
 
-    raise ValueError(
-        f"Unknown event bus backend: {backend!r}. "
-        f"Supported: memory, redis"
-    )
+    raise ValueError(f"Unknown event bus backend: {backend!r}. Supported: memory, redis")

@@ -16,17 +16,24 @@ class InMemoryEntityStore(EntityStore):
         self._links: list[GraphLink] = []
 
     async def put_entity(
-        self, id: str, type_name: str, properties: dict[str, Any],
+        self,
+        id: str,
+        type_name: str,
+        properties: dict[str, Any],
     ) -> None:
         existing = self._entities.get(id)
         if existing is not None:
             merged = {**existing.properties, **properties}
             self._entities[id] = GraphObject(
-                id=id, type_name=type_name, properties=merged,
+                id=id,
+                type_name=type_name,
+                properties=merged,
             )
         else:
             self._entities[id] = GraphObject(
-                id=id, type_name=type_name, properties=dict(properties),
+                id=id,
+                type_name=type_name,
+                properties=dict(properties),
             )
 
     async def put_link(

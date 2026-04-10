@@ -15,13 +15,13 @@ The recall service is injected into the runtime via ``RunDeps``.
 from __future__ import annotations
 
 from remi.agent.memory.store import MemoryStore
-from remi.agent.memory.types import MemoryEntry, MemoryNamespace
+from remi.agent.memory.types import MemoryEntry, MemoryNamespace, RecallService
 
 _CHARS_PER_TOKEN = 4
 _DEFAULT_TOKEN_BUDGET = 2000
 
 
-class MemoryRecallService:
+class MemoryRecallService(RecallService):
     """Cross-namespace memory retrieval with relevance ranking."""
 
     def __init__(
