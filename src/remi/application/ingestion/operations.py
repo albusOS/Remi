@@ -9,7 +9,7 @@ rules-first path (``run_deterministic_pipeline``) and the YAML workflow tools
 import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import structlog
@@ -23,6 +23,7 @@ from remi.application.core.models import (
     MaintenanceStatus,
     Note,
     NoteProvenance,
+    OccupancyStatus,
     Owner,
     Priority,
     Property,
@@ -53,19 +54,24 @@ from remi.application.ingestion.rules import (
     PERSISTABLE_TYPES,
     PRIORITY_MAP,
     REPORT_CAN_CREATE,
+    REPORT_FIELD_AUTHORITY,
     TENANT_STATUS_MAP,
+    LeaseTagFields,
     is_inactive_property,
     is_junk_property,
     is_manager_tag,
     is_section_header,
+    is_summary_row,
     normalize_address,
     parse_address,
+    parse_lease_tags,
     property_name,
     split_bd_ba,
     to_date,
     to_decimal,
     to_decimal_or_none,
     to_int,
+    validate_row_plausibility,
 )
 from remi.types.identity import (
     balance_observation_id as _bal_obs_id,
@@ -226,6 +232,7 @@ class IngestionCtx:
         "real_manager_tags",
         "property_manager",
         "extracted_entity_ids",
+        "as_of_date",
     )
 
     def __init__(
@@ -239,6 +246,7 @@ class IngestionCtx:
         manager_resolver: ManagerResolver,
         result: IngestionResult,
         upload_manager_id: str | None = None,
+        as_of_date: date | None = None,
     ) -> None:
         self.platform = platform
         self.report_type = report_type
@@ -248,6 +256,7 @@ class IngestionCtx:
         self.manager_resolver = manager_resolver
         self.result = result
         self.upload_manager_id = upload_manager_id
+        self.as_of_date = as_of_date
         self.seen_properties: set[str] = set()
         self.prop_manager_tags: dict[str, str] = {}
         self.real_manager_tags: set[str] = set()
@@ -255,9 +264,24 @@ class IngestionCtx:
         self.extracted_entity_ids: list[tuple[str, str]] = []
 
 
+_FK_COUNTS: dict[str, int] = {
+    "Property": 1,        # MANAGED_BY
+    "Unit": 1,            # BELONGS_TO (property)
+    "Lease": 3,           # HAS_UNIT, TENANT_ON, BELONGS_TO (property)
+    "Tenant": 0,
+    "BalanceObservation": 2,  # tenant, property
+    "MaintenanceRequest": 2,  # unit, property
+    "PropertyManager": 0,
+    "Owner": 0,
+    "Vendor": 0,
+    "Note": 1,            # entity_id
+}
+
+
 async def _record_extracted(ctx: IngestionCtx, entity_id: str, entity_type: str) -> None:
     ctx.extracted_entity_ids.append((entity_id, entity_type))
     ctx.result.entities_created += 1
+    ctx.result.relationships_created += _FK_COUNTS.get(entity_type, 0)
 
 
 def _primary_manager_tag(raw_tag: str) -> str:
@@ -423,7 +447,7 @@ async def _ensure_property(row: dict[str, Any], ctx: IngestionCtx) -> str | None
 
 _NON_ENTITY_KEYS = frozenset({
     "type", "extra_fields", "_section_label",
-    "site_manager_name", "_manager_tag", "_lease_tags",
+    "site_manager_name", "_manager_tag",
 })
 
 
@@ -460,6 +484,10 @@ def apply_column_map(
 
         if extra:
             out["extra_fields"] = extra
+
+        if is_summary_row(raw_row):
+            total_skipped += 1
+            continue
 
         bd_ba = out.pop("_bd_ba", None)
         if bd_ba is not None:
@@ -531,6 +559,19 @@ def apply_column_map(
             total_skipped += 1
             continue
 
+        # Plausibility check — catches cross-column mapping errors (e.g. a
+        # date serial number landing in monthly_rent, or a dollar amount in
+        # unit_count). Warnings don't block persistence; they're logged and
+        # surfaced to callers as RowWarnings for review.
+        issues = validate_row_plausibility(out)
+        if issues:
+            out["_plausibility_warnings"] = issues
+            _log.warning(
+                "row_plausibility_warning",
+                entity_type=entity_type,
+                issues=issues,
+            )
+
         mapped.append(out)
 
     if total_skipped:
@@ -580,6 +621,21 @@ def validate_rows(rows: list[dict[str, Any]], result: IngestionResult) -> list[d
             result.observation_rows.append(row)
             result.rows_skipped += 1
             continue
+
+        # Plausibility warnings were set by apply_column_map. Emit them as
+        # RowWarnings so callers can surface them in review_items / upload response.
+        plaus_issues: list[str] = row.pop("_plausibility_warnings", [])
+        for issue_text in plaus_issues:
+            result.validation_warnings.append(
+                RowWarning(
+                    row_index=idx,
+                    row_type=entity_type,
+                    field="",
+                    issue=f"plausibility: {issue_text}",
+                    raw_value="",
+                )
+            )
+
         required = _PERSISTER_REQUIREMENTS.get(entity_type, frozenset())
         missing = [f for f in required if not _has_value(row, f)]
         if missing:
@@ -617,6 +673,37 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _confidence_merge(
+    existing: _BaseModel,
+    updates: dict[str, object],
+    report_type: ReportType,
+    entity_type: str,
+) -> dict[str, object]:
+    """Merge updates into an existing entity using field authority rules.
+
+    Authority fields (per REPORT_FIELD_AUTHORITY): overwrite even if the
+    existing value is non-null — the report type owns these fields.
+    Non-authority fields: only fill if the existing value is None, empty
+    string, or zero Decimal.
+    """
+    from decimal import Decimal as _Dec
+
+    authority = REPORT_FIELD_AUTHORITY.get(
+        report_type.value, {},
+    ).get(entity_type, frozenset())
+    merged: dict[str, object] = {}
+    for field, value in updates.items():
+        if value is None:
+            continue
+        if field in authority:
+            merged[field] = value
+        else:
+            current = getattr(existing, field, None)
+            if current is None or current == "" or current == _Dec("0"):
+                merged[field] = value
+    return merged
+
+
 async def _reconcile_lease(ctx: IngestionCtx, new_lease: Lease) -> None:
     existing_active = await ctx.ps.list_leases(unit_id=new_lease.unit_id, status=LeaseStatus.ACTIVE)
     for existing in existing_active:
@@ -628,10 +715,38 @@ async def _reconcile_lease(ctx: IngestionCtx, new_lease: Lease) -> None:
             )
     prior = await ctx.ps.get_lease(new_lease.id)
     now = _utcnow()
-    update: dict[str, object] = {"last_confirmed_at": now}
-    if prior is None:
-        update["first_seen_at"] = now
-    await ctx.ps.upsert_lease(new_lease.model_copy(update=update))  # type: ignore[arg-type]
+
+    if prior is not None:
+        new_fields = {
+            k: v for k, v in new_lease.model_dump().items()
+            if k not in ("id", "unit_id", "tenant_id", "property_id",
+                         "content_hash", "first_seen_at", "last_confirmed_at")
+        }
+        merged = _confidence_merge(prior, new_fields, ctx.report_type, "Lease")
+        merged["last_confirmed_at"] = now
+        merged["source_document_id"] = ctx.doc_id
+        final = prior.model_copy(update=merged)
+    else:
+        final = new_lease.model_copy(update={
+            "first_seen_at": now, "last_confirmed_at": now,
+        })
+
+    await ctx.ps.upsert_lease(_with_hash(final))  # type: ignore[arg-type]
+
+
+# Maps AppFolio rent roll section headers to canonical OccupancyStatus values.
+# "current" = occupied with active lease. "notice" = tenant gave notice but
+# hasn't vacated. "vacant" = empty. All other values are treated as unknown.
+_SECTION_TO_OCCUPANCY: dict[str, OccupancyStatus] = {
+    "current": OccupancyStatus.OCCUPIED,
+    "notice": OccupancyStatus.NOTICE_UNRENTED,
+    "notice-rented": OccupancyStatus.NOTICE_RENTED,
+    "notice-unrented": OccupancyStatus.NOTICE_UNRENTED,
+    "vacant": OccupancyStatus.VACANT_UNRENTED,
+    "vacant-rented": OccupancyStatus.VACANT_RENTED,
+    "vacant-unrented": OccupancyStatus.VACANT_UNRENTED,
+    "month-to-month": OccupancyStatus.OCCUPIED,
+}
 
 
 async def persist_unit(row: dict[str, Any], ctx: IngestionCtx) -> None:
@@ -652,27 +767,44 @@ async def persist_unit(row: dict[str, Any], ctx: IngestionCtx) -> None:
     unum = str(row.get("unit_number") or "main").strip()
     uid = _unit_id(prop_id, unum)
 
-    unit_kwargs: dict[str, Any] = {
-        "id": uid,
-        "property_id": prop_id,
-        "unit_number": unum,
-        "source_document_id": ctx.doc_id,
-    }
+    proposed: dict[str, Any] = {"source_document_id": ctx.doc_id}
     beds = to_int(row.get("bedrooms"))
     if beds is not None:
-        unit_kwargs["bedrooms"] = beds
+        proposed["bedrooms"] = beds
     baths_raw = row.get("bathrooms")
     if baths_raw is not None:
         with contextlib.suppress(ValueError, TypeError):
-            unit_kwargs["bathrooms"] = float(baths_raw)
+            proposed["bathrooms"] = float(baths_raw)
     sqft = to_int(row.get("sqft"))
     if sqft is not None:
-        unit_kwargs["sqft"] = sqft
+        proposed["sqft"] = sqft
     market = to_decimal_or_none(row.get("market_rent"))
     if market is not None:
-        unit_kwargs["market_rent"] = market
+        proposed["market_rent"] = market
 
-    await ctx.ps.upsert_unit(_with_hash(Unit(**unit_kwargs)))  # type: ignore[arg-type]
+    # Rent roll / vacancy section header → occupancy_status.
+    # The section label ("Current", "Vacant", "Notice") is set on every row by
+    # apply_column_map. When a full Lease record can't be created (no tenant
+    # name or rent in the report), this is the only occupancy signal we have.
+    section = str(row.get("_section_label") or "").strip().lower()
+    occ_status = _SECTION_TO_OCCUPANCY.get(section)
+    if occ_status is not None:
+        proposed["occupancy_status"] = occ_status
+
+    # days_vacant from the "Days Vacant" column — meaningful for vacant units.
+    dv = to_int(row.get("days_vacant"))
+    if dv is not None:
+        proposed["days_vacant"] = dv
+
+    existing_unit = await ctx.ps.get_unit(uid)
+    if existing_unit is not None:
+        merged = _confidence_merge(existing_unit, proposed, ctx.report_type, "Unit")
+        merged["source_document_id"] = ctx.doc_id
+        unit = existing_unit.model_copy(update=merged)
+    else:
+        unit = Unit(id=uid, property_id=prop_id, unit_number=unum, **proposed)
+
+    await ctx.ps.upsert_unit(_with_hash(unit))  # type: ignore[arg-type]
     await _record_extracted(ctx, uid, "Unit")
 
     tname = str(row.get("tenant_name") or row.get("name") or "").strip()
@@ -688,6 +820,10 @@ async def persist_unit(row: dict[str, Any], ctx: IngestionCtx) -> None:
         )
         await ctx.ps.upsert_tenant(_with_hash(tenant))  # type: ignore[arg-type]
         await _record_extracted(ctx, tid, "Tenant")
+
+        # Parse Tags column for lease-level signals (subsidy, MTM, notice, renewal).
+        raw_tags = str(row.get("_manager_tag") or "").strip()
+        tag_data: LeaseTagFields = parse_lease_tags(raw_tags)
 
         start = to_date(row.get("move_in_date") or row.get("start_date"))
         end = to_date(row.get("lease_expires") or row.get("end_date"))
@@ -708,7 +844,8 @@ async def persist_unit(row: dict[str, Any], ctx: IngestionCtx) -> None:
         deposit = to_decimal_or_none(row.get("deposit"))
         if deposit is not None:
             lease_kwargs["deposit"] = deposit
-        if row.get("is_month_to_month"):
+        lease_kwargs.update(tag_data.lease_updates())
+        if not lease_kwargs.get("is_month_to_month") and row.get("is_month_to_month"):
             lease_kwargs["is_month_to_month"] = True
 
         await _reconcile_lease(ctx, _with_hash(Lease(**lease_kwargs)))  # type: ignore[arg-type]
@@ -740,23 +877,46 @@ async def persist_tenant(row: dict[str, Any], ctx: IngestionCtx) -> None:
             )
         )  # type: ignore[arg-type]
 
+    # Parse the full Tags column for lease-level and tenant-level signals.
+    # is_manager_tag() already extracted the manager; parse_lease_tags() gets
+    # everything else: subsidy program, MTM, notice clause, eviction status.
+    raw_tags = str(row.get("_manager_tag") or "").strip()
+    tag_data: LeaseTagFields = parse_lease_tags(raw_tags)
+
     raw_st = row.get("tenant_status") or row.get("status") or "current"
-    tenant = Tenant(
-        id=tid,
-        name=tname,
-        status=TENANT_STATUS_MAP.get(str(raw_st).strip().lower(), TenantStatus.CURRENT),
-        source_document_id=ctx.doc_id,
+    effective_status = (
+        tag_data.tenant_status
+        or TENANT_STATUS_MAP.get(str(raw_st).strip().lower(), TenantStatus.CURRENT)
     )
+
+    tenant_updates: dict[str, object] = {
+        "name": tname,
+        "status": effective_status,
+        "source_document_id": ctx.doc_id,
+    }
+    existing_tenant = await ctx.ps.get_tenant(tid)
+    if existing_tenant is not None:
+        merged = _confidence_merge(existing_tenant, tenant_updates, ctx.report_type, "Tenant")
+        merged["source_document_id"] = ctx.doc_id
+        tenant = existing_tenant.model_copy(update=merged)
+    else:
+        tenant = Tenant(id=tid, **tenant_updates)  # type: ignore[arg-type]
+
     await ctx.ps.upsert_tenant(_with_hash(tenant))  # type: ignore[arg-type]
     await _record_extracted(ctx, tid, "Tenant")
 
     obs_id = _bal_obs_id(tid, ctx.doc_id)
+    observed_at = (
+        datetime.combine(ctx.as_of_date, datetime.min.time(), tzinfo=UTC)
+        if ctx.as_of_date is not None
+        else _utcnow()
+    )
     obs = BalanceObservation(
         id=obs_id,
         tenant_id=tid,
         lease_id=None,
         property_id=prop_id,
-        observed_at=_utcnow(),
+        observed_at=observed_at,
         balance_total=to_decimal(
             row.get("balance_total") or row.get("amount_owed") or row.get("balance_owed")
         ),
@@ -767,6 +927,30 @@ async def persist_tenant(row: dict[str, Any], ctx: IngestionCtx) -> None:
     )
     await ctx.ps.insert_balance_observation(obs)
     await _persist_delinquency_notes(row, ctx, tid)
+
+    # Graph enrichment: walk Tenant → TENANT_ON → Lease and propagate any
+    # tag-derived fields (subsidy_program, notice_days, is_month_to_month,
+    # renewal_status). Delinquency reports are often the only source of these
+    # signals — they must not be discarded just because this row's entity type
+    # is BalanceObservation.
+    lease_updates = tag_data.lease_updates()
+    if lease_updates:
+        existing_leases = await ctx.ps.list_leases(
+            tenant_id=tid, property_id=prop_id, status=LeaseStatus.ACTIVE
+        )
+        for existing_lease in existing_leases:
+            merged = _confidence_merge(
+                existing_lease, lease_updates, ctx.report_type, "Lease",
+            )
+            if merged:
+                enriched = _with_hash(existing_lease.model_copy(update=merged))
+                await ctx.ps.upsert_lease(enriched)  # type: ignore[arg-type]
+                _log.info(
+                    "lease_enriched_from_tags",
+                    lease_id=existing_lease.id,
+                    tenant_id=tid,
+                    fields=list(merged),
+                )
 
 
 async def _persist_delinquency_notes(
@@ -814,40 +998,48 @@ async def persist_lease(row: dict[str, Any], ctx: IngestionCtx) -> None:
     lid = _lease_id(tname, prop_id, unum)
     rent = to_decimal(row.get("monthly_rent"))
 
-    unit_kwargs: dict[str, Any] = {
-        "id": uid,
-        "property_id": prop_id,
-        "unit_number": unum,
-        "source_document_id": ctx.doc_id,
-    }
+    unit_proposed: dict[str, Any] = {"source_document_id": ctx.doc_id}
     sqft = to_int(row.get("sqft"))
     if sqft is not None:
-        unit_kwargs["sqft"] = sqft
+        unit_proposed["sqft"] = sqft
     market = to_decimal_or_none(row.get("market_rent"))
     if market is not None:
-        unit_kwargs["market_rent"] = market
+        unit_proposed["market_rent"] = market
     beds = to_int(row.get("bedrooms"))
     if beds is not None:
-        unit_kwargs["bedrooms"] = beds
+        unit_proposed["bedrooms"] = beds
     baths_raw = row.get("bathrooms")
     if baths_raw is not None:
         with contextlib.suppress(ValueError, TypeError):
-            unit_kwargs["bathrooms"] = float(baths_raw)
+            unit_proposed["bathrooms"] = float(baths_raw)
 
-    await ctx.ps.upsert_unit(_with_hash(Unit(**unit_kwargs)))  # type: ignore[arg-type]
+    existing_unit = await ctx.ps.get_unit(uid)
+    if existing_unit is not None:
+        u_merged = _confidence_merge(existing_unit, unit_proposed, ctx.report_type, "Unit")
+        u_merged["source_document_id"] = ctx.doc_id
+        unit = existing_unit.model_copy(update=u_merged)
+    else:
+        unit = Unit(id=uid, property_id=prop_id, unit_number=unum, **unit_proposed)
+    await ctx.ps.upsert_unit(_with_hash(unit))  # type: ignore[arg-type]
     await _record_extracted(ctx, uid, "Unit")
 
-    await ctx.ps.upsert_tenant(
-        _with_hash(
-            Tenant(
-                id=tid,
-                name=tname,
-                phone=(str(row.get("phone_numbers") or row.get("phone") or "").strip() or None),
-                source_document_id=ctx.doc_id,
-            )
-        )
-    )  # type: ignore[arg-type]
+    tenant_proposed: dict[str, object] = {
+        "name": tname,
+        "phone": str(row.get("phone_numbers") or row.get("phone") or "").strip() or None,
+        "source_document_id": ctx.doc_id,
+    }
+    existing_tenant = await ctx.ps.get_tenant(tid)
+    if existing_tenant is not None:
+        t_merged = _confidence_merge(existing_tenant, tenant_proposed, ctx.report_type, "Tenant")
+        t_merged["source_document_id"] = ctx.doc_id
+        tenant = existing_tenant.model_copy(update=t_merged)
+    else:
+        tenant = Tenant(id=tid, **tenant_proposed)  # type: ignore[arg-type]
+    await ctx.ps.upsert_tenant(_with_hash(tenant))  # type: ignore[arg-type]
     await _record_extracted(ctx, tid, "Tenant")
+
+    raw_tags = str(row.get("_manager_tag") or "").strip()
+    tag_data: LeaseTagFields = parse_lease_tags(raw_tags)
 
     start = to_date(row.get("move_in_date") or row.get("start_date"))
     end = to_date(row.get("lease_expires") or row.get("end_date"))
@@ -868,7 +1060,8 @@ async def persist_lease(row: dict[str, Any], ctx: IngestionCtx) -> None:
     deposit = to_decimal_or_none(row.get("deposit"))
     if deposit is not None:
         lease_kwargs["deposit"] = deposit
-    if row.get("is_month_to_month"):
+    lease_kwargs.update(tag_data.lease_updates())
+    if not lease_kwargs.get("is_month_to_month") and row.get("is_month_to_month"):
         lease_kwargs["is_month_to_month"] = True
 
     await _reconcile_lease(ctx, _with_hash(Lease(**lease_kwargs)))  # type: ignore[arg-type]
@@ -980,8 +1173,8 @@ async def persist_manager(row: dict[str, Any], ctx: IngestionCtx) -> None:
         mid = _manager_id(mgr_name)
         tag = str(row.get("manager_tag") or raw_name).strip()
         existing = await ctx.ps.get_manager(mid)
-        base = existing or PropertyManager(id=mid, name=mgr_name)
-        updates: dict[str, str | int | None] = {
+        proposed: dict[str, str | int | None] = {
+            "name": mgr_name,
             "manager_tag": tag,
             "source_document_id": ctx.doc_id,
         }
@@ -995,12 +1188,20 @@ async def persist_manager(row: dict[str, Any], ctx: IngestionCtx) -> None:
         ):
             raw = str(row.get(key) or "").strip() or None
             if raw is not None:
-                updates[field] = raw
+                proposed[field] = raw
         raw_max = row.get("max_units")
         if raw_max is not None:
             with contextlib.suppress(TypeError, ValueError):
-                updates["max_units"] = int(raw_max)
-        manager = base.model_copy(update=updates)
+                proposed["max_units"] = int(raw_max)
+
+        if existing is not None:
+            merged = _confidence_merge(
+                existing, proposed, ctx.report_type, "PropertyManager",  # type: ignore[arg-type]
+            )
+            merged["source_document_id"] = ctx.doc_id
+            manager = existing.model_copy(update=merged)
+        else:
+            manager = PropertyManager(id=mid, **proposed)  # type: ignore[arg-type]
         await ctx.ps.upsert_manager(_with_hash(manager))  # type: ignore[arg-type]
         await _record_extracted(ctx, mid, "PropertyManager")
 
@@ -1071,6 +1272,7 @@ async def run_deterministic_pipeline(
     column_map: dict[str, str] = extract_data.get("column_map", {})
     entity_type: str = extract_data.get("primary_entity_type", "")
     section_header: str | None = extract_data.get("section_header_column")
+    as_of_date: date | None = extract_data.get("as_of_date")
 
     try:
         rt = ReportType(report_type)
@@ -1085,6 +1287,7 @@ async def run_deterministic_pipeline(
         ps=ps,
         manager_resolver=ManagerResolver(ps),
         result=result,
+        as_of_date=as_of_date,
     )
     result.report_type = rt
 

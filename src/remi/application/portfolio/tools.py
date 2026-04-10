@@ -84,7 +84,9 @@ class PortfolioToolProvider(ToolProvider):
         )
 
     async def _dashboard_op(self, args: dict[str, Any]) -> dict[str, Any]:
-        overview = await self._dashboard.dashboard_overview()
+        overview = await self._dashboard.dashboard_overview(
+            manager_id=args.get("manager_id"),
+        )
         return overview.model_dump(mode="json")
 
     async def _managers_op(self, args: dict[str, Any]) -> dict[str, Any]:

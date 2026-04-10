@@ -44,17 +44,17 @@ modules:
 
         ## Workflow
 
-        1. Call `portfolio_query(operation="manager_review", manager_id=X)` to get the
+        1. Call `query(operation="manager_review", manager_id=X)` to get the
            full manager data: summary, metrics, properties, action items, and notes.
-        2. Call `operations_query(operation="delinquency", manager_id=X)` for delinquency.
-           Call `operations_query(operation="expiring_leases", manager_id=X)` for leases.
-           Call `operations_query(operation="vacancies", manager_id=X)` for vacancies.
+        2. Call `query(operation="delinquency", manager_id=X)` for delinquency.
+           Call `query(operation="expiring_leases", manager_id=X)` for leases.
+           Call `query(operation="vacancies", manager_id=X)` for vacancies.
         3. Call `memory_read(query="meeting brief for [manager name]")` to
            recall any prior meeting context or corrections.
         4. Analyze the data: identify 3-5 themes (revenue leakage, turnover
            risk, maintenance backlog, collection problems, marketing gaps).
         5. If a theme needs deeper investigation, drill in:
-           - `portfolio_query(operation="rent_roll", property_id=X)` for unit-level detail
+           - `query(operation="rent_roll", property_id=X)` for unit-level detail
         6. Produce the structured brief as your final response.
         7. Save a memory of this brief for future reference:
            `memory_write(key="last_brief_[manager_id]", content="...",
@@ -112,15 +112,14 @@ modules:
         - Prioritize ruthlessly — a director should scan this in < 1 minute.
 
       skills_paths:
-        - src/remi/application/agents/brief_writer/skills
+        - .remi/skills
 
       input_template: "{input}"
       output_contract: json
       response_format: json
 
       tools:
-        - name: portfolio_query
-        - name: operations_query
+        - name: query
         - name: memory_write
         - name: memory_read
 

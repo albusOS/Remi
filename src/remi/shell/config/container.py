@@ -33,19 +33,17 @@ from remi.application.ingestion import (
     FormatRegistry,
     InMemoryFormatRegistry,
 )
-from remi.application.intelligence import IntelligenceToolProvider, SearchService, TrendResolver
+from remi.application.intelligence import SearchService, TrendResolver
 from remi.application.operations import (
     DelinquencyResolver,
     LeaseResolver,
     MaintenanceResolver,
-    OperationsToolProvider,
     VacancyResolver,
 )
 from remi.application.portfolio import (
     AutoAssignService,
     DashboardBuilder,
     ManagerResolver,
-    PortfolioToolProvider,
     PropertyResolver,
     RentRollResolver,
 )
@@ -57,8 +55,8 @@ from remi.application.stores import (
 )
 from remi.application.stores.indexer import AgentVectorSearch
 from remi.application.stores.world import build_re_world_model
-from remi.application.ingestion.documents import DocumentToolProvider
 from remi.application.ingestion.tools import IngestionToolProvider
+from remi.application.tools import DocumentToolProvider, MutationToolProvider, QueryToolProvider
 from remi.shell.config.settings import RemiSettings
 
 
@@ -176,33 +174,32 @@ class Container:
             empty_state_label=profile.empty_state_label,
         ))
 
-        # -- RE tool providers (per-slice) -------------------------------------
+        # -- RE tool providers -------------------------------------------------
         re_providers: list[ToolProvider] = [
-            PortfolioToolProvider(
+            QueryToolProvider(
                 manager_resolver=self.manager_resolver,
                 property_resolver=self.property_resolver,
                 rent_roll_resolver=self.rent_roll_resolver,
                 dashboard_builder=self.dashboard_builder,
-                property_store=self.property_store,
-            ),
-            OperationsToolProvider(
                 lease_resolver=self.lease_resolver,
                 maintenance_resolver=self.maintenance_resolver,
                 delinquency_resolver=self.delinquency_resolver,
                 vacancy_resolver=self.vacancy_resolver,
-            ),
-            IntelligenceToolProvider(
                 search_service=self.search_service,
                 trend_resolver=self.trend_resolver,
                 property_store=self.property_store,
-                event_store=self.event_store,
-                event_bus=self.event_bus,
+                domain_schema=self.domain_schema,
             ),
             DocumentToolProvider(
                 content_store=self.content_store,
                 property_store=self.property_store,
                 document_ingest=self.document_ingest,
                 vector_search=vector_search,
+            ),
+            MutationToolProvider(
+                property_store=self.property_store,
+                event_store=self.event_store,
+                event_bus=self.event_bus,
             ),
             IngestionToolProvider(
                 content_store=self.content_store,

@@ -60,35 +60,42 @@ modules:
 
         ## Data access — tools (fastest to slowest)
 
-        **`portfolio_query` tool** — managers, properties, dashboard, rent rolls:
-          - `portfolio_query(operation="dashboard")` — portfolio overview
-          - `portfolio_query(operation="managers")` — all managers with metrics
-          - `portfolio_query(operation="manager_review", manager_id="X")` — full review
-          - `portfolio_query(operation="properties", manager_id="X")` — property list
-          - `portfolio_query(operation="rent_roll", property_id="X")` — rent roll
-          - `portfolio_query(operation="rankings", sort_by="delinquency_rate")` — rankings
+        **`query` tool** — all in-process data access (~10ms, no subprocess):
 
-        **`operations_query` tool** — leases, delinquency, vacancies, maintenance:
-          - `operations_query(operation="delinquency", manager_id="X")` — delinquent tenants
-          - `operations_query(operation="delinquency", group_by="manager")` — per-manager rollup
-          - `operations_query(operation="expiring_leases", days="90")` — expiring leases
-          - `operations_query(operation="expiring_leases", group_by="manager")` — per-manager rollup
-          - `operations_query(operation="vacancies", manager_id="X")` — vacant units
-          - `operations_query(operation="vacancies", group_by="manager")` — per-manager rollup
-          - `operations_query(operation="leases", property_id="X")` — lease list
-          - `operations_query(operation="maintenance", property_id="X")` — maintenance
+          Portfolio:
+          - `query(operation="dashboard")` — portfolio overview
+          - `query(operation="managers")` — all managers with metrics
+          - `query(operation="manager_review", manager_id="X")` — full review
+          - `query(operation="properties", manager_id="X")` — property list
+          - `query(operation="rent_roll", property_id="X")` — rent roll
+          - `query(operation="rankings", sort_by="delinquency_rate")` — rankings
 
-        **`intelligence_query` tool** — search and trends:
-          - `intelligence_query(operation="search", query="text")` — entity search
-          - `intelligence_query(operation="delinquency_trend", manager_id="X")` — trend
-          - `intelligence_query(operation="occupancy_trend")` — occupancy over time
+          Operations:
+          - `query(operation="delinquency", manager_id="X")` — delinquent tenants
+          - `query(operation="delinquency", group_by="manager")` — per-manager rollup
+          - `query(operation="expiring_leases", days="90")` — expiring leases
+          - `query(operation="expiring_leases", group_by="manager")` — per-manager rollup
+          - `query(operation="vacancies", manager_id="X")` — vacant units
+          - `query(operation="vacancies", group_by="manager")` — per-manager rollup
+          - `query(operation="leases", property_id="X")` — lease list
+          - `query(operation="maintenance", property_id="X")` — maintenance
+
+          Intelligence:
+          - `query(operation="search", query="text")` — entity search
+          - `query(operation="delinquency_trend", manager_id="X")` — trend over time
+          - `query(operation="occupancy_trend")` — occupancy over time
+          - `query(operation="entity_graph", manager_id="X")` — entity counts + relationships
+          - `query(operation="ontology_schema")` — domain entity types and relationships
 
         **`document_list` / `document_query`** — uploaded documents and their content.
 
-        **`bash` + `remi` CLI** — for write operations:
+        **`assert_fact` / `add_context`** — write observations and annotations in-process:
+          - `assert_fact(entity_type="X", properties={...})` — record a new fact
+          - `add_context(entity_type="X", entity_id="Y", context="...")` — annotate an entity
+
+        **`bash` + `remi` CLI** — for write operations not covered above:
           remi operations create-action --title "..." --manager-id X --priority high
           remi operations create-note --content "..." --entity-type X --entity-id X
-          remi intelligence assert-fact --entity-type X --properties '{...}'
 
         **`python`** — computation on data already retrieved. Variables persist.
 
@@ -104,26 +111,23 @@ modules:
 
         ## Rules
 
-        - Prefer slice query tools over CLI — faster and cheaper (no subprocess)
-        - Use `group_by="manager"` on operations_query for manager-level rollups
-        - Use CLI for write operations (create-action, create-note, assert-fact)
+        - Prefer the `query` tool over CLI — faster and cheaper (no subprocess)
+        - Use `group_by="manager"` on delinquency/expiring_leases/vacancies for per-manager rollups
+        - Use `assert_fact`/`add_context` tools for facts and annotations (in-process)
+        - Use CLI for create-action and create-note (write operations with side effects)
         - Use skills as guides when available — they encode best practices
         - Every claim must cite specific data you retrieved
         - Match depth to scope: don't run 8 tool calls to answer a 1-call question
+        - `ontology_schema` and `entity_graph` return pre-rendered markdown — relay verbatim, no reformatting
 
       skills_paths:
-        - src/remi/application/agents/director/skills
+        - .remi/skills
 
       input_template: "{input}"
       output_contract: conversation
       response_format: text
 
       delegates_to:
-        - agent: researcher
-          description: "Deep statistical analysis, cross-property correlations, and structured research reports"
-          constraints:
-            timeout_seconds: 300
-            max_tool_rounds: 20
         - agent: ingester
           description: "Document ingestion — classifies uploaded reports, extracts entities, and persists to the knowledge base"
           constraints:
@@ -136,11 +140,11 @@ modules:
             max_tool_rounds: 6
 
       tools:
-        - name: portfolio_query
-        - name: operations_query
-        - name: intelligence_query
+        - name: query
         - name: document_list
         - name: document_query
+        - name: assert_fact
+        - name: add_context
         - name: python
           description: >
             Persistent Python session. Variables and DataFrames survive between

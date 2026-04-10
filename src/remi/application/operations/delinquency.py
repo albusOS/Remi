@@ -6,6 +6,7 @@ import asyncio
 
 from remi.application.core.models import BalanceObservation
 from remi.application.core.protocols import PropertyStore
+from remi.application.portfolio.properties import property_ids_for_manager
 
 from .views import DelinquencyBoard, DelinquentTenant
 
@@ -21,11 +22,6 @@ def _latest_obs_by_tenant(
     return latest
 
 
-async def _property_ids_for_manager(ps: PropertyStore, manager_id: str) -> set[str]:
-    props = await ps.list_properties(manager_id=manager_id)
-    return {p.id for p in props}
-
-
 class DelinquencyResolver:
     """Delinquency board — tenants with outstanding balances."""
 
@@ -39,7 +35,7 @@ class DelinquencyResolver:
     ) -> DelinquencyBoard:
         allowed: set[str] | None = property_ids
         if allowed is None and manager_id:
-            allowed = await _property_ids_for_manager(self._ps, manager_id)
+            allowed = await property_ids_for_manager(self._ps, manager_id)
 
         all_obs = await self._ps.list_balance_observations()
         if allowed is not None:
@@ -77,7 +73,7 @@ class DelinquencyResolver:
                 DelinquentTenant(
                     tenant_id=obs.tenant_id,
                     tenant_name=tenant.name if tenant else obs.tenant_id,
-                    status=tenant.status.value if tenant else "current",
+                    status=tenant.status.value if tenant else "unknown",
                     property_id=obs.property_id,
                     property_name=prop.name if prop else obs.property_id,
                     manager_id=mgr_id,

@@ -9,8 +9,8 @@ Six tools expose the ingestion pipeline to the agent:
   ``ingest_format_save``    — save a confirmed column mapping to the registry
   ``ingest_finalize``       — update document record and publish completion event
 
-Happy path (known format): analyze → resolve → format_lookup (hit) → run → finalize.
-New format: analyze → resolve → format_lookup (miss) → agent builds map → run → format_save → finalize.
+Happy path (known format): analyze → format_lookup (vocabulary hit) → resolve → run → finalize.
+LLM fallback: analyze → format_lookup (miss) → LLM classify_and_map → resolve → run → finalize.
 """
 
 from __future__ import annotations
@@ -25,14 +25,13 @@ from remi.agent.events import DomainEvent, EventBus
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.models import PropertyManager, ReportType
 from remi.application.core.protocols import PropertyStore
-from remi.application.core.rules import manager_name_from_tag
+from remi.application.core.rules import manager_name_from_tag, normalize_entity_name
 from remi.application.ingestion.formats import (
     FormatRegistry,
     IngestionFormat,
     column_signature,
     format_id,
 )
-from remi.application.core.rules import normalize_entity_name
 from remi.application.ingestion.models import IngestionResult
 from remi.application.ingestion.operations import run_deterministic_pipeline
 from remi.application.ingestion.rules import (
@@ -42,6 +41,7 @@ from remi.application.ingestion.rules import (
     property_name,
     resolve_manager_from_metadata,
 )
+from remi.application.ingestion.vocab import match_columns
 from remi.types.identity import manager_id as _manager_id
 from remi.types.identity import property_id as _property_id
 
@@ -118,9 +118,6 @@ class IngestionToolProvider(ToolProvider):
         fmt_registry = self._format_registry
 
         async def ingest_format_lookup(args: dict[str, Any]) -> Any:
-            if fmt_registry is None:
-                return {"match": False, "reason": "format registry not configured"}
-
             doc_id = args.get("document_id", "")
             manager_id_arg = args.get("manager_id", "")
             report_type_arg = args.get("report_type", "")
@@ -137,48 +134,87 @@ class IngestionToolProvider(ToolProvider):
             if content is None:
                 return {"error": f"Document {doc_id} not found"}
 
-            col_sig = column_signature(content.column_names)
-
-            def _format_hit(fmt: IngestionFormat, *, exact: bool = True) -> dict[str, Any]:
+            # ── Tier 1: Column vocabulary (deterministic, instant) ──────
+            # Fuzzy-match raw headers against the known vocabulary.
+            # If confidence is high enough, return immediately — zero LLM.
+            vocab_result = match_columns(content.column_names)
+            if vocab_result.should_proceed:
+                _log.info(
+                    "format_vocabulary_hit",
+                    doc_id=doc_id,
+                    report_type=vocab_result.report_type,
+                    confidence=vocab_result.confidence,
+                    type_score=vocab_result.type_score,
+                    unrecognized=vocab_result.unrecognized,
+                )
                 return {
                     "match": True,
-                    "exact": exact,
-                    "format_id": fmt.id,
-                    "column_map": fmt.column_map,
-                    "primary_entity_type": fmt.primary_entity_type,
-                    "scope": fmt.scope,
-                    "platform": fmt.platform,
-                    "report_type": fmt.report_type,
-                    "manager_id": fmt.manager_id,
-                    "use_count": fmt.use_count,
-                    "confirmed_by_human": fmt.confirmed_by_human,
+                    "source": "vocabulary",
+                    "column_map": vocab_result.column_map,
+                    "report_type": vocab_result.report_type,
+                    "primary_entity_type": vocab_result.primary_entity_type,
+                    "confidence": vocab_result.confidence,
+                    "unrecognized_columns": vocab_result.unrecognized,
+                    "review_notes": vocab_result.review_notes,
+                    "platform": "appfolio",
                 }
 
-            # Exact match: same manager + report_type + column shape.
-            # Human-confirmed preferred; auto-saved from a previous successful
-            # run is also valid — no human gate for autonomous operation.
-            if manager_id_arg and report_type_arg:
-                exact = await fmt_registry.lookup(
-                    manager_id=manager_id_arg,
-                    report_type=report_type_arg,
-                    col_sig=col_sig,
-                )
-                if exact is not None:
-                    await fmt_registry.record_use(exact.id)
-                    return _format_hit(exact, exact=True)
+            # ── Tier 2: Format registry (learned from prior runs) ───────
+            if fmt_registry is not None:
+                col_sig = column_signature(content.column_names)
 
-            # Signature-only match: same column shape, any manager/type.
-            # Prefer human-confirmed, then most-used auto-saved.
-            by_sig = await fmt_registry.lookup_by_signature(col_sig)
-            if by_sig:
-                best = max(by_sig, key=lambda f: (f.confirmed_by_human, f.use_count))
-                await fmt_registry.record_use(best.id)
-                return _format_hit(best, exact=False)
+                def _format_hit(fmt: IngestionFormat, *, exact: bool = True) -> dict[str, Any]:
+                    return {
+                        "match": True,
+                        "source": "registry",
+                        "exact": exact,
+                        "format_id": fmt.id,
+                        "column_map": fmt.column_map,
+                        "primary_entity_type": fmt.primary_entity_type,
+                        "scope": fmt.scope,
+                        "platform": fmt.platform,
+                        "report_type": fmt.report_type,
+                        "manager_id": fmt.manager_id,
+                        "use_count": fmt.use_count,
+                        "confirmed_by_human": fmt.confirmed_by_human,
+                    }
 
+                if manager_id_arg and report_type_arg:
+                    exact = await fmt_registry.lookup(
+                        manager_id=manager_id_arg,
+                        report_type=report_type_arg,
+                        col_sig=col_sig,
+                    )
+                    if exact is not None:
+                        await fmt_registry.record_use(exact.id)
+                        return _format_hit(exact, exact=True)
+
+                by_sig = await fmt_registry.lookup_by_signature(col_sig)
+                if by_sig:
+                    best = max(by_sig, key=lambda f: (f.confirmed_by_human, f.use_count))
+                    await fmt_registry.record_use(best.id)
+                    return _format_hit(best, exact=False)
+
+            # ── Tier 3: Miss — vocabulary had low confidence, registry empty ─
+            # Return partial vocabulary results so the LLM has a head start.
+            has_partial = len(vocab_result.column_map) > len(vocab_result.unrecognized)
+            _log.info(
+                "format_lookup_miss",
+                doc_id=doc_id,
+                vocab_confidence=vocab_result.confidence,
+                vocab_report_type=vocab_result.report_type,
+                unrecognized=vocab_result.unrecognized,
+            )
             return {
                 "match": False,
-                "column_signature": col_sig,
+                "column_signature": column_signature(content.column_names),
                 "columns": content.column_names,
+                "vocabulary_partial": {
+                    "column_map": vocab_result.column_map,
+                    "report_type": vocab_result.report_type,
+                    "confidence": vocab_result.confidence,
+                    "review_notes": vocab_result.review_notes,
+                } if has_partial else None,
             }
 
         registry.register(
@@ -230,7 +266,10 @@ class IngestionToolProvider(ToolProvider):
             confirmed = args.get("confirmed_by_human", False)
 
             if not all([doc_id, manager_id_arg, report_type_arg, col_map, entity_type]):
-                return {"error": "document_id, manager_id, report_type, column_map, and primary_entity_type are required"}
+                return {
+                    "error": "document_id, manager_id, report_type, "
+                    "column_map, and primary_entity_type are required",
+                }
 
             if isinstance(col_map, str):
                 try:
@@ -724,6 +763,9 @@ class IngestionToolProvider(ToolProvider):
                 )
                 await ps.upsert_document(updated)
 
+            review_notes: list[str] = args.get("review_notes") or []
+            unrecognized_cols: list[str] = args.get("unrecognized_columns") or []
+
             try:
                 await event_bus.publish(
                     DomainEvent(
@@ -736,6 +778,8 @@ class IngestionToolProvider(ToolProvider):
                             "rows_accepted": rows_accepted,
                             "rows_rejected": rows_rejected,
                             "graph_changed": entities_created > 0,
+                            "review_notes": review_notes,
+                            "unrecognized_columns": unrecognized_cols,
                         },
                     )
                 )
@@ -747,6 +791,8 @@ class IngestionToolProvider(ToolProvider):
                 "report_type": rt.value,
                 "manager_id": doc_manager_id,
                 "status": "complete",
+                "review_notes": review_notes,
+                "unrecognized_columns": unrecognized_cols,
             }
 
         registry.register(

@@ -183,7 +183,7 @@ modules:
         - Do not reload data you already have — variables persist.
 
       skills_paths:
-        - src/remi/application/agents/researcher/skills
+        - .remi/skills
 
       input_template: "{input}"
       output_contract: conversation

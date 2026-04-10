@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dc_field
+from datetime import date
 from enum import StrEnum
 from typing import Any as _Any
 
@@ -65,6 +66,11 @@ class RowWarning:
 class IngestionResult:
     document_id: str
     report_type: ReportType = ReportType.UNKNOWN
+
+    # Temporal spine — when the snapshot was taken.  Set from "Exported On" /
+    # "As of" in the report header; None when the report carries no date.
+    as_of_date: date | None = None
+
     entities_created: int = 0
     relationships_created: int = 0
     rows_accepted: int = 0

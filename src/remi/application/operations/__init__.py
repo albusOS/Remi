@@ -19,7 +19,6 @@ string references — they are NOT re-exported here to avoid barrel→api
 from remi.application.operations.delinquency import DelinquencyResolver
 from remi.application.operations.leases import LeaseResolver
 from remi.application.operations.maintenance import MaintenanceResolver
-from remi.application.operations.tools import OperationsToolProvider
 from remi.application.operations.vacancies import VacancyResolver
 from remi.application.operations.views import (
     DelinquencyBoard,
@@ -38,7 +37,6 @@ __all__ = [
     "LeaseCalendar",
     "LeaseResolver",
     "MaintenanceResolver",
-    "OperationsToolProvider",
     "VacancyResolver",
     "VacancyTracker",
     "VacantUnit",

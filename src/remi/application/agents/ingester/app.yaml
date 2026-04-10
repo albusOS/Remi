@@ -28,7 +28,7 @@ runtime:
 
 defaults:
   provider: anthropic
-  model: claude-haiku-4-20250414
+  model: claude-haiku-4-5-20251001
   max_concurrency: 1
 
 context_mode: accumulate

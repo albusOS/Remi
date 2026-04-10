@@ -19,7 +19,6 @@ string references — they are NOT re-exported here to avoid barrel→api
 
 from remi.application.intelligence.assertions import add_context, assert_fact
 from remi.application.intelligence.search import SearchService
-from remi.application.intelligence.tools import IntelligenceToolProvider
 from remi.application.intelligence.trends import TrendResolver
 from remi.application.intelligence.views import (
     DelinquencyTrend,
@@ -33,7 +32,6 @@ from remi.application.intelligence.views import (
 
 __all__ = [
     "DelinquencyTrend",
-    "IntelligenceToolProvider",
     "MaintenanceTrend",
     "OccupancyTrend",
     "RentTrend",

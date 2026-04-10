@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 class LeaseListItem(BaseModel):
     id: str
+    tenant_id: str
     tenant: str
     unit_id: str
     property_id: str
@@ -17,6 +18,10 @@ class LeaseListItem(BaseModel):
     end: str
     rent: float
     status: str
+    subsidy_program: str | None = None
+    notice_days: int | None = None
+    is_month_to_month: bool = False
+    renewal_status: str | None = None
 
 
 class LeaseListResult(BaseModel):

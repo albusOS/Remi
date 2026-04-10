@@ -216,10 +216,28 @@ def parse_excel(
 
 _DO_NOT_USE_RE = re.compile(r"^do\s+not\s+use\s*[-–]?\s*", re.I)
 
+# "136 Units", "17 Units" — section summary rows in rent roll reports.
+_UNITS_SUMMARY_RE = re.compile(r"^\d+\s+units?$", re.I)
+
+# "Mar 2026", "Jun 2026" — month/year section labels in lease expiration reports.
+_MONTH_YEAR_RE = re.compile(
+    r"^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}$", re.I,
+)
+
 
 def _normalize_cell_address(val: str) -> str:
     """Strip 'DO NOT USE' prefixes from address strings."""
     return _DO_NOT_USE_RE.sub("", val).strip()
+
+
+def _is_section_label(val: str, section_labels: frozenset[str]) -> bool:
+    """True when a single-cell value is a section label, not a property address."""
+    lower = val.lower()
+    if section_labels and lower in section_labels:
+        return True
+    if _MONTH_YEAR_RE.match(val):
+        return True
+    return False
 
 
 def _parse_data_rows(
@@ -264,8 +282,12 @@ def _parse_data_rows(
         if len(non_empty) == 1 and n_cols > 1:
             raw_val = str(non_empty[0][1]).strip()
             clean_val = _normalize_cell_address(raw_val)
-            lower_val = clean_val.lower()
-            if section_labels and lower_val in section_labels:
+
+            # "136 Units" etc. — section boundary summaries, not context.
+            if _UNITS_SUMMARY_RE.match(clean_val):
+                continue
+
+            if _is_section_label(clean_val, section_labels):
                 context["_ctx_section_label"] = clean_val
             else:
                 context["_ctx_property_address"] = clean_val

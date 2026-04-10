@@ -9,13 +9,9 @@ from decimal import Decimal
 from remi.application.core.models import LeaseStatus
 from remi.application.core.protocols import PropertyStore
 from remi.application.core.rules import derive_occupancy_status
+from remi.application.portfolio.properties import property_ids_for_manager
 
 from .views import VacancyTracker, VacantUnit
-
-
-async def _property_ids_for_manager(ps: PropertyStore, manager_id: str) -> set[str]:
-    props = await ps.list_properties(manager_id=manager_id)
-    return {p.id for p in props}
 
 
 class VacancyResolver:
@@ -33,7 +29,7 @@ class VacancyResolver:
 
         allowed: set[str] | None = property_ids
         if allowed is None and manager_id:
-            allowed = await _property_ids_for_manager(self._ps, manager_id)
+            allowed = await property_ids_for_manager(self._ps, manager_id)
         if allowed is not None:
             all_units = [u for u in all_units if u.property_id in allowed]
 

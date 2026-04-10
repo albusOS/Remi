@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 from remi.application.core.models import LeaseStatus
 from remi.application.core.protocols import PropertyStore
+from remi.application.portfolio.properties import property_ids_for_manager
 
 from .views import (
     ExpiringLease,
@@ -16,11 +17,6 @@ from .views import (
     LeaseListResult,
     TenantDetail,
 )
-
-
-async def _property_ids_for_manager(ps: PropertyStore, manager_id: str) -> set[str]:
-    props = await ps.list_properties(manager_id=manager_id)
-    return {p.id for p in props}
 
 
 class LeaseResolver:
@@ -36,21 +32,34 @@ class LeaseResolver:
     ) -> LeaseListResult:
         lease_status = LeaseStatus(status) if status else None
         leases = await self._ps.list_leases(property_id=property_id, status=lease_status)
-        items: list[LeaseListItem] = []
-        for le in leases:
-            tenant = await self._ps.get_tenant(le.tenant_id)
-            items.append(
-                LeaseListItem(
-                    id=le.id,
-                    tenant=tenant.name if tenant else le.tenant_id,
-                    unit_id=le.unit_id,
-                    property_id=le.property_id,
-                    start=le.start_date.isoformat(),
-                    end=le.end_date.isoformat(),
-                    rent=float(le.monthly_rent),
-                    status=le.status.value,
-                )
+
+        # Batch-fetch all tenants in one gather instead of N sequential gets.
+        tenant_ids = list({le.tenant_id for le in leases})
+        tenant_results = await asyncio.gather(
+            *[self._ps.get_tenant(tid) for tid in tenant_ids]
+        )
+        tenant_map = {tid: t for tid, t in zip(tenant_ids, tenant_results) if t}
+
+        items: list[LeaseListItem] = [
+            LeaseListItem(
+                id=le.id,
+                tenant_id=le.tenant_id,
+                tenant=tenant_map[le.tenant_id].name
+                if le.tenant_id in tenant_map
+                else le.tenant_id,
+                unit_id=le.unit_id,
+                property_id=le.property_id,
+                start=le.start_date.isoformat(),
+                end=le.end_date.isoformat(),
+                rent=float(le.monthly_rent),
+                status=le.status.value,
+                subsidy_program=le.subsidy_program,
+                notice_days=le.notice_days,
+                is_month_to_month=le.is_month_to_month,
+                renewal_status=le.renewal_status.value if le.renewal_status else None,
             )
+            for le in leases
+        ]
         return LeaseListResult(count=len(items), leases=items)
 
     async def expiring_leases(
@@ -66,7 +75,7 @@ class LeaseResolver:
 
         allowed: set[str] | None = property_ids
         if allowed is None and manager_id:
-            allowed = await _property_ids_for_manager(self._ps, manager_id)
+            allowed = await property_ids_for_manager(self._ps, manager_id)
         if allowed is not None:
             leases = [le for le in leases if le.property_id in allowed]
 

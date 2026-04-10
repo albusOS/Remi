@@ -1,6 +1,9 @@
 """Document tools — in-process calls to ContentStore and ingestion pipeline.
 
 Provides: document_list, document_query, document_search, ingest_document.
+
+Used by all agents that need document access. Separated from the ingestion
+slice because document querying is cross-cutting — not ingestion-specific.
 """
 
 from typing import Any

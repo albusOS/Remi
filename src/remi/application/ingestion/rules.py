@@ -1,16 +1,16 @@
-"""Ingestion utility functions — domain knowledge for the pipeline execution layer.
+"""Ingestion rules — deterministic domain knowledge for the pipeline.
 
 Junk filtering, address normalization, BD/BA parsing, section header detection,
-type coercion (date/decimal/int), and enum maps.
+type coercion (date/decimal/int), enum maps, report authority tables, and
+lease tag parsing.
 
-Column classification and mapping is handled by the ingester agent (LLM).
-These utilities are called by the pipeline execution layer (operations.py)
-after the agent has produced a column_map.
+Column vocabulary and fuzzy header matching live in ``vocab.py``.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -18,9 +18,12 @@ from typing import Any
 import structlog
 
 from remi.application.core.models.address import Address
+from remi.application.core.models.date_range import DateRange
 from remi.application.core.models.enums import (
+    LeaseType,
     MaintenanceStatus,
     Priority,
+    RenewalStatus,
     TenantStatus,
     TradeCategory,
 )
@@ -96,7 +99,13 @@ def is_junk_property(address: str) -> bool:
         return True
     if any(lower.startswith(p) for p in _JUNK_PREFIXES):
         return True
-    return any(kw in lower for kw in _JUNK_CONTAINS)
+    if any(kw in lower for kw in _JUNK_CONTAINS):
+        return True
+    # Pure-numeric strings are AppFolio internal IDs or spreadsheet totals,
+    # never real addresses (e.g. "28", "999", "1877").
+    if re.match(r"^\d+$", lower):
+        return True
+    return False
 
 
 def is_inactive_property(address: str) -> bool:
@@ -263,6 +272,132 @@ def is_manager_tag(tag: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Lease tag parsing — structured field extraction from AppFolio Tags column
+#
+# Tags like "Section 8", "90 Day Notice Clause", "12 Month Renewal" carry
+# lease-level metadata that maps to existing Lease/Tenant model fields.
+# is_manager_tag() already rejects these as manager names; this function
+# extracts the actual information instead of discarding it.
+# ---------------------------------------------------------------------------
+
+_NOTICE_RE = re.compile(r"(\d+)\s*day\s*notice", re.IGNORECASE)
+_RENEWAL_TERM_RE = re.compile(r"(\d+)\s*month\s*renewal", re.IGNORECASE)
+
+_SUBSIDY_TAGS = frozenset({
+    "section 8", "hcvp", "housing choice voucher",
+    "project based voucher", "pbv", "vash", "lihtc",
+})
+
+_MTM_TAGS = frozenset({"mtm", "month to month", "m2m"})
+
+_EVICTION_TAGS = frozenset({
+    "file for eviction", "eviction", "eviction filed",
+    "eviction pending", "filing",
+})
+
+_TAG_TENANT_STATUS: dict[str, TenantStatus] = {
+    "file for eviction": TenantStatus.FILING,
+    "eviction filed": TenantStatus.FILING,
+    "eviction pending": TenantStatus.FILING,
+    "eviction": TenantStatus.EVICT,
+    "filing": TenantStatus.FILING,
+    "notice": TenantStatus.NOTICE,
+}
+
+
+class LeaseTagFields:
+    """Structured fields extracted from a raw tag string.
+
+    Only non-None attributes should be applied to the target entity.
+    """
+
+    __slots__ = (
+        "subsidy_program", "lease_type", "notice_days",
+        "renewal_status", "renewal_term_months",
+        "is_month_to_month", "tenant_status",
+    )
+
+    def __init__(self) -> None:
+        self.subsidy_program: str | None = None
+        self.lease_type: LeaseType | None = None
+        self.notice_days: int | None = None
+        self.renewal_status: RenewalStatus | None = None
+        self.renewal_term_months: int | None = None
+        self.is_month_to_month: bool = False
+        self.tenant_status: TenantStatus | None = None
+
+    @property
+    def has_data(self) -> bool:
+        return (
+            self.subsidy_program is not None
+            or self.lease_type is not None
+            or self.notice_days is not None
+            or self.renewal_status is not None
+            or self.is_month_to_month
+            or self.tenant_status is not None
+        )
+
+    def lease_updates(self) -> dict[str, object]:
+        """Fields to merge into a Lease model_copy(update=...)."""
+        out: dict[str, object] = {}
+        if self.subsidy_program is not None:
+            out["subsidy_program"] = self.subsidy_program
+            out["lease_type"] = LeaseType.SECTION8
+        if self.notice_days is not None:
+            out["notice_days"] = self.notice_days
+        if self.renewal_status is not None:
+            out["renewal_status"] = self.renewal_status
+        if self.renewal_term_months is not None:
+            out["renewal_offer_term_months"] = self.renewal_term_months
+        if self.is_month_to_month:
+            out["is_month_to_month"] = True
+            out["lease_type"] = LeaseType.MONTH_TO_MONTH
+        return out
+
+
+def parse_lease_tags(raw: str) -> LeaseTagFields:
+    """Extract structured lease/tenant fields from a raw AppFolio tag string.
+
+    Comma-separated segments are classified independently. Unrecognized
+    segments are silently skipped — this is intentional; new tag patterns
+    should be added here when discovered, not force-fit into existing fields.
+    """
+    result = LeaseTagFields()
+    if not raw:
+        return result
+
+    segments = [s.strip() for s in raw.split(",") if s.strip()]
+    for seg in segments:
+        lower = seg.lower()
+
+        if lower in _SUBSIDY_TAGS:
+            result.subsidy_program = seg
+            result.lease_type = LeaseType.SECTION8
+            continue
+
+        if lower in _MTM_TAGS:
+            result.is_month_to_month = True
+            continue
+
+        if lower in _EVICTION_TAGS or lower in _TAG_TENANT_STATUS:
+            result.tenant_status = _TAG_TENANT_STATUS.get(lower, TenantStatus.EVICT)
+            continue
+
+        m = _NOTICE_RE.search(seg)
+        if m:
+            result.notice_days = int(m.group(1))
+            continue
+
+        m = _RENEWAL_TERM_RE.search(seg)
+        if m:
+            result.renewal_term_months = int(m.group(1))
+            result.renewal_status = RenewalStatus.OFFERED
+            continue
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Metadata-based manager + scope extraction
 # Deterministic — runs before the LLM touches the document.
 # ---------------------------------------------------------------------------
@@ -288,6 +423,166 @@ def resolve_manager_from_metadata(
         if val and is_manager_tag(val):
             return val, "manager_portfolio"
     return None, "portfolio_wide"
+
+
+# ---------------------------------------------------------------------------
+# Report date extraction
+# AppFolio embeds export date and optional date-range in the pre-header rows.
+# We extract these to populate Document.effective_date and Document.coverage,
+# which are the temporal spine for time-series queries.
+# ---------------------------------------------------------------------------
+
+# Metadata keys are already normalised to lowercase_with_underscores by the parser.
+# We match on these directly rather than reconstructing the original raw line.
+
+# "exported_on" → "02/23/2026 02:44 PM"  (time portion is ignored)
+# "export_date" → same
+_EXPORTED_ON_KEYS = frozenset({"exported_on", "export_date"})
+
+# "as_of" → "03/23/2026"
+_AS_OF_KEYS = frozenset({"as_of"})
+
+# "date_range" → "Mar 2026 to Jun 2026"
+_DATE_RANGE_KEYS = frozenset({"date_range"})
+
+# Value: MM/DD/YYYY (optional trailing time is ignored)
+_MDY_RE = re.compile(r"(\d{1,2}/\d{1,2}/\d{4})")
+
+# Value: "Mon YYYY to Mon YYYY"
+_RANGE_VAL_RE = re.compile(
+    r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})"
+    r"\s+to\s+"
+    r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})",
+    re.I,
+)
+
+# Filename date patterns: YYYYMMDD or YYYY-MM-DD anywhere in the name
+_FILENAME_DATE_RE = re.compile(
+    r"(?:^|[-_])(\d{4})[-_]?(\d{2})[-_]?(\d{2})(?:\.|$|-)"
+)
+
+_MONTH_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _parse_mdy(raw: str) -> date | None:
+    """Extract and parse the first MM/DD/YYYY substring, returning None on failure."""
+    m = _MDY_RE.search(raw)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%m/%d/%Y").date()
+    except ValueError:
+        return None
+
+
+def _parse_mon_year(raw: str) -> tuple[int, int] | None:
+    """Parse 'Mar 2026' → (2026, 3), returning None on failure."""
+    parts = raw.strip().split()
+    if len(parts) != 2:
+        return None
+    month = _MONTH_ABBR.get(parts[0].lower()[:3])
+    try:
+        year = int(parts[1])
+    except ValueError:
+        return None
+    if month is None:
+        return None
+    return year, month
+
+
+def _last_day_of_month(year: int, month: int) -> date:
+    """Return the last calendar day of the given month."""
+    import calendar
+    last = calendar.monthrange(year, month)[1]
+    return date(year, month, last)
+
+
+@dataclass(frozen=True)
+class ReportDates:
+    """Temporal metadata extracted from an AppFolio report.
+
+    ``effective_date`` is the "as of" date — when the snapshot was taken.
+    For most reports this is the export date.  For rent rolls AppFolio also
+    emits an explicit "As of:" field that takes precedence.
+
+    ``coverage`` is the closed date interval the data covers.  Only present
+    on ranged reports (e.g. Lease Expiration, Maintenance History).  For
+    point-in-time snapshots (delinquency, rent roll) it is None.
+    """
+
+    effective_date: date | None
+    coverage: DateRange | None
+
+
+def resolve_report_dates(
+    metadata: dict[str, str],
+    filename: str = "",
+) -> ReportDates:
+    """Extract the temporal spine from AppFolio report metadata + filename.
+
+    Priority for ``effective_date``:
+      1. "As of: MM/DD/YYYY"        (rent roll explicit snapshot date)
+      2. "Exported On: MM/DD/YYYY"  (all other AppFolio reports)
+      3. YYYYMMDD or YYYY-MM-DD in the filename
+      4. None — caller should fall back to upload timestamp
+
+    ``coverage`` is set from "Date Range: Mon YYYY to Mon YYYY" when present.
+    """
+    effective_date: date | None = None
+    coverage: DateRange | None = None
+
+    # Metadata keys are already lowercased + underscored by the parser.
+    # "as_of" takes priority over "exported_on" (rent roll has both).
+    for key, raw_val in metadata.items():
+        val = (raw_val or "").strip()
+        if not val:
+            continue
+
+        if key in _AS_OF_KEYS and effective_date is None:
+            effective_date = _parse_mdy(val)
+
+        elif key in _EXPORTED_ON_KEYS and effective_date is None:
+            effective_date = _parse_mdy(val)
+
+        elif key in _DATE_RANGE_KEYS and coverage is None:
+            m = _RANGE_VAL_RE.search(val)
+            if m:
+                start_parts = _parse_mon_year(m.group(1))
+                end_parts = _parse_mon_year(m.group(2))
+                if start_parts and end_parts:
+                    try:
+                        coverage = DateRange(
+                            start=date(start_parts[0], start_parts[1], 1),
+                            end=_last_day_of_month(end_parts[0], end_parts[1]),
+                        )
+                    except ValueError:
+                        _log.warning(
+                            "report_date_range_invalid",
+                            raw_start=m.group(1),
+                            raw_end=m.group(2),
+                        )
+
+    # Re-scan: "as_of" may appear after "exported_on" in the dict — ensure
+    # it wins even if exported_on was already set.
+    as_of_raw = metadata.get("as_of", "").strip()
+    if as_of_raw:
+        parsed = _parse_mdy(as_of_raw)
+        if parsed is not None:
+            effective_date = parsed
+
+    # Fallback: parse date from filename (e.g. "property_directory-20260330.xlsx")
+    if effective_date is None and filename:
+        fm = _FILENAME_DATE_RE.search(filename)
+        if fm:
+            try:
+                effective_date = date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
+            except ValueError:
+                pass
+
+    return ReportDates(effective_date=effective_date, coverage=coverage)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +642,40 @@ def is_section_header(row: dict[str, Any], property_key: str = "property_address
         return True
     non_empty = sum(1 for v in row.values() if v is not None and str(v).strip())
     return non_empty <= 1 and not prop
+
+
+_SUMMARY_ROW_RE = re.compile(
+    r"^(total|grand\s+total|subtotal|totals)$", re.I,
+)
+
+_UNITS_SUMMARY_RE = re.compile(
+    r"^\d+\s+units?$", re.I,
+)
+
+
+def is_summary_row(row: dict[str, Any]) -> bool:
+    """True when any visible field contains only a summary label like 'Total'.
+
+    AppFolio reports append aggregate rows at section boundaries and at the
+    end. These carry labels in the first text column (e.g. 'Total' in the
+    Tenant Status or Property column) but their numeric columns hold sums,
+    not per-entity values. They must be filtered before persistence.
+
+    Also matches "N Units" summary rows (e.g. "136 Units") that appear
+    between sections in rent roll reports.
+    """
+    for val in row.values():
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text:
+            continue
+        if _SUMMARY_ROW_RE.match(text):
+            return True
+        if _UNITS_SUMMARY_RE.match(text):
+            return True
+        return False
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +742,37 @@ REPORT_CAN_CREATE: dict[str, frozenset[str]] = {
     "manager_directory": frozenset({
         "PropertyManager",
     }),
+}
+
+# ---------------------------------------------------------------------------
+# Field authority — which fields each report type can overwrite on existing
+# entities.  Non-authority fields are fill-only (enrich empty, never clobber).
+# This is the confidence-merge counterpart to REPORT_CAN_CREATE above.
+# ---------------------------------------------------------------------------
+
+REPORT_FIELD_AUTHORITY: dict[str, dict[str, frozenset[str]]] = {
+    "rent_roll": {
+        "Unit": frozenset({"bedrooms", "bathrooms", "sqft", "market_rent", "occupancy_status", "days_vacant"}),
+        "Lease": frozenset({"monthly_rent", "market_rent", "deposit", "is_month_to_month"}),
+        "Tenant": frozenset({"name", "phone"}),
+    },
+    "delinquency": {
+        "Tenant": frozenset({"status"}),
+    },
+    "lease_expiration": {
+        "Lease": frozenset({"start_date", "end_date", "monthly_rent", "market_rent"}),
+        "Tenant": frozenset({"name", "phone"}),
+    },
+    "property_directory": {
+        "Property": frozenset({"manager_id", "address", "unit_count", "status"}),
+        "PropertyManager": frozenset({"name", "email", "phone", "company", "territory"}),
+    },
+    "maintenance": {
+        "MaintenanceRequest": frozenset({
+            "status", "priority", "scheduled_date", "completed_date",
+            "resolved_at", "cost", "vendor", "vendor_id",
+        }),
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -650,4 +1010,96 @@ def property_name(address: str) -> str:
 def parse_address(raw: str) -> Address:
     street, city, state, zipcode = _split_address(raw)
     return Address(street=street or raw.strip(), city=city, state=state, zip_code=zipcode)
+
+
+# ---------------------------------------------------------------------------
+# Row plausibility validation
+#
+# Catches obvious cross-column mapping errors before any entity is persisted.
+# Returns a list of human-readable warnings. An empty list means the row is
+# plausible. Callers decide whether to skip the row or persist with warnings.
+#
+# These checks are intentionally lenient — they flag implausible values, not
+# "wrong" ones, because real-world property data is messy.
+# ---------------------------------------------------------------------------
+
+_RENT_MAX    = 50_000    # USD — anything higher is almost certainly a mismap
+_UNITS_MAX   = 500       # units per property — a Pittsburgh portfolio flag
+_BEDS_MAX    = 12        # bedrooms per unit
+_BALANCE_MAX = 1_000_000 # delinquency balance per tenant
+_DAYS_MAX    = 3_650     # days vacant (10 years) — catches date-in-numeric field
+
+
+def validate_row_plausibility(row: dict[str, Any]) -> list[str]:
+    """Return a list of plausibility warnings for a mapped entity row.
+
+    Does NOT raise — callers log or surface warnings as ReviewItems.
+    """
+    warnings: list[str] = []
+    entity = row.get("type", "unknown")
+
+    def _num(key: str) -> float | None:
+        val = row.get(key)
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    # Rent fields — detect date-string-in-money or unit-count-in-rent
+    for field in ("monthly_rent", "market_rent", "deposit"):
+        v = _num(field)
+        if v is not None:
+            if v < 0:
+                warnings.append(f"{entity}.{field}={v!r} is negative")
+            elif v > _RENT_MAX:
+                warnings.append(
+                    f"{entity}.{field}={v!r} exceeds ${_RENT_MAX:,} — "
+                    "possible mismap (date serial? unit count?)"
+                )
+
+    # Unit count per property — catches rent-dollar-in-unit-count
+    v = _num("unit_count")
+    if v is not None and v > _UNITS_MAX:
+        warnings.append(
+            f"Property.unit_count={v!r} exceeds {_UNITS_MAX} — "
+            "possible mismap"
+        )
+
+    # Bedrooms / bathrooms per unit
+    v = _num("bedrooms")
+    if v is not None and (v < 0 or v > _BEDS_MAX):
+        warnings.append(f"Unit.bedrooms={v!r} is out of range [0, {_BEDS_MAX}]")
+
+    v = _num("bathrooms")
+    if v is not None and (v < 0 or v > _BEDS_MAX + 4):
+        warnings.append(f"Unit.bathrooms={v!r} is out of range")
+
+    # Delinquency balance
+    v = _num("balance_total")
+    if v is not None and v > _BALANCE_MAX:
+        warnings.append(
+            f"BalanceObservation.balance_total={v!r} exceeds ${_BALANCE_MAX:,} — "
+            "possible mismap"
+        )
+
+    # Days vacant — catches a serialised date integer (e.g. 44927 = Jan 2023 in Excel)
+    v = _num("days_vacant")
+    if v is not None and v > _DAYS_MAX:
+        warnings.append(
+            f"Unit.days_vacant={v!r} exceeds {_DAYS_MAX} days — "
+            "possible Excel date serial number in this field"
+        )
+
+    # Tenant / property name that is purely numeric — already junk-filtered for
+    # property_address, but the tenant_name field can also get a mismap.
+    tenant_name = str(row.get("tenant_name") or "").strip()
+    if tenant_name and tenant_name.isdigit():
+        warnings.append(
+            f"Tenant.tenant_name={tenant_name!r} is purely numeric — "
+            "possible mismap"
+        )
+
+    return warnings
 

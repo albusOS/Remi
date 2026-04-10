@@ -6,18 +6,24 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 
-from remi.application.core.models import Lease, LeaseStatus, MaintenanceRequest, Unit
+from remi.application.core.models import (
+    Lease,
+    LeaseStatus,
+    MaintenanceRequest,
+    OccupancyStatus,
+    Unit,
+)
 from remi.application.core.protocols import PropertyStore
 from remi.application.core.rules import (
     active_lease,
     is_below_market,
     is_maintenance_open,
     is_occupied,
-    is_vacant,
     loss_to_lease,
 )
 
 from .views import (
+    DataCoverage,
     ManagerMetrics,
     ManagerRanking,
     ManagerSummary,
@@ -31,6 +37,108 @@ def _group_by_unit(leases: list[Lease]) -> dict[str, list[Lease]]:
     for le in leases:
         result.setdefault(le.unit_id, []).append(le)
     return result
+
+
+def _is_unit_occupied(u: Unit, unit_leases: list[Lease]) -> bool:
+    """True when the unit has an active lease OR the rent roll flagged it occupied.
+
+    Lease evidence is primary. Unit.occupancy_status from the rent roll is the
+    fallback for units where we have physical data but no matching lease record
+    (e.g. the rent roll has lease dates but no tenant name or rent figure).
+    """
+    if is_occupied(unit_leases):
+        return True
+    occ = u.occupancy_status
+    return occ in (
+        OccupancyStatus.OCCUPIED,
+        OccupancyStatus.NOTICE_RENTED,
+        OccupancyStatus.NOTICE_UNRENTED,
+    )
+
+
+def _compute_coverage(
+    all_units: list[Unit],
+    all_leases: list[Lease],
+    all_maint: list[MaintenanceRequest],
+    obs_list: list,
+    declared_units: int,
+) -> DataCoverage:
+    """Infer data completeness from what's actually in the graph.
+
+    No document-store query needed — we check for the presence of physical
+    data fields (beds/baths, market_rent, occupancy_status) that only appear
+    after a rent roll has been ingested.
+    """
+    n_rec = len(all_units)
+    n_dec = max(declared_units, 1)
+
+    has_beds   = sum(1 for u in all_units if u.bedrooms is not None)
+    has_market = sum(1 for u in all_units if u.market_rent and u.market_rent > 0)
+    has_occ_s  = sum(1 for u in all_units if u.occupancy_status is not None)
+
+    has_rent_roll    = n_rec > 0 and (
+        # Rent roll creates unit records for ALL units in the portfolio.
+        # Proxy: record coverage >= 90%, OR any unit has physical data.
+        (n_rec / n_dec >= 0.90)
+        or has_beds > 0
+        or has_occ_s > 0
+    )
+    has_lease_data        = len(all_leases) > 0
+    has_delinquency_data  = len(obs_list) > 0
+    has_maintenance_data  = len(all_maint) > 0
+
+    missing: list[str] = []
+    if not has_rent_roll:
+        missing.append("rent_roll")
+    if not has_lease_data:
+        missing.append("lease_expiration")
+    if not has_delinquency_data:
+        missing.append("delinquency")
+    if not has_maintenance_data:
+        missing.append("work_orders")
+
+    rec_pct   = round(n_rec / n_dec, 3)
+    phys_pct  = round(has_beds   / max(n_rec, 1), 3)
+    mrkt_pct  = round(has_market / max(n_rec, 1), 3)
+
+    if has_rent_roll and has_lease_data:
+        confidence = "full"
+        caveat = (
+            "Data from rent roll and lease reports. "
+            "Metrics are reliable; upload work orders for maintenance accuracy."
+        ) if has_maintenance_data else (
+            "Data from rent roll and lease reports. "
+            "Occupancy and rent figures are reliable; no maintenance data loaded yet."
+        )
+    elif has_lease_data or has_delinquency_data:
+        confidence = "partial"
+        gap_pct = round((1 - rec_pct) * 100)
+        caveat = (
+            f"Partial data — rent roll not yet loaded. "
+            f"{gap_pct}% of declared units have no individual records. "
+            "Occupancy rate may be understated; unit-level physical data (beds/baths, "
+            "market rent) is sparse. Upload a rent roll to improve accuracy."
+        )
+    else:
+        confidence = "sparse"
+        caveat = (
+            "Only property directory loaded — no leases, rent roll, or delinquency data. "
+            "All metrics (occupancy, revenue, delinquency) are zero or estimates. "
+            "Do not cite specific figures without qualifying this caveat."
+        )
+
+    return DataCoverage(
+        has_rent_roll=has_rent_roll,
+        has_lease_data=has_lease_data,
+        has_delinquency_data=has_delinquency_data,
+        has_maintenance_data=has_maintenance_data,
+        unit_record_coverage=rec_pct,
+        units_with_physical_data=phys_pct,
+        units_with_market_rent=mrkt_pct,
+        confidence=confidence,
+        missing_report_types=missing,
+        caveat=caveat,
+    )
 
 
 def _latest_obs_by_tenant(obs_list: list) -> dict[str, object]:
@@ -89,9 +197,22 @@ class ManagerResolver:
             property_count += 1
             leases_by_unit = _group_by_unit(leases)
 
-            p_units = len(units)
-            p_occ = sum(1 for u in units if is_occupied(leases_by_unit.get(u.id, [])))
-            p_vac = sum(1 for u in units if is_vacant(leases_by_unit.get(u.id, [])))
+            # Use the declared unit_count from the property directory as the
+            # authoritative denominator when available. For multi-family
+            # properties we may have fewer Unit records than actual units
+            # (the directory lists "8 units" but only 3 appear in reports).
+            # The gap is real vacancy we know exists — count it as vacant.
+            known_units = len(units)
+            p_units = max(known_units, prop.unit_count or 0)
+
+            p_occ = sum(
+                1 for u in units
+                if _is_unit_occupied(u, leases_by_unit.get(u.id, []))
+            )
+            # Vacant = declared total minus what we know is occupied.
+            # Includes both known-vacant Unit records AND declared-but-unseen
+            # units (directory count > record count = real vacancy gap).
+            p_vac = p_units - p_occ
             p_market = sum((u.market_rent for u in units), Decimal("0"))
             p_actual = sum(
                 (
@@ -114,7 +235,11 @@ class ManagerResolver:
                 Decimal("0"),
             )
             p_vloss = sum(
-                (u.market_rent for u in units if is_vacant(leases_by_unit.get(u.id, []))),
+                (
+                    u.market_rent
+                    for u in units
+                    if not _is_unit_occupied(u, leases_by_unit.get(u.id, []))
+                ),
                 Decimal("0"),
             )
             p_open_maint = sum(1 for m in maint if is_maintenance_open(m))
@@ -183,7 +308,7 @@ class ManagerResolver:
                 act = active_lease(unit_leases)
                 lease_rent = act.monthly_rent if act else Decimal("0")
                 unit_issues: list[str] = []
-                if is_vacant(unit_leases):
+                if not _is_unit_occupied(u, unit_leases):
                     unit_issues.append("vacant")
                 if is_below_market(u.market_rent, lease_rent):
                     unit_issues.append("below_market")
@@ -220,10 +345,27 @@ class ManagerResolver:
         latest_obs = _latest_obs_by_tenant(all_obs)
         delinquent_count = 0
         delinquent_balance = Decimal("0")
+        mgr_obs: list[object] = []
         for obs in latest_obs.values():
-            if obs.property_id in all_property_ids and obs.balance_total > 0:  # type: ignore[union-attr]
-                delinquent_count += 1
-                delinquent_balance += obs.balance_total  # type: ignore[union-attr]
+            if obs.property_id in all_property_ids:  # type: ignore[union-attr]
+                mgr_obs.append(obs)
+                if obs.balance_total > 0:  # type: ignore[union-attr]
+                    delinquent_count += 1
+                    delinquent_balance += obs.balance_total  # type: ignore[union-attr]
+
+        # Flatten all units, leases, and maintenance across all properties for
+        # coverage inference. prop_data is already in memory from the gather above.
+        all_mgr_units = [u for _, (units, _, _) in zip(all_properties, prop_data) for u in units]
+        all_mgr_leases = [le for _, (_, leases, _) in zip(all_properties, prop_data) for le in leases]
+        all_mgr_maint  = [m for _, (_, _, maint) in zip(all_properties, prop_data) for m in maint]
+
+        coverage = _compute_coverage(
+            all_units=all_mgr_units,
+            all_leases=all_mgr_leases,
+            all_maint=all_mgr_maint,
+            obs_list=mgr_obs,
+            declared_units=total_units,
+        )
 
         metrics = ManagerMetrics(
             total_units=total_units,
@@ -245,6 +387,7 @@ class ManagerResolver:
             company=manager.company,
             property_count=property_count,
             metrics=metrics,
+            data_coverage=coverage,
             delinquent_count=delinquent_count,
             total_delinquent_balance=float(delinquent_balance),
             expired_leases=expired_leases,

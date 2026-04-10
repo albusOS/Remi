@@ -26,13 +26,11 @@ from remi.application.portfolio.properties import (
     property_ids_for_owner,
 )
 from remi.application.portfolio.rent_roll import RentRollResolver
-from remi.application.portfolio.tools import PortfolioToolProvider
 
 __all__ = [
     "AutoAssignService",
     "DashboardBuilder",
     "ManagerResolver",
-    "PortfolioToolProvider",
     "PropertyResolver",
     "RentRollResolver",
     "property_ids_for_manager",

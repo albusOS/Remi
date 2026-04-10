@@ -28,6 +28,7 @@ class PropertyDetailUnit(BaseModel):
     property_id: str
     unit_number: str
     status: str  # derived: "occupied" | "vacant"
+    is_vacant: bool = False
     occupancy_status: str | None = None
     bedrooms: int | None
     bathrooms: float | None
@@ -65,6 +66,7 @@ class UnitListItem(BaseModel):
     property_name: str
     property_id: str
     status: str
+    is_vacant: bool = False
     bedrooms: int | None = None
     sqft: int | None = None
     market_rent: float
@@ -137,6 +139,36 @@ class RentRollResult(BaseModel):
     rows: list[RentRollRow]
 
 
+# -- Data coverage models -----------------------------------------------------
+
+
+class DataCoverage(BaseModel):
+    """How complete and trustworthy a manager's data is.
+
+    Inferred entirely from what's actually in the graph — no document store
+    needed. The agent should include the ``caveat`` in any response that cites
+    occupancy rates, revenue, or delinquency for this manager.
+
+    Confidence levels:
+      full    — rent roll + leases + delinquency. All key metrics are reliable.
+      partial — leases or delinquency present but no rent roll. Occupancy may
+                be understated; unit-level physical data is sparse.
+      sparse  — only property directory. Unit counts are declared, not verified.
+                Most metrics are estimates.
+    """
+
+    has_rent_roll: bool
+    has_lease_data: bool
+    has_delinquency_data: bool
+    has_maintenance_data: bool
+    unit_record_coverage: float       # records / declared (0.0 – 1.0)
+    units_with_physical_data: float   # % of records with beds/baths
+    units_with_market_rent: float     # % of records with market_rent > 0
+    confidence: str                   # "sparse" | "partial" | "full"
+    missing_report_types: list[str]
+    caveat: str
+
+
 # -- Manager review models ----------------------------------------------------
 
 
@@ -192,6 +224,7 @@ class ManagerSummary(BaseModel):
     company: str | None
     property_count: int
     metrics: ManagerMetrics
+    data_coverage: DataCoverage
     delinquent_count: int
     total_delinquent_balance: float
     expired_leases: int

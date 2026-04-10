@@ -28,6 +28,10 @@ _RE_METADATA_SKIP_PATTERNS = (
     r"appliances",
     r"balance:",
     r"amount\s+owed",
+    r"delinquency\s+note",
+    r"tenant\s+status:",
+    r"unit\s+vacancy",
+    r"include\s+non[-\s]revenue",
 )
 
 _RE_TOOL_HINTS = {
@@ -49,8 +53,8 @@ _RE_API_PATH_EXAMPLES = (
     "Examples:\n"
     "  GET /api/v1/managers \u2014 list managers\n"
     "  POST /api/v1/actions \u2014 create action item\n"
-    "  POST /api/v1/signals/infer \u2014 trigger signal inference\n"
-    "  GET /api/v1/ontology/search?object_type=Property \u2014 ontology query"
+    "  GET /api/v1/feed?after={cursor}&types=ingestion.* \u2014 event feed\n"
+    "  GET /api/v1/intelligence/ontology/schema \u2014 domain schema"
 )
 
 _RE_SECTION_LABELS = frozenset(

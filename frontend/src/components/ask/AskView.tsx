@@ -12,6 +12,8 @@ import { ThreadSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import type { ManagerListItem, ResearchArtifact as ResearchArtifactType } from "@/lib/types";
 
+type AgentMode = "director" | "researcher";
+
 export function AskView() {
   const searchParams = useSearchParams();
   const [provider, setProvider] = useState("anthropic");
@@ -21,6 +23,7 @@ export function AskView() {
   const [showWorkDetails, setShowWorkDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeArtifact, setActiveArtifact] = useState<ResearchArtifactType | null>(null);
+  const [agentMode, setAgentMode] = useState<AgentMode>("director");
   const initialQuerySent = useRef(false);
 
   const lastSendRef = useRef<string | null>(null);
@@ -39,7 +42,14 @@ export function AskView() {
     send,
     dismissError,
     stopGenerating,
-  } = useSessions("director");
+  } = useSessions(agentMode);
+
+  const handleModeSwitch = useCallback((mode: AgentMode) => {
+    if (mode === agentMode) return;
+    setAgentMode(mode);
+    setActiveArtifact(null);
+    createSession();
+  }, [agentMode, createSession]);
 
   useEffect(() => {
     const q = searchParams.get("q");
@@ -110,6 +120,31 @@ export function AskView() {
 
         <div className="flex-1" />
 
+        {/* Mode toggle */}
+        <div className="flex items-center rounded-lg bg-surface-sunken p-0.5 gap-0.5">
+          <button
+            onClick={() => handleModeSwitch("director")}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+              agentMode === "director"
+                ? "bg-surface text-fg shadow-sm"
+                : "text-fg-faint hover:text-fg-secondary"
+            }`}
+          >
+            Ask
+          </button>
+          <button
+            onClick={() => handleModeSwitch("researcher")}
+            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+              agentMode === "researcher"
+                ? "bg-surface text-amber-500 shadow-sm"
+                : "text-fg-faint hover:text-fg-secondary"
+            }`}
+            title="Deep Research — statistical analysis, multi-phase reports. ~$0.20–$1.35 per run."
+          >
+            Research
+          </button>
+        </div>
+
         {activeSessionId && (
           <button
             onClick={createSession}
@@ -146,7 +181,7 @@ export function AskView() {
           onSend={handleSend}
           connected={connected}
           streaming={session?.streaming ?? false}
-          mode="ask"
+          mode={agentMode === "researcher" ? "research" : "ask"}
           managerName={managers.find((m) => m.id === managerId)?.name}
         />
       ) : (
