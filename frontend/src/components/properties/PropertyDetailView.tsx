@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { fmt$ } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import { MetricCard } from "@/components/ui/MetricCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { EntityFormPanel, type FieldDef } from "@/components/ui/EntityFormPanel";
@@ -85,7 +83,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
     <PageContainer wide>
       <div className="anim-fade-up">
         <div className="flex items-center gap-1.5 text-xs text-fg-faint">
-          <Link href="/" className="hover:text-fg-secondary transition-colors">&larr; Home</Link>
+          <Link href="/properties" className="hover:text-fg-secondary transition-colors">Properties</Link>
           {property.manager_id && property.manager_name && (
             <>
               <span>/</span>
@@ -131,18 +129,31 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
         </div>
       </div>
 
-      <MetricStrip className="stagger">
-        <MetricCard
-          label="Occupancy"
-          value={`${rentRoll.total_units > 0 ? Math.round((rentRoll.occupied / rentRoll.total_units) * 100) : 0}%`}
-          sub={`${rentRoll.occupied}/${rentRoll.total_units} units`}
-          trend={rentRoll.vacant === 0 ? "up" : "down"}
-        />
-        <MetricCard label="Actual Rent" value={fmt$(rentRoll.total_actual_rent)} />
-        <MetricCard label="Market Rent" value={fmt$(rentRoll.total_market_rent)} />
-        <MetricCard label="Loss to Lease" value={fmt$(rentRoll.total_loss_to_lease)} alert={rentRoll.total_loss_to_lease > 0} sub={rentRoll.total_market_rent > 0 ? `${((rentRoll.total_loss_to_lease / rentRoll.total_market_rent) * 100).toFixed(1)}% of market` : undefined} />
-        <MetricCard label="Vacancy Loss" value={fmt$(rentRoll.total_vacancy_loss)} alert={rentRoll.total_vacancy_loss > 0} sub={`${rentRoll.vacant} vacant units`} />
-      </MetricStrip>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 stagger">
+        {[
+          {
+            label: "Occupancy",
+            value: `${rentRoll.total_units > 0 ? Math.round((rentRoll.occupied / rentRoll.total_units) * 100) : 0}%`,
+            sub: `${rentRoll.occupied}/${rentRoll.total_units} units`,
+            alert: false,
+          },
+          { label: "Actual Rent", value: fmt$(rentRoll.total_actual_rent), sub: undefined, alert: false },
+          { label: "Market Rent", value: fmt$(rentRoll.total_market_rent), sub: undefined, alert: false },
+          {
+            label: "Loss to Lease",
+            value: fmt$(rentRoll.total_loss_to_lease),
+            sub: rentRoll.total_market_rent > 0 ? `${((rentRoll.total_loss_to_lease / rentRoll.total_market_rent) * 100).toFixed(1)}% of market` : undefined,
+            alert: rentRoll.total_loss_to_lease > 0,
+          },
+          { label: "Vacancy Loss", value: fmt$(rentRoll.total_vacancy_loss), sub: `${rentRoll.vacant} vacant`, alert: rentRoll.total_vacancy_loss > 0 },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-border bg-surface px-4 py-3">
+            <p className="text-[9px] font-semibold text-fg-muted uppercase tracking-widest mb-1">{stat.label}</p>
+            <p className={`text-sm font-bold font-mono ${stat.alert ? "text-warn-fg" : "text-fg"}`}>{stat.value}</p>
+            {stat.sub && <p className="text-[10px] text-fg-faint mt-0.5">{stat.sub}</p>}
+          </div>
+        ))}
+      </div>
 
       <div className="border-b border-border-subtle flex gap-0 overflow-x-auto anim-fade-in scrollbar-none" style={{ animationDelay: "200ms" }}>
         {TABS.map((tab) => (

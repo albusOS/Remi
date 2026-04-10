@@ -23,7 +23,8 @@ Tabular files hit `vocab.py` (deterministic header matching) → if matched, `op
 
 ```
 data/sample_reports/Alex_Budavich_Reports/
-  property_directory-20260330.xlsx   ← always ingest first (establishes managers/properties)
+  property_directory-20260330.xlsx   ← ingest first (establishes managers/properties)
+  unit_directory-20260409.xlsx       ← ingest second (creates all units with beds/baths/sqft/market_rent)
   Rent Roll_Vacancy (1).xlsx
   Lease Expiration Detail By Month.xlsx
   Delinquency.xlsx
@@ -66,6 +67,7 @@ Detection in `vocab.py` is set-membership: a `Profile` matches when ALL its `req
 | Report type | Required canonical fields | Primary entity |
 |-------------|--------------------------|----------------|
 | `property_directory` | `site_manager_name`, `_unit_count` | PropertyManager |
+| `unit_directory` | `unit_number`, `property_address`, `bedrooms` | Unit |
 | `delinquency` | `balance_total`, `balance_0_30` | BalanceObservation |
 | `lease_expiration` | `lease_expires`, `tenant_name` | Lease |
 | `rent_roll` | `_bd_ba`, `days_vacant` OR `_bd_ba` + `lease_expires` + `property_address` | Unit |

@@ -81,31 +81,29 @@ steps:
 
       ## Column mapping rules
 
-        - Property address → "property_address"
-        - Unit / apartment number → "unit_number"
-        - Resident / tenant name → "tenant_name"
-        - Site manager name (directories) → "name"
-        - Beds/baths combined ("BD/BA", "Bed/Bath", "BD / BA") → "_bd_ba"
+      The vocabulary matcher already resolved many columns — see vocabulary_partial
+      in the format_lookup output. Focus on the unrecognized columns only.
+
+      For any column not in the partial map, use the closest canonical field:
+        - Property address variants → "property_address"
+        - Unit / apartment number variants → "unit_number"
+        - Tenant / resident name variants → "tenant_name"
+        - Site manager name (directory reports) → "site_manager_name"
+        - Beds/baths combined (BD/BA, Bed/Bath, etc.) → "_bd_ba"
         - Unit count → "_unit_count"
-        - Tags (AppFolio) → "_manager_tag"
-        - Lease start / "Lease From" → "start_date"
-        - Lease end / "Lease To" / "Lease Expires" → "end_date" or "lease_expires"
-        - Monthly rent / current rent → "monthly_rent"
-        - Balance owed / amount receivable → "balance_total"
-        - 0–30 day bucket → "balance_0_30"
-        - 30+ day bucket → "balance_30_plus"
+        - AppFolio Tags column → "_manager_tag"
+        - Lease start date variants → "start_date"
+        - Lease end / expiration variants → "lease_expires"
+        - Monthly / current rent → "monthly_rent"
+        - Balance owed / total due → "balance_total"
+        - 0–30 day aging bucket → "balance_0_30"
+        - 30+ day aging bucket → "balance_30_plus"
         - Last payment date → "last_payment_date"
-        - Unknown columns → "_<lower_snake_of_header>"
+        - Any truly unknown column → "_<lower_snake_of_header>"
 
       ## Entity types
 
-        - Rent roll / occupancy / vacancy → "Unit"
-        - Delinquency / balance aging → "BalanceObservation"
-        - Lease expiration calendar → "Lease"
-        - Work orders / maintenance → "MaintenanceRequest"
-        - Property directory (manager→property) → "PropertyManager"
-        - Owner directory → "Owner"
-        - Vendor directory → "Vendor"
+      {steps.analyze.entity_schema}
 
       ## Output
 

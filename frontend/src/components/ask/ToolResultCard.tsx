@@ -501,7 +501,7 @@ function LeasesListCard({ data }: { data: unknown }) {
             <span className="text-[10px] font-mono text-fg-muted shrink-0">
               {fmt$(Number(l.monthly_rent ?? l.rent ?? 0))}
             </span>
-            {l.end_date && (
+            {l.end_date != null && (
               <span className="text-[10px] font-mono text-fg-ghost shrink-0">
                 {fmtDate(String(l.end_date))}
               </span>

@@ -1,0 +1,76 @@
+---
+description: Frontend visualization patterns — tables are banned except for specific line-item data contexts
+globs: frontend/**/*.tsx
+alwaysApply: false
+---
+
+# Frontend Visualization Patterns
+
+## Tables Are Forbidden Except For
+
+- **Rent roll** — unit-by-unit line items with many columns (unit, status, tenant, rent, market, gap, lease end)
+- **Lease lists** — individual lease records (tenant, property, unit, rent, expiry, days left)
+- **Maintenance work orders** — line-item operational records
+- **Documents list** — uploaded file records
+
+**Everything else uses visual components.** No exceptions.
+
+## What to Use Instead
+
+| Context | Use |
+|---|---|
+| Manager list | `ManagerHealthCard` grid or master-detail ranked list |
+| Property list | `PropertyHealthCard` grid or master-detail ranked list |
+| Portfolio summary | `StatHero`, `HealthRing`, `PipelineStrip`, `TimelineBuckets` |
+| Occupancy | `HealthRing` (SVG donut) — never a `<table>` or a text percentage alone |
+| Collections status | `PipelineStrip` |
+| Lease timeline | `TimelineBuckets` |
+| Alerts / signals | `AlertFeed` |
+| Trends over time | Recharts `AreaChart` or `BarChart` |
+
+## Primitive Library (use these, don't inline)
+
+```
+src/components/ui/
+  HealthRing.tsx       — occupancy/rate donut chart
+  PipelineStrip.tsx    — sequential stage visualization
+  TimelineBuckets.tsx  — time-bucketed bar viz
+  StatHero.tsx         — prominent metric with supporting stats
+  AlertFeed.tsx        — actionable signal list
+  ManagerHealthCard.tsx
+  PropertyHealthCard.tsx
+```
+
+## Layout Patterns
+
+- **List views** (`/managers`, `/properties`): master-detail split — left panel is the list, right panel is the selected entity detail. Never a full-page navigation just to see a detail.
+- **Empty states**: show the structural skeleton, not an error or "no data" message. The framework is always visible.
+- **Search/filter**: narrows the population of the framework, does not hide the layout.
+
+## ❌ Banned Patterns
+
+```tsx
+// Never for entity lists or overviews
+<table>
+  <tr><td>Manager Name</td><td>Occupancy</td><td>Revenue</td></tr>
+</table>
+
+// Never for occupancy
+<span>{pct(occupancy_rate)}</span>
+
+// Never for portfolio summary
+<div>Revenue: $45,000</div>
+```
+
+## ✅ Required Patterns
+
+```tsx
+// Entity overview
+<ManagerHealthCard manager={m} />
+
+// Occupancy — always visual
+<HealthRing rate={metrics.occupancy_rate} size={56} />
+
+// Pipeline status
+<PipelineStrip stages={stages} title="Collections" />
+```

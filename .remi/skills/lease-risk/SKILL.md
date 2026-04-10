@@ -1,59 +1,88 @@
 ---
 name: lease-risk
-description: Lease expiration and vacancy risk analysis — expiring leases, month-to-month leases, current vacancies, and estimated revenue at risk.
-tags: [leases, vacancies, risk, revenue]
+description: Lease expiration and renewal pipeline — milestone-based review at 150/120/90/60 days, month-to-month management, and vacancy risk.
+tags: [leases, vacancies, risk, revenue, renewals]
 scope: entity
 trigger: on_demand
-required_capabilities: [bash]
+required_capabilities: [query]
 ---
 
 # Lease Risk Review
 
-Use this when asked about lease expirations, vacancy exposure,
-revenue at risk, or renewal pipeline.
+Use this when asked about lease expirations, renewal pipeline,
+month-to-month leases, vacancy exposure, or revenue at risk.
 
-## Knowledge
+## How the Director Reviews Lease Expirations
 
-Revenue risk has two components:
-- **Expiring leases** — active leases ending in N days. If not renewed,
-  these become vacancies. Revenue at risk = sum of monthly rents.
-- **Current vacancies** — already empty units losing market rent.
-- **Month-to-month** — expired leases still active but not renewed.
-  These tenants can leave with 30 days notice.
+The director uses a **milestone-based framework**. Each distance threshold
+has a specific expected action. When reviewing expiring leases, check
+whether the PM has hit these milestones:
 
-Prioritize by highest rent at risk first. Check occupancy trends
-to see if the situation is improving or declining.
+| Days to Expiry | What Should Be Happening |
+|---|---|
+| **≥ 150 days** | PM has started the conversation with the **owner** about renewal terms |
+| **≥ 120 days** | PM has started the conversation with the **tenant** about renewal or non-renewal |
+| **≥ 90 days** | Renewal or non-renewal notice has been **sent** |
+| **60 days** | Director checks to know what's going on — awareness, not action threshold |
+
+**A lease at 90 days without a sent notice is the critical failure state.**
+Flag it. Surface who the PM is and what property is at risk.
+
+## Month-to-Month Leases
+
+Expired leases still active month-to-month require special attention.
+These tenants can leave with 30 days notice. The director monitors whether:
+- The PM should get them onto a yearly lease
+- Their rent should be bumped (market conditions may have changed since signing)
+
+When surfacing month-to-month leases, note how long they've been month-to-month
+and flag any where rent may be significantly below current market.
+
+## Revenue Risk Components
+
+- **Expiring leases** — active leases ending in N days. Revenue at risk = sum of monthly rents
+- **Current vacancies** — already empty units losing market rent daily
+- **Month-to-month** — can leave on 30 days notice; treated as soft risk
+
+Prioritize by highest rent at risk first.
 
 ## Commands
 
-1. **Pull expiring leases** (default 90-day window):
+1. **Pull expiring leases** at the director's full 150-day horizon:
 
-```bash
-remi operations expiring-leases --days 90 --manager-id <manager-id>
+```
+query(operation="expiring_leases", days="150")
+```
+
+Or scoped to a manager:
+
+```
+query(operation="expiring_leases", days="150", manager_id="<name or slug>")
 ```
 
 2. **Pull current vacancies**:
 
-```bash
-remi intelligence vacancies --manager-id <manager-id>
+```
+query(operation="vacancies", manager_id="<name or slug>")
 ```
 
-3. **Check occupancy trends** for context:
+3. **Get the full lease list** to identify month-to-month leases:
 
-```bash
-remi intelligence trends occupancy --manager-id <manager-id>
+```
+query(operation="leases", property_id="<id>")
 ```
 
-4. **Get the full lease list** for detail:
+4. **Check occupancy trends** for context:
 
-```bash
-remi operations leases --manager-id <manager-id>
+```
+query(operation="occupancy_trend")
 ```
 
 ## What to Report
 
-- Number of leases expiring in 90 days and total monthly rent at risk
-- Month-to-month leases (already expired but not renewed)
-- Current vacant units and market rent being lost
-- Combined monthly revenue exposure
-- Trend direction: is occupancy improving or declining?
+- Leases expiring within 150 days — grouped by milestone (≥150, ≥120, ≥90, ≥60)
+- For each: PM name, property, tenant, expiry date, monthly rent, and whether a note/action exists
+- **Flag at 90 days**: any lease without a sent renewal/non-renewal notice
+- Month-to-month leases: how many, total rent at risk, how long overdue for renewal
+- Current vacancies and market rent being lost
+- Combined monthly revenue exposure across all categories

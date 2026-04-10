@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
-import { Workspace } from "@/components/workspace/Workspace";
+import { AskView } from "@/components/ask/AskView";
 
 export default function Home() {
   return (
     <Suspense>
-      <Workspace />
+      <AskView />
     </Suspense>
   );
 }

@@ -300,11 +300,21 @@ async def generate_meeting_brief(
     spec = TaskSpec(
         agent_name="brief_writer",
         objective=objective,
-        input_data={"manager_id": manager_id, "focus": focus},
-        constraints=TaskConstraints(timeout_seconds=90, max_tool_rounds=6),
-        metadata={"source": "meeting_brief_api", "manager_id": manager_id},
+        # operation is included so the pipeline's transform step can call
+        # query(operation="manager_review", manager_id=...) directly.
+        input_data={
+            "manager_id": manager_id,
+            "focus": focus or "",
+            "operation": "manager_review",
+        },
+        constraints=TaskConstraints(timeout_seconds=45, max_tool_rounds=4),
+        metadata={
+            "source": "meeting_brief_api",
+            "manager_id": manager_id,
+            "workflow_context": {"focus": focus or ""},
+        },
     )
-    task_result = await c.task_supervisor.spawn_and_wait(spec, timeout=100.0)
+    task_result = await c.task_supervisor.spawn_and_wait(spec, timeout=50.0)
 
     if not task_result.ok:
         logger.warning(
@@ -346,16 +356,39 @@ async def generate_meeting_brief(
 
 
 def _parse_brief_output(task_result: TaskResult) -> dict[str, Any] | None:
-    """Extract structured brief data from agent task result."""
-    if task_result.data:
-        return task_result.data
+    """Extract the brief dict from either a pipeline or agent task result.
 
-    if task_result.output:
+    Pipeline result: task_result.data = {"fetch": {...}, "format": {...brief...}}
+    Agent result:    task_result.data = None; task_result.output = raw text
+    """
+    # Pipeline path — workflow executor populates data as {step_id: step_value}
+    if task_result.data and isinstance(task_result.data, dict):
+        # Pull the "format" step output if this is a pipeline result.
+        if "format" in task_result.data:
+            candidate = task_result.data["format"]
+            if isinstance(candidate, dict) and "manager_name" in candidate:
+                return candidate
+        # Fallback: if data IS the brief itself (legacy agent path with json mode)
+        if "manager_name" in task_result.data:
+            return task_result.data
+
+    # Agent path — parse from raw output text.
+    raw = task_result.output
+    if not raw:
+        return None
+
+    import re as _re
+
+    for attempt in (
+        lambda t: json.loads(t),
+        lambda t: json.loads(_re.search(r"```(?:json)?\s*([\s\S]*?)```", t).group(1)),  # type: ignore[union-attr]
+        lambda t: json.loads(t[t.find("{") : t.rfind("}") + 1]),
+    ):
         try:
-            parsed = json.loads(task_result.output)
-            if isinstance(parsed, dict):
+            parsed = attempt(raw.strip())
+            if isinstance(parsed, dict) and "manager_name" in parsed:
                 return parsed
-        except (json.JSONDecodeError, TypeError):
+        except Exception:
             pass
 
     return None

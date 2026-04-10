@@ -1,7 +1,7 @@
 "use client";
 
-import { VacanciesView } from "@/components/vacancies/VacanciesView";
+import { VacancyBoardView } from "@/components/vacancies/VacancyBoardView";
 
 export default function VacanciesPage() {
-  return <VacanciesView />;
+  return <VacancyBoardView />;
 }

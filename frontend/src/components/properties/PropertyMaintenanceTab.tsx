@@ -4,7 +4,6 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmt$, fmtDate } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import { MetricCard } from "@/components/ui/MetricCard";
 import { Badge } from "@/components/ui/Badge";
 import { SparklineChart } from "@/components/ui/SparklineChart";
 import type { MaintenanceTrend } from "@/lib/types";
@@ -62,10 +61,17 @@ export function PropertyMaintenanceTab({ propertyId }: { propertyId: string }) {
     <div className="space-y-4 anim-fade-up">
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 stagger">
-          <MetricCard label="Total" value={summary.total} />
-          <MetricCard label="Open" value={openCount} alert={openCount > 0} />
-          <MetricCard label="Completed" value={completedCount} />
-          <MetricCard label="Total Cost" value={fmt$(summary.total_cost)} />
+          {[
+            { label: "Total", value: summary.total, alert: false },
+            { label: "Open", value: openCount, alert: openCount > 0 },
+            { label: "Completed", value: completedCount, alert: false },
+            { label: "Total Cost", value: fmt$(summary.total_cost), alert: false },
+          ].map((s) => (
+            <div key={s.label} className="rounded-xl border border-border bg-surface px-4 py-3">
+              <p className="text-[9px] font-semibold text-fg-muted uppercase tracking-widest mb-1">{s.label}</p>
+              <p className={`text-sm font-bold font-mono ${s.alert ? "text-warn-fg" : "text-fg"}`}>{String(s.value)}</p>
+            </div>
+          ))}
         </div>
       )}
 

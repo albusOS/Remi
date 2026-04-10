@@ -1,0 +1,182 @@
+# REMI Navigation & Operations
+
+## How to Run
+
+```bash
+# Start the API server (port 8000)
+uv run remi serve
+
+# Start with auto-reload
+uv run remi serve --reload
+
+# All CLI commands
+uv run remi <group> <command>
+# Groups: portfolio, operations, intelligence, ingestion
+```
+
+Entry points:
+- **API**: `src/remi/shell/api/main.py` → `create_app()` → `app` object
+- **CLI**: `src/remi/shell/cli/main.py` → `cli` Typer app
+- **Module run**: `uv run python -m remi` (runs CLI)
+- **Script entry**: `pyproject.toml` defines `remi = "remi.shell.cli.main:app"`
+
+## Config & Secrets
+
+Config is loaded by `load_settings()` in `src/remi/shell/config/settings.py`.
+Order: `.env` file → `config/${REMI_CONFIG_ENV}.yaml` → env vars.
+
+```
+config/
+  base.yaml    # defaults: in_memory store, port 8000, no DB required
+  dev.yaml     # dev overrides (usually postgres DSN)
+  local.yaml   # personal overrides (gitignored)
+  prod.yaml    # production
+```
+
+Set `REMI_CONFIG_ENV=dev` to load `config/dev.yaml`. Default is `base` (in-memory, no DB).
+
+Required env vars (at least one LLM key):
+```
+ANTHROPIC_API_KEY=       # required for director + ingester (claude-sonnet/haiku)
+OPENAI_API_KEY=          # optional
+GOOGLE_API_KEY=          # optional
+DATABASE_URL=            # optional — omit for in-memory dev mode
+REMI_API_URL=            # set inside sandbox so CLI proxies to running API
+```
+
+Other env vars:
+```
+REMI_LLM_PROVIDER=       # override default LLM provider
+REMI_LLM_MODEL=          # override default model
+REMI_SANDBOX__BACKEND=   # local (default) or docker
+REMI_API__PORT=          # override port
+```
+
+The sandbox always sets `REMI_API_URL` so that `remi` CLI commands inside
+bash/python tool calls proxy to the running API (no cold start, no separate container).
+
+## File Navigation — Where Things Actually Live
+
+### The Dependency Ring
+```
+types/ ← agent/ ← application/ ← shell/
+```
+Never import outer from inner at module level.
+Exception: `application/*/cli.py` files do deferred lazy imports from `shell/`
+inside `_is_remote()` / `_container()` helper functions. This is intentional
+and the established pattern — do not refactor it away.
+
+### Finding Anything
+
+| What you want | Where it lives |
+|---|---|
+| DI container / wiring | `src/remi/shell/config/container.py` |
+| Settings & env vars | `src/remi/shell/config/settings.py` |
+| Capability registration | `src/remi/shell/config/capabilities.py` |
+| Domain entity types (vocab) | `src/remi/shell/config/domain.yaml` |
+| Agent manifests | `src/remi/application/agents/*/app.yaml` |
+| The unified query tool | `src/remi/application/tools/query.py` |
+| Group-by aggregators | `src/remi/application/tools/aggregators.py` |
+| 360° entity detail views | `src/remi/application/tools/detail.py` |
+| Document tools | `src/remi/application/tools/documents.py` |
+| Mutation tools (assert_fact, add_context) | `src/remi/application/tools/mutations.py` |
+| Ingestion pipeline tools | `src/remi/application/ingestion/tools.py` |
+| Ingestion vocab (column headers) | `src/remi/application/ingestion/vocab.py` |
+| Ingestion rules (junk, normalize) | `src/remi/application/ingestion/rules.py` |
+| Storage port (PropertyStore) | `src/remi/application/core/protocols.py` |
+| Domain models | `src/remi/application/core/models/` |
+| Portfolio resolvers | `src/remi/application/portfolio/managers.py` etc. |
+| Operations resolvers | `src/remi/application/operations/delinquency.py` etc. |
+| Intelligence resolvers | `src/remi/application/intelligence/trends.py` etc. |
+| Per-slice read models (views) | `src/remi/application/{portfolio,operations,intelligence}/views.py` |
+| Agent runtime loop | `src/remi/agent/runtime/loop.py` |
+| Agent node (YAML → execution) | `src/remi/agent/runtime/node.py` |
+| Kernel boot | `src/remi/agent/serve/kernel.py` |
+| Workflow engine | `src/remi/agent/workflow/engine.py` |
+| EventBus | `src/remi/agent/events/bus.py` |
+| Memory store | `src/remi/agent/memory/store.py` |
+| Task supervisor | `src/remi/agent/tasks/supervisor.py` |
+| FastAPI app factory | `src/remi/shell/api/main.py` |
+| CLI entrypoint | `src/remi/shell/cli/main.py` |
+| CLI HTTP client (sandbox proxy) | `src/remi/shell/cli/client.py` |
+| API routers | `src/remi/application/{portfolio,operations,intelligence,ingestion}/api.py` |
+| CLI commands | `src/remi/application/{portfolio,operations,intelligence,ingestion}/cli.py` |
+
+### Directory Structure Reality
+The docs describe `application/views/` and `application/cli/` as packages.
+They do not exist. The actual layout:
+- Views: `application/portfolio/views.py`, `application/operations/views.py`, `application/intelligence/views.py`
+- CLI: `application/portfolio/cli.py`, `application/operations/cli.py`, etc. — colocated with each slice
+
+## Dead Code — Do Not Touch or Reference
+
+These three files exist but are **not registered anywhere** and have no callers.
+The tools they define are never visible to the LLM.
+
+| File | Dead tool name | Status |
+|---|---|---|
+| `src/remi/application/portfolio/tools.py` | `portfolio_query` | Not wired in container |
+| `src/remi/application/operations/tools.py` | `operations_query` | Not wired in container |
+| `src/remi/application/intelligence/tools.py` | `intelligence_query` | Not wired in container |
+
+The `assert_fact` and `add_context` in `intelligence/tools.py` are also dead —
+the live versions are in `application/tools/mutations.py` (wired via `MutationToolProvider`).
+
+The group-by functions in `operations/tools.py` are dead —
+the live versions are in `application/tools/aggregators.py`.
+
+## What's Actually Registered in the Container
+
+Kernel (registers for ALL agents):
+- `bash`, `python` → `AnalysisToolProvider` (agents must declare in YAML tools list to use)
+- `memory_write`, `memory_read` → `MemoryToolProvider`
+- `delegate_to_agent` → `DelegationToolProvider`
+- `ask_human` → `HumanToolProvider` (no agent currently declares this)
+
+Product (container.py registers these on top):
+- `query` → `QueryToolProvider` (all 20 operations in one tool)
+- `document_list`, `document_query`, `document_search` → `DocumentToolProvider`
+- `assert_fact`, `add_context` → `MutationToolProvider`
+- `ingest_analyze`, `ingest_format_lookup`, `ingest_resolve`, `ingest_run`,
+  `ingest_format_save`, `ingest_finalize` → `IngestionToolProvider`
+
+## Director's Actual Tool Surface
+
+The director (`application/agents/director/app.yaml`) has:
+```
+query, document_list, document_query, assert_fact, add_context,
+delegate_to_agent, memory_write, memory_read
+```
+No `bash` or `python`. Director delegates computation to `researcher`.
+
+The researcher has `bash` and `python` (declared in researcher/app.yaml).
+
+## Testing
+
+```bash
+uv run pytest                    # all tests
+uv run pytest tests/ingestion/   # ingestion tests
+uv run pytest -x                 # stop on first failure
+uv run ruff check src/           # lint
+```
+
+Tests live in `tests/` mirroring the src layout. `conftest.py` in `tests/` is the shared fixture root.
+
+## Adding Things — Quick Reference
+
+**New query operation** (read-only, no LLM, ~10ms):
+→ See skill: `add-query-operation`
+→ File: `src/remi/application/tools/query.py`
+
+**New agent/workflow/pipeline**:
+→ See skill: `add-agent`
+→ Create: `src/remi/application/agents/<name>/app.yaml`
+→ Auto-discovered; only touch `capabilities.py` for API routes or CLI
+
+**New ingestion report type**:
+→ See skill: `ingestion-debugging`
+→ Start at: `src/remi/application/ingestion/vocab.py`
+
+**New API endpoint**:
+→ Add to the relevant `application/<slice>/api.py`
+→ Router auto-mounted via `capabilities.py` `_shell_wiring()` entry

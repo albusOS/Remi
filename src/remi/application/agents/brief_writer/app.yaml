@@ -1,13 +1,14 @@
 apiVersion: remi/v1
-kind: Agent
+kind: Pipeline
 
 metadata:
   name: brief_writer
-  version: "1.0.0"
+  version: "4.0.0"
   description: >
-    Meeting brief specialist — generates structured manager review briefs.
-    Uses query tools to gather data, memory to recall past meetings, and
-    produces a prioritized meeting agenda with talking points and actions.
+    Meeting brief pipeline — deterministic data fetch followed by a single
+    LLM formatting call. No agent loop, no planning overhead.
+    Step 1 calls query(manager_review) in-process (~10ms).
+    Step 2 formats the result into a structured JSON brief (~3-5s haiku call).
   tags: [review, managers, internal]
   domain: real-estate
   audience: internal
@@ -18,116 +19,79 @@ runtime:
   isolation: none
   durability: ephemeral
   resources:
-    timeout_seconds: 120
-    max_tool_rounds: 8
-    max_tokens: 60000
+    timeout_seconds: 45
+    max_tokens: 30000
   scaling:
     max_concurrency: 4
     queue_priority: normal
 
-modules:
-  - id: brief_writer
-    kind: agent
-    description: >
-      Generates a structured meeting brief for a property manager review.
-      Gathers data via query tool, recalls past meetings from memory,
-      and produces a JSON brief with agenda items and actions.
-    config:
-      provider: anthropic
-      model: claude-sonnet-4-20250514
-      temperature: 0.3
-      max_tokens: 6144
-      max_iterations: 6
-      system_prompt: |
-        You are a real-estate operations director preparing a meeting brief
-        for a property manager review.
+defaults:
+  provider: anthropic
+  model: claude-haiku-4-5-20251001
 
-        ## Workflow
+context_mode: accumulate
 
-        **Round 1** — `query(operation="manager_review", manager_id=X)`
-        This single call returns everything needed: metrics, all properties,
-        top issues, delinquency totals, vacancy counts, expiring lease counts,
-        action items, and notes. Do NOT follow up with separate delinquency,
-        expiring_leases, or vacancies calls — those figures are already here.
+steps:
+  # Step 1 — fetch all manager data in-process, no LLM.
+  # Receives the full pipeline context as args:
+  # {operation: "manager_review", manager_id: "...", focus: "..."}
+  - id: fetch
+    kind: transform
+    tool: query
 
-        **Round 2** — `memory_read(query="meeting brief [manager name]")`
-        Recall prior meeting notes, corrections, or known situations.
+  # Step 2 — one LLM call to format the data into a brief.
+  # No tools — the data is already here from step 1.
+  - id: format
+    kind: llm
+    temperature: 0.3
+    max_tokens: 2048
+    response_format: json
+    system_prompt: |
+      You are a real-estate operations director writing a pre-meeting brief.
+      You will receive structured portfolio data. Your job is to distill it
+      into a focused brief that a director can scan in under 60 seconds.
 
-        **Round 3 (conditional)** — Drill down only if a specific signal
-        demands unit-level detail that manager_review doesn't provide:
-        - High delinquency? `query(operation="delinquency", manager_id=X)`
-          for individual tenant names and balances.
-        - Specific property with problems? `query(operation="rent_roll", property_id=X)`
-        Skip this round entirely if manager_review data is sufficient.
+      Rules:
+      - Lead with the single biggest problem. Numbers over adjectives.
+      - Max 3 themes, max 3 agenda items. If fewer are significant, return fewer.
+      - Every data point must be a specific number from the input data.
+      - Skip sections where there is nothing meaningful to say.
+      - Do NOT re-flag things already in existing action items.
+      - One talking point per agenda item. One question per agenda item.
 
-        **Final round** — Produce the structured JSON brief, then
-        `memory_write(key="last_brief_[manager_id]", namespace="episodic",
-        importance="notable", content="[one-paragraph summary of key findings]")`
+      Respond with ONLY a raw JSON object. No prose, no fences. Start with {.
 
-        ## Output format
+      Required shape:
+      {
+        "manager_name": string,
+        "summary": "2-3 sentences. Lead with the biggest issue and a number.",
+        "themes": [
+          {
+            "id": "slug",
+            "title": "Title",
+            "severity": "high|medium|low",
+            "summary": "One sentence with a specific number.",
+            "affected_properties": ["names"],
+            "monthly_impact": 0.00
+          }
+        ],
+        "agenda": [
+          {
+            "topic": "Title",
+            "severity": "high|medium|low",
+            "talking_points": ["One data-backed point"],
+            "questions": ["One open question"],
+            "suggested_actions": [
+              {"title": "Action", "owner": "manager|director|both", "timeframe": "this week|next 2 weeks|this month"}
+            ]
+          }
+        ],
+        "positives": ["One brief positive if warranted"],
+        "follow_up_date": "suggested timeframe"
+      }
+    input_template: >
+      Prepare a meeting brief using this portfolio data.
+      Focus area (if any): {context.focus}
 
-        Your final response MUST be valid JSON with this structure:
-
-        ```json
-        {
-          "manager_name": "Name",
-          "summary": "One paragraph executive summary. Lead with the biggest issue.",
-          "themes": [
-            {
-              "id": "theme_slug",
-              "title": "Theme Title",
-              "severity": "high|medium|low",
-              "summary": "One sentence.",
-              "affected_properties": ["property names"],
-              "monthly_impact": 1500.00
-            }
-          ],
-          "agenda": [
-            {
-              "topic": "Topic title",
-              "severity": "high|medium|low",
-              "talking_points": ["Specific point with data — max 2"],
-              "questions": ["One open-ended question"],
-              "suggested_actions": [
-                {
-                  "title": "Action item title",
-                  "owner": "manager|director|both",
-                  "timeframe": "this week|next 2 weeks|this month"
-                }
-              ]
-            }
-          ],
-          "positives": ["1-2 things to acknowledge"],
-          "follow_up_date": "Suggested next check-in timeframe"
-        }
-        ```
-
-        ## Rules
-
-        - Focus on what MATTERS — find the story, not a data dump.
-        - Max 5 themes. If fewer are significant, return fewer.
-        - Max 4 agenda items, ordered by impact.
-        - Flag systemic patterns vs. isolated incidents.
-        - Do NOT re-flag things already tracked in existing action items.
-        - Reference user notes that provide context (prior meetings, known
-          situations).
-        - Acknowledge 1-2 positives briefly.
-        - Every claim must cite specific properties, tenants, or units.
-        - Prioritize ruthlessly — a director should scan this in < 1 minute.
-
-      skills_paths:
-        - .remi/skills
-
-      input_template: "{input}"
-      output_contract: json
-      response_format: json
-
-      tools:
-        - name: query
-        - name: memory_write
-        - name: memory_read
-
-      memory:
-        namespace: remi-brief-writer
-        auto_load: true
-        auto_save: true
+      Portfolio data:
+      {steps.fetch}

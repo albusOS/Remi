@@ -85,12 +85,11 @@ Every package with external consumers must define its public API in
   Deeper paths are acceptable only within the same layer.
 
 **Exceptions:**
-- `application/services/` subpackages (ingestion, seeding,
-  embedding) — deep service paths are acceptable when the service has
-  a single consumer and no barrel would add clarity.
+- Capability slices under `application/` importing their own internal modules
+  (`delinquency-review/resolver.py` importing `delinquency-review/views.py`) — fine.
 - Test files may import internal modules for setup/mocking.
-- `application/api/` routers importing within their own slice is fine —
-  each slice barrel (`portfolio/`, `operations/`, etc.) is the public entry point.
+- Each capability barrel (`delinquency-review/__init__.py`, etc.) is the
+  public entry point for that capability — deep paths within a capability are fine.
 
 ## Tests
 
@@ -105,23 +104,23 @@ Three rules govern every file and folder decision:
 
 ### Screaming Architecture
 The directory tree IS the documentation. A new developer reading
-`ls src/remi/` should immediately know this is an agent operating
-system for real estate — not a generic web app. Folders are named
+`ls src/remi/application/` should immediately know this is a real
+estate operations platform — not a generic web app. Folders are named
 for what the system **does**, not what technical role they play.
 
-- **Good:** `ingestion/`, `signals/`, `portfolio/`, `intelligence/`
-- **Bad:** `controllers/`, `helpers/`, `utils/`, `misc/`
+- **Good:** `delinquency-review/`, `document-ingestion/`, `lease-risk/`, `manager-review/`
+- **Bad:** `controllers/`, `helpers/`, `utils/`, `services/`
 
-### Vertical Slicing (Package by Feature)
-Group code by **business capability**, not by technical layer.
-Everything related to a feature lives together.
+### Vertical Slicing (Package by Capability)
+The `application/` layer is **sliced by capability**. Each capability
+is a self-contained directory owning every layer of its implementation:
 
-- `api/portfolio/` contains managers, properties, units, portfolios
-- `cli/intelligence/` contains dashboard, search, ontology, trace
-- `services/ingestion/` contains rules, pipeline, persist, resolver
+- `delinquency-review/` contains SKILL.md + resolver + views + api + cli
+- `document-ingestion/` contains SKILL.md + pipeline + scripts/app.yaml
+- `deep-research/` contains SKILL.md + scripts/app.yaml
 
-Avoid horizontal grouping by technical role (e.g. all queries together).
-Group by entity or capability.
+Every file related to a capability lives in that capability's directory.
+No horizontal grouping by technical role (resolvers together, apis together, etc.).
 
 ### Clean Architecture Boundaries
 The four packages enforce strict dependency rings:
@@ -196,35 +195,25 @@ src/remi/
     tools/            Domain-agnostic tool implementations
     workspace/        Agent working memory (Markdown scratchpad)
 
-  application/        # Real estate product (hexagonal)
-    core/             Pure business: models, protocols, rules, events
-    views/            Computed read-models — the read side of the domain:
-      managers.py     Manager aggregation and ranking
-      properties.py   Property list, detail, cross-property unit queries
-      leases.py       Lease list, expiring-lease calendar, tenant detail
-      maintenance.py  Maintenance list and summary
-      dashboard.py    Composite dashboard views
-      rent_roll.py    Detailed rent-roll assembly
-      _models.py      Read-model types (Pydantic)
-    services/         Orchestration pipelines (writes + async work):
-      ingestion/      YAML-workflow-driven report ingestion (pipeline.py,
-                      service.py, transforms.py, persisters.py, rules.py)
-      auto_assign.py  KB-tag-based property-to-manager assignment
-      search.py       RE-aware hybrid search
-    stores/           Port implementations: mem, pg, world model, indexer
-    tools/            Agent tool registrations
-    agents/           RE agent YAML manifests
-    events/           Event feed projections: HTTP poll + WebSocket push
-    api/              HTTP delivery — vertical slices:
-      portfolio/      managers, properties, units, portfolios
-      operations/     leases, maintenance, tenants, actions, notes
-      intelligence/   signals, dashboard, search, ontology, knowledge, events
-      system/         agents, documents, seed, usage
-    cli/              CLI delivery — vertical slices:
-      portfolio/      managers, property, units, portfolios, rent_roll
-      operations/     leases, maintenance, tenants
-      intelligence/   dashboard, search, ontology, graph, trace, research
-      system/         agents, documents, seed, demo, vectors, bench, db
+  application/              # Real estate product — sliced by capability
+    core/                   Pure models, protocols, rules — no framework deps
+    stores/                 Port implementations: mem, pg, world model, indexer
+    tools/                  Agent tool providers: query, documents, mutations
+    events/                 Event feed projections: HTTP poll + WebSocket push
+
+    # ── Capability slices ── each owns SKILL.md + code + manifest ──────────
+    delinquency-review/     SKILL.md, resolver, views, api, cli
+    lease-risk/             SKILL.md, resolver, views, api, cli
+    rent-roll/              SKILL.md, resolver, views, api, cli
+    manager-review/         SKILL.md, resolver, views, api, cli
+    portfolio-health/       SKILL.md, dashboard, api, cli
+    entity-search/          SKILL.md, search service, api, cli
+    entity-annotation/      SKILL.md, mutations, api          [planned]
+    maintenance-review/     SKILL.md, resolver, api, cli      [planned]
+    document-ingestion/     SKILL.md, pipeline, scripts/app.yaml
+    director-copilot/       scripts/app.yaml (primary chat agent, inline)
+    deep-research/          SKILL.md, scripts/app.yaml
+    manager-meeting-prep/   SKILL.md, scripts/app.yaml
 
   types/              # Shared vocabulary — ids, clock, errors, enums
 
@@ -242,6 +231,11 @@ or import from `remi.domain`. The real estate domain lives in `application/`.
 **There is no `detection/` package.** The precomputed entailment engine
 and snapshot system have been deleted. Do not create or import from
 `remi.application.services.detection`.
+
+**There is no `portfolio/`, `operations/`, or `intelligence/` package.**
+These old horizontal slices are replaced by capability-named vertical slices.
+Do not create `src/remi/application/portfolio/`, `operations/`, or `intelligence/`.
+New capabilities go in `src/remi/application/<capability-name>/`.
 
 **Dependency direction:** `application/` imports from `agent/` — never
 the reverse. `shell/` imports from both. `types/` imports nothing.
@@ -275,8 +269,11 @@ Three clean concepts:
 - **Command** = a `remi` CLI subcommand returning structured JSON.
   Returns `{"status": "success"|"error", "data": ..., "metadata": {...}}`.
   Used via `bash` for write operations and commands not in the `query` tool.
-- **Skill** = a markdown playbook (`SKILL.md`) with domain knowledge.
-  Discovered at startup, injected into the system prompt.
+- **Skill** = a capability slice in `application/`. Each skill owns its
+  cognitive layer (`SKILL.md` — injected into agent context at startup),
+  analytical scripts (`scripts/`), reference docs (`references/`), and
+  Python implementation (resolver, views, api, cli). Skills ship inside
+  the Python package — they are the application, not metadata about it.
 
 The `QueryToolProvider` (`application/tools/query.py`) provides a single
 `query` tool with an `operation` parameter that dispatches to the
@@ -835,41 +832,59 @@ No container bootstrap, no cold start.
 4. Always wrap output in `emit_success()` / `emit_error()`
 5. Use `--json/--table` flag defaulting to JSON
 
-## Skills — Domain Knowledge for Agents
+## Skills — Capability Slices in `application/`
 
-Skills live in `.remi/skills/<name>/SKILL.md`. Each has:
+Skills live in `src/remi/application/<capability-name>/`. Each is a
+complete vertical slice with three cognitive loading levels:
 
-- **YAML frontmatter** — name, description, tags, scope, trigger,
-  required_capabilities
-- **Knowledge section** — what to look for, red flags, interpretation
-- **Commands section** — example `remi` CLI invocations
+| Level | Content | Token cost |
+|-------|---------|------------|
+| Metadata | YAML frontmatter in `SKILL.md` — always loaded at startup | ~100 tokens |
+| Instructions | `SKILL.md` body — loaded when skill triggers | <5k tokens |
+| Resources | `references/`, `scripts/`, `assets/` — loaded on demand | Unlimited |
 
-Skills are discovered by `FilesystemSkillDiscovery` at agent startup
-and injected into the system prompt. Agents use `skills_paths:` in
-their YAML manifest to declare which skill directories to scan.
+**`SKILL.md`** — cognitive entrypoint: when to activate, how to reason,
+which tool calls to make, what to surface. Keep under 500 lines.
+
+**`references/`** — on-demand knowledge: `IMPL.md` (resolver → API → frontend
+map), `DATA.md` (field schema, null semantics). Zero token cost until referenced.
+
+**`scripts/`** — executable code the agent runs via bash/python. Includes
+`app.yaml` for agent/workflow manifests. Only output enters the context window.
+
+**`assets/`** — static lookup tables, templates, canonical reference data.
+
+Skills are discovered by `FilesystemSkillDiscovery` scanning `application/`
+recursively for `SKILL.md` files. Agent manifests (`app.yaml` in `scripts/`)
+are discovered by `_discover_manifests()` scanning `application/**/scripts/app.yaml`.
+
+Agents declare which directories to scan via `skills_paths:` in their manifest.
 
 ### What NOT to do with skills
 
-- Do not put Python code in skills. Skills teach CLI commands.
-- Do not put `import remi` examples. The bridge is deleted.
-- Do not create complex multi-file skill packages. One SKILL.md per
-  skill, in its own directory.
+- Do not put skills in `.remi/skills/` — they belong in `application/<capability>/`
+- Do not create skills outside `application/` — they won't ship with the package
+- Do not leave `SKILL.md` siblings unreferenced — unreferenced files provide zero value
+- Do not nest skills inside subdirectories — the standard is flat: `application/<name>/SKILL.md`
 
-## Application Structure — Product Surface, Not Integration
+## Application Structure — Sliced by Capability
 
-`application/` is organized by **product surface** — what the user
-sees and what business capability it serves:
+`application/` is organized by **capability** — one directory per thing
+the system knows how to do. Each capability owns its full stack:
+cognitive layer (SKILL.md), analytical scripts, reference docs, and
+Python implementation (resolver, views, HTTP routes, CLI commands).
 
-- `portfolio/` — managers, properties, units, rent rolls, rankings
-- `operations/` — leases, maintenance, delinquency, actions, notes
-- `intelligence/` — dashboard, search, trends, assertions, knowledge
-- `ingestion/` — document upload, extraction pipeline
+**Shared infrastructure** (not capability-specific) lives flat in `application/`:
+- `core/` — pure models, protocols, rules (no framework deps)
+- `stores/` — persistence port implementations
+- `tools/` — agent tool providers (query, documents, mutations)
+- `events/` — event feed HTTP/WS delivery
 
-This is NOT organized by data source. When ServiceM8, Xero, or Gmail
-data flows in, it feeds into existing surfaces (maintenance data from
-ServiceM8 enriches `operations/`, financials from Xero enrich
-`portfolio/`). New integrations add **data adapters**, not new
-top-level packages.
+**When adding a new data source** (ServiceM8, Xero, Gmail): it produces
+data that enriches existing capabilities. Add a data adapter within the
+relevant capability slice — not a new top-level package. Maintenance data
+from ServiceM8 enriches `maintenance-review/`. Financial data from Xero
+enriches `portfolio-health/` and `delinquency-review/`.
 
 ### Future integrations
 
@@ -881,8 +896,7 @@ prepares for this via:
 - Protocol-based stores (swap implementations per data source)
 - CLI client mode (agents don't know how data is stored)
 
-Do not force integration infrastructure into the current `application/`
-packages prematurely.
+Do not force integration infrastructure into capability slices prematurely.
 
 ## Key Constraints
 

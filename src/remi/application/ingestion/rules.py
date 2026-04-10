@@ -713,6 +713,15 @@ REPORT_CAN_CREATE: dict[str, frozenset[str]] = {
     "property_directory": frozenset({
         "Property", "PropertyManager", "Unit",
     }),
+    "unit_directory": frozenset({
+        # Unit is the primary entity. Property is allowed so that _ensure_property
+        # can create the property record when unit_directory is ingested standalone
+        # (without a prior property_directory). PropertyManager is excluded —
+        # unit_directory manager attribution comes from the Tags column, which
+        # flows through the ManagerResolver inside persist_unit, not as a top-level
+        # row type.
+        "Unit", "Property",
+    }),
     "rent_roll": frozenset({
         "Unit", "Lease", "Tenant",
     }),

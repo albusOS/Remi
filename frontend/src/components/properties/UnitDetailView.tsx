@@ -5,8 +5,6 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmt$, fmtDate } from "@/lib/format";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import { MetricCard } from "@/components/ui/MetricCard";
-import { MetricStrip } from "@/components/ui/MetricStrip";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { SparklineChart } from "@/components/ui/SparklineChart";
@@ -443,7 +441,7 @@ export function UnitDetailView({ propertyId, unitId }: { propertyId: string; uni
       {/* Breadcrumb + hero */}
       <div className="anim-fade-up">
         <div className="flex items-center gap-1.5 text-xs text-fg-faint">
-          <Link href="/" className="hover:text-fg-secondary transition-colors">&larr; Home</Link>
+          <Link href="/properties" className="hover:text-fg-secondary transition-colors">Properties</Link>
           {property.manager_id && property.manager_name && (
             <>
               <span>/</span>
@@ -473,12 +471,20 @@ export function UnitDetailView({ propertyId, unitId }: { propertyId: string; uni
       </div>
 
       {/* KPI strip — staggered */}
-      <MetricStrip className="grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 stagger">
-        <MetricCard label="Current Rent" value={fmt$(unitRow.current_rent)} sub={unitRow.tenant ? `Tenant: ${unitRow.tenant.name}` : "Vacant"} />
-        <MetricCard label="Market Rent" value={fmt$(unitRow.market_rent)} />
-        <MetricCard label="Rent Gap" value={fmt$(unitRow.rent_gap)} alert={unitRow.rent_gap < 0} sub={unitRow.pct_below_market > 0 ? `${unitRow.pct_below_market}% below market` : "At or above market"} />
-        <MetricCard label="Open Issues" value={unitRow.issues.length} alert={unitRow.issues.length > 0} sub={unitRow.open_maintenance > 0 ? `${unitRow.open_maintenance} maintenance` : "No open items"} />
-      </MetricStrip>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 stagger">
+        {[
+          { label: "Current Rent", value: fmt$(unitRow.current_rent), sub: unitRow.tenant ? `Tenant: ${unitRow.tenant.name}` : "Vacant", alert: false },
+          { label: "Market Rent", value: fmt$(unitRow.market_rent), sub: undefined, alert: false },
+          { label: "Rent Gap", value: fmt$(unitRow.rent_gap), sub: unitRow.pct_below_market > 0 ? `${unitRow.pct_below_market}% below market` : "At or above market", alert: unitRow.rent_gap < 0 },
+          { label: "Open Issues", value: String(unitRow.issues.length), sub: unitRow.open_maintenance > 0 ? `${unitRow.open_maintenance} maintenance` : "No open items", alert: unitRow.issues.length > 0 },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-border bg-surface px-4 py-3">
+            <p className="text-[9px] font-semibold text-fg-muted uppercase tracking-widest mb-1">{s.label}</p>
+            <p className={`text-sm font-bold font-mono ${s.alert ? "text-warn-fg" : "text-fg"}`}>{s.value}</p>
+            {s.sub && <p className="text-[10px] text-fg-faint mt-0.5">{s.sub}</p>}
+          </div>
+        ))}
+      </div>
 
       {/* Tabs — icon + label, horizontally scrollable on mobile */}
       <div className="border-b border-border-subtle flex gap-0 overflow-x-auto anim-fade-in scrollbar-none" style={{ animationDelay: "200ms" }}>

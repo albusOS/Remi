@@ -22,6 +22,7 @@ import structlog
 
 from remi.agent.documents import ContentStore
 from remi.agent.events import DomainEvent, EventBus
+from remi.agent.signals import DomainSchema
 from remi.agent.types import ToolArg, ToolDefinition, ToolProvider, ToolRegistry
 from remi.application.core.models import PropertyManager, ReportType
 from remi.application.core.protocols import PropertyStore
@@ -41,11 +42,41 @@ from remi.application.ingestion.rules import (
     property_name,
     resolve_manager_from_metadata,
 )
-from remi.application.ingestion.vocab import match_columns
+from remi.application.ingestion.vocab import PROFILES, match_columns
 from remi.types.identity import manager_id as _manager_id
 from remi.types.identity import property_id as _property_id
 
 _log = structlog.get_logger(__name__)
+
+
+def _build_entity_schema(domain_schema: DomainSchema | None) -> str:
+    """Render a compact entity-type reference for the LLM classification step.
+
+    Derives the report_type → entity_type mapping from ``PROFILES`` and
+    augments each entity with its description from the domain schema.
+    Falls back to a bare name when the schema is absent or the type is unknown.
+    """
+    desc_by_name: dict[str, str] = {}
+    if domain_schema is not None:
+        desc_by_name = {et.name: et.description.strip() for et in domain_schema.entity_types}
+
+    # Collect unique (entity_type → [report_types]) in profile order.
+    entity_to_reports: dict[str, list[str]] = {}
+    for profile in PROFILES:
+        entity_to_reports.setdefault(profile.entity_type, [])
+        if profile.report_type not in entity_to_reports[profile.entity_type]:
+            entity_to_reports[profile.entity_type].append(profile.report_type)
+
+    lines = ["Entity types for report classification:"]
+    for entity_type, report_types in entity_to_reports.items():
+        desc = desc_by_name.get(entity_type, "")
+        reports_str = ", ".join(report_types)
+        if desc:
+            lines.append(f"- {entity_type}: {desc} (report_type: {reports_str})")
+        else:
+            lines.append(f"- {entity_type} (report_type: {reports_str})")
+
+    return "\n".join(lines)
 
 
 class IngestionToolProvider(ToolProvider):
@@ -57,11 +88,13 @@ class IngestionToolProvider(ToolProvider):
         property_store: PropertyStore,
         event_bus: EventBus,
         format_registry: FormatRegistry | None = None,
+        domain_schema: DomainSchema | None = None,
     ) -> None:
         self._cs = content_store
         self._ps = property_store
         self._event_bus = event_bus
         self._format_registry = format_registry
+        self._entity_schema = _build_entity_schema(domain_schema)
 
     def register(self, registry: ToolRegistry) -> None:
         cs = self._cs
@@ -69,6 +102,8 @@ class IngestionToolProvider(ToolProvider):
         event_bus = self._event_bus
 
         # -- ingest_analyze ----------------------------------------------------
+
+        entity_schema = self._entity_schema
 
         async def ingest_analyze(args: dict[str, Any]) -> Any:
             doc_id = args.get("document_id", "")
@@ -91,6 +126,7 @@ class IngestionToolProvider(ToolProvider):
                 "resolved_manager": manager_name,
                 "resolved_scope": scope,
                 "sample_rows": content.rows[:5],
+                "entity_schema": entity_schema,
             }
 
         registry.register(

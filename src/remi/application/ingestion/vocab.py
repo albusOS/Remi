@@ -28,7 +28,10 @@ VOCAB: dict[str, str] = {
     # ── Property address ──────────────────────────────────────────────────
     "property":                  "property_address",
     "property address":          "property_address",
-    "property name":             "property_address",
+    # "property name" is context-dependent: full address in most reports, but a
+    # short label in unit_directory (where "Property" already carries the full
+    # address). Resolved per-profile via ambiguous_as to avoid truncation bugs.
+    "property name":             "_property_name_ambiguous",
     "address":                   "property_address",
     "location":                  "property_address",
     "building":                  "property_address",
@@ -39,6 +42,7 @@ VOCAB: dict[str, str] = {
     # ── Unit ─────────────────────────────────────────────────────────────
     "unit":                      "unit_number",
     "unit number":               "unit_number",
+    "unit name":                 "unit_number",
     "unit #":                    "unit_number",
     "unit no":                   "unit_number",
     "unit no.":                  "unit_number",
@@ -48,6 +52,9 @@ VOCAB: dict[str, str] = {
     "apartment":                 "unit_number",
     "apartment number":          "unit_number",
     "suite":                     "unit_number",
+    "unit address":              "_unit_address",
+    "unit street address 1":     "_unit_street_address_1",
+    "unit street address 2":     "_unit_street_address_2",
 
     # ── Beds / baths ─────────────────────────────────────────────────────
     "bd/ba":                     "_bd_ba",
@@ -152,10 +159,11 @@ VOCAB: dict[str, str] = {
     "list rent":                 "market_rent",
     "asking rent":               "market_rent",
     "advertised rent":           "market_rent",
-    # Rent roll "Revenue" column = asking/market rate for vacant units;
-    # occupied rows leave it blank so it safely falls through to market_rent.
-    "revenue":                   "market_rent",
+    # "revenue" is context-dependent: dollar amount (vacant market rent) in rent_roll,
+    # Yes/No boolean in unit_directory. Resolved per-profile via ambiguous_as.
+    "revenue":                   "_revenue_ambiguous",
     "deposit":                   "deposit",
+    "default deposit":           "deposit",
     "security deposit":          "deposit",
     "sec dep":                   "deposit",
     "security":                  "deposit",
@@ -295,6 +303,10 @@ VOCAB: dict[str, str] = {
 
 # Headers that mean different things depending on report type.
 # Stored separately; resolved after profile detection.
+# "revenue" and "property name" are also context-dependent — they are handled
+# in VOCAB itself (mapped to sentinel values) rather than here, because _AMBIGUOUS
+# is only consulted during the header→field lookup pass; the profile ambiguous_as
+# dict resolves sentinel canonical fields after profile detection.
 _AMBIGUOUS: dict[str, str] = {
     "name":    "_name_ambiguous",
     "manager": "_manager_ambiguous",
@@ -379,60 +391,114 @@ PROFILES: list[Profile] = [
         report_type="property_directory",
         entity_type="PropertyManager",
         required=frozenset({"site_manager_name", "_unit_count"}),
-        ambiguous_as={"_name_ambiguous": "site_manager_name",
-                      "_manager_ambiguous": "site_manager_name"},
+        ambiguous_as={
+            "_name_ambiguous": "site_manager_name",
+            "_manager_ambiguous": "site_manager_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",  # no Revenue column expected here
+        },
+    ),
+    Profile(
+        report_type="unit_directory",
+        entity_type="Unit",
+        # unit_number (Unit Name), property_address (Property), and bedrooms are
+        # all guaranteed present in every AppFolio unit directory export.
+        required=frozenset({"unit_number", "property_address", "bedrooms"}),
+        ambiguous_as={
+            "_name_ambiguous": "unit_number",
+            "_manager_ambiguous": "site_manager_name",
+            # "Property Name" is a short label here ("1 Crosman St"), NOT the full
+            # address — keep it private to prevent overwriting the full address from
+            # the "Property" column.
+            "_property_name_ambiguous": "_property_label",
+            # "Revenue" is a Yes/No boolean flag in unit_directory, not market rent.
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="delinquency",
         entity_type="BalanceObservation",
         required=frozenset({"balance_total", "balance_0_30"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name",
-                      "_manager_ambiguous": "site_manager_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_manager_ambiguous": "site_manager_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="lease_expiration",
         entity_type="Lease",
         required=frozenset({"lease_expires", "tenant_name"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name",
-                      "_manager_ambiguous": "site_manager_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_manager_ambiguous": "site_manager_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="rent_roll",
         entity_type="Unit",
         required=frozenset({"_bd_ba", "days_vacant"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name",
-                      "_manager_ambiguous": "site_manager_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_manager_ambiguous": "site_manager_name",
+            "_property_name_ambiguous": "property_address",
+            # "Revenue" = asking/market rate for vacant units in rent_roll reports.
+            "_revenue_ambiguous": "market_rent",
+        },
     ),
     Profile(
         report_type="rent_roll",        # alternate: rent roll without days_vacant
         entity_type="Unit",
         required=frozenset({"_bd_ba", "lease_expires", "property_address"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name",
-                      "_manager_ambiguous": "site_manager_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_manager_ambiguous": "site_manager_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "market_rent",
+        },
     ),
     Profile(
         report_type="maintenance",
         entity_type="MaintenanceRequest",
         required=frozenset({"scheduled_date", "completed_date"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="tenant_directory",
         entity_type="Tenant",
         required=frozenset({"tenant_name", "email", "phone"}),
-        ambiguous_as={"_name_ambiguous": "tenant_name"},
+        ambiguous_as={
+            "_name_ambiguous": "tenant_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="owner_directory",
         entity_type="Owner",
         required=frozenset({"email", "company"}),
-        ambiguous_as={"_name_ambiguous": "owner_name"},
+        ambiguous_as={
+            "_name_ambiguous": "owner_name",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
     Profile(
         report_type="vendor_directory",
         entity_type="Vendor",
         required=frozenset({"vendor", "category"}),
-        ambiguous_as={"_name_ambiguous": "vendor"},
+        ambiguous_as={
+            "_name_ambiguous": "vendor",
+            "_property_name_ambiguous": "property_address",
+            "_revenue_ambiguous": "_revenue",
+        },
     ),
 ]
 

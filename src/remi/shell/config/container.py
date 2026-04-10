@@ -218,6 +218,7 @@ class Container:
                 property_store=self.property_store,
                 event_bus=self.event_bus,
                 format_registry=self.format_registry,
+                domain_schema=self.domain_schema,
             ),
         ]
         for provider in re_providers:

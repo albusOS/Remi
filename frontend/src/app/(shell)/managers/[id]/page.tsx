@@ -1,13 +1,13 @@
 "use client";
 
 import { use } from "react";
-import { ManagerReviewView } from "@/components/managers/ManagerReviewView";
+import { ManagerDetailView } from "@/components/managers/ManagerDetailView";
 
-export default function ManagerReviewPage({
+export default function ManagerDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  return <ManagerReviewView managerId={decodeURIComponent(id)} />;
+  return <ManagerDetailView managerId={decodeURIComponent(id)} />;
 }

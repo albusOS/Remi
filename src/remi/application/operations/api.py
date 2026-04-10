@@ -306,6 +306,16 @@ class UpdateTenantRequest(BaseModel):
 tenants_router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
+@tenants_router.get("", response_model=list[Tenant])
+async def list_tenants(
+    c: Ctr, property_id: str | None = None, status: str | None = None
+) -> list[Tenant]:
+    tenant_status = TenantStatus(status) if status else None
+    return await c.property_store.list_tenants(
+        property_id=property_id, status=tenant_status
+    )
+
+
 @tenants_router.get("/{tenant_id}", response_model=TenantDetail)
 async def get_tenant(tenant_id: str, c: Ctr) -> TenantDetail:
     detail = await c.lease_resolver.tenant_detail(tenant_id)

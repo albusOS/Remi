@@ -68,6 +68,13 @@ schema:
         repairs, or make-ready work.
       key_fields: [name, trade]
 
+    - name: BalanceObservation
+      description: >
+        A snapshot of a tenant's outstanding balance at a point in time,
+        broken into aging buckets (0–30 days, 30+ days). Sourced from
+        delinquency reports.
+      key_fields: [tenant_name, balance_total, balance_0_30, balance_30_plus]
+
   # ---------------------------------------------------------------------------
   # Relationships — how entity types connect
   # ---------------------------------------------------------------------------

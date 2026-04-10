@@ -67,13 +67,10 @@ function groupResults(results: SearchHit[]): [string, SearchHit[]][] {
 }
 
 const NAV_PAGES = [
-  { label: "REMI", href: "/", keywords: "home remi ask ai chat agent" },
-  { label: "Portfolio Dashboard", href: "/?tab=portfolio", keywords: "dashboard overview portfolio" },
-  { label: "Managers", href: "/managers", keywords: "managers property pm" },
-  { label: "Documents", href: "/?tab=documents", keywords: "documents upload files knowledge" },
-  { label: "Delinquency", href: "/delinquency", keywords: "delinquent tenants collections owed" },
-  { label: "Expiring Leases", href: "/leases", keywords: "leases expiring mtm month" },
-  { label: "Vacancies", href: "/vacancies", keywords: "vacant units vacancy" },
+  { label: "Ask REMI", href: "/", keywords: "ask remi ai chat agent home intelligence" },
+  { label: "Managers", href: "/managers", keywords: "managers property pm portfolio" },
+  { label: "Properties", href: "/properties", keywords: "properties buildings units" },
+  { label: "Documents", href: "/documents", keywords: "documents upload files reports ingestion" },
 ];
 
 

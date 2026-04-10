@@ -327,6 +327,7 @@ def _pre_set_manager_tag(row: dict[str, Any], ctx: IngestionCtx, prop_id: str) -
 # to skip the row rather than creating a phantom property.
 _PROPERTY_AUTHORITATIVE_TYPES: frozenset[ReportType] = frozenset({
     ReportType.PROPERTY_DIRECTORY,
+    ReportType.UNIT_DIRECTORY,   # directory reports are authoritative for property existence
     ReportType.RENT_ROLL,
     ReportType.LEASE_EXPIRATION,
     ReportType.UNKNOWN,  # permissive fallback for unclassified documents
@@ -1219,20 +1220,6 @@ async def persist_manager(row: dict[str, Any], ctx: IngestionCtx) -> None:
             ctx.property_manager[prop_id] = mid
         await _ensure_property(prop_row, ctx)
 
-        unit_count = to_int(row.get("_unit_count"))
-        if unit_count and unit_count == 1:
-            uid = _unit_id(prop_id, "main")
-            await ctx.ps.upsert_unit(
-                _with_hash(
-                    Unit(
-                        id=uid,
-                        property_id=prop_id,
-                        unit_number="main",
-                        source_document_id=ctx.doc_id,
-                    )
-                )
-            )  # type: ignore[arg-type]
-            await _record_extracted(ctx, uid, "Unit")
 
 
 _Persister = Callable[["dict[str, Any]", IngestionCtx], Any]

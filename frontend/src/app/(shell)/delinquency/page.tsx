@@ -1,7 +1,7 @@
 "use client";
 
-import { DelinquencyView } from "@/components/delinquency/DelinquencyView";
+import { CollectionsPipelineView } from "@/components/delinquency/CollectionsPipelineView";
 
 export default function DelinquencyPage() {
-  return <DelinquencyView />;
+  return <CollectionsPipelineView />;
 }

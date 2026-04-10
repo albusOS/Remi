@@ -1,7 +1,7 @@
 "use client";
 
-import { LeasesView } from "@/components/leases/LeasesView";
+import { LeasePipelineView } from "@/components/leases/LeasePipelineView";
 
 export default function LeasesPage() {
-  return <LeasesView />;
+  return <LeasePipelineView />;
 }

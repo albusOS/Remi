@@ -198,6 +198,7 @@ class ReportType(StrEnum):
     WORK_ORDER = "work_order"
     LEASE_EXPIRATION = "lease_expiration"
     PROPERTY_DIRECTORY = "property_directory"
+    UNIT_DIRECTORY = "unit_directory"
     TENANT_DIRECTORY = "tenant_directory"
     VENDOR_DIRECTORY = "vendor_directory"
     OWNER_DIRECTORY = "owner_directory"

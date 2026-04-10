@@ -10,9 +10,19 @@ import { useTheme } from "@/lib/theme";
 import type { FeedEvent } from "@/lib/types";
 
 function NavLink({
-  href, label, icon, active, collapsed, onClick,
+  href,
+  label,
+  icon,
+  active,
+  collapsed,
+  onClick,
 }: {
-  href: string; label: string; icon: ReactNode; active: boolean; collapsed?: boolean; onClick?: () => void;
+  href: string;
+  label: string;
+  icon: ReactNode;
+  active: boolean;
+  collapsed?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Link
@@ -22,9 +32,10 @@ function NavLink({
       className={`
         flex items-center rounded-lg text-[13px] transition-all
         ${collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2"}
-        ${active
-          ? "bg-accent-soft text-fg font-medium border border-accent/20"
-          : "text-fg-muted hover:text-fg-secondary hover:bg-surface-raised border border-transparent"
+        ${
+          active
+            ? "bg-accent-soft text-fg font-medium border border-accent/20"
+            : "text-fg-muted hover:text-fg-secondary hover:bg-surface-raised border border-transparent"
         }
       `}
     >
@@ -34,56 +45,15 @@ function NavLink({
   );
 }
 
-function HamburgerButton({ open, onClick }: { open: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-raised transition-colors"
-      aria-label={open ? "Close menu" : "Open menu"}
-    >
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        {open ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        ) : (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-        )}
-      </svg>
-    </button>
-  );
-}
 
-const NAV_ITEMS = [
-  {
-    href: "/",
-    label: "REMI",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/managers",
-    label: "Managers",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/documents",
-    label: "Documents",
-    icon: (
-      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-      </svg>
-    ),
-  },
-];
 
 const INVALIDATION_MAP: Record<string, string[][]> = {
-  "ingestion.complete": [["api", "documents"], ["api", "dashboard"], ["api", "properties"], ["api", "managers"]],
+  "ingestion.complete": [
+    ["api", "documents"],
+    ["api", "dashboard"],
+    ["api", "properties"],
+    ["api", "managers"],
+  ],
   "assertion.created": [["api", "events"], ["api", "properties"], ["api", "managers"]],
 };
 
@@ -91,14 +61,17 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
 
-  const onEvent = useCallback((event: FeedEvent) => {
-    const keys = INVALIDATION_MAP[event.topic];
-    if (keys) {
-      for (const key of keys) {
-        queryClient.invalidateQueries({ queryKey: key });
+  const onEvent = useCallback(
+    (event: FeedEvent) => {
+      const keys = INVALIDATION_MAP[event.topic];
+      if (keys) {
+        for (const key of keys) {
+          queryClient.invalidateQueries({ queryKey: key });
+        }
       }
-    }
-  }, [queryClient]);
+    },
+    [queryClient],
+  );
 
   const { connected } = useAppOSEvents(onEvent);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -107,16 +80,21 @@ export function Shell({ children }: { children: ReactNode }) {
   const { theme, toggle: toggleTheme } = useTheme();
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/" || pathname === "/ask";
-    if (href === "/managers")
-      return pathname.startsWith("/managers") || pathname.startsWith("/properties");
+    if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
   };
 
   const closeMobile = () => setMobileOpen(false);
 
+  const icon = (path: string) => (
+    <svg className="w-[18px] h-[18px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+      <path strokeLinecap="round" strokeLinejoin="round" d={path} />
+    </svg>
+  );
+
   const sidebarContent = (isCollapsed: boolean) => (
     <>
+      {/* Logo */}
       <div className={`border-b border-border-subtle ${isCollapsed ? "px-2 py-4 flex justify-center" : "px-4 py-4"}`}>
         <div className={`flex items-center ${isCollapsed ? "" : "gap-2.5"}`}>
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center shrink-0">
@@ -125,13 +103,60 @@ export function Shell({ children }: { children: ReactNode }) {
           {!isCollapsed && (
             <div className="min-w-0">
               <h1 className="text-sm font-semibold text-fg tracking-tight">REMI</h1>
-              <p className="text-[9px] text-fg-faint -mt-0.5 truncate">portfolio intelligence</p>
+              <p className="text-[9px] text-fg-faint -mt-0.5 truncate">AI property intelligence</p>
             </div>
           )}
         </div>
       </div>
 
-      <div className="px-2 pt-2">
+      {/* Nav */}
+      <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
+        {/* Ask REMI — the product */}
+        <NavLink
+          href="/"
+          label="Ask REMI"
+          active={isActive("/")}
+          collapsed={isCollapsed}
+          onClick={closeMobile}
+          icon={icon("M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z")}
+        />
+
+        {/* Divider */}
+        {!isCollapsed && (
+          <p className="px-1 pt-3 pb-1 text-[9px] font-semibold text-fg-ghost uppercase tracking-widest">
+            Portfolio
+          </p>
+        )}
+        {isCollapsed && <div className="my-2 border-t border-border-subtle mx-1" />}
+
+        <NavLink
+          href="/managers"
+          label="Managers"
+          active={isActive("/managers")}
+          collapsed={isCollapsed}
+          onClick={closeMobile}
+          icon={icon("M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z")}
+        />
+        <NavLink
+          href="/properties"
+          label="Properties"
+          active={isActive("/properties")}
+          collapsed={isCollapsed}
+          onClick={closeMobile}
+          icon={icon("M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21")}
+        />
+        <NavLink
+          href="/documents"
+          label="Documents"
+          active={isActive("/documents")}
+          collapsed={isCollapsed}
+          onClick={closeMobile}
+          icon={icon("M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25")}
+        />
+      </div>
+
+      {/* Search */}
+      <div className="px-2 pb-2">
         <button
           onClick={() => { closeMobile(); cmd.setOpen(true); }}
           title={isCollapsed ? "Search (⌘K)" : undefined}
@@ -152,19 +177,12 @@ export function Shell({ children }: { children: ReactNode }) {
         </button>
       </div>
 
-      <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => (
-          <NavLink key={item.href} {...item} active={isActive(item.href)} collapsed={isCollapsed} onClick={closeMobile} />
-        ))}
-      </div>
-
+      {/* Footer */}
       <div className={`border-t border-border-subtle ${isCollapsed ? "px-2 py-3 flex flex-col items-center gap-2" : "px-3 py-3 flex items-center justify-between gap-2"}`}>
         <div className="flex items-center gap-2">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${connected ? "bg-ok" : "bg-error"}`} />
           {!isCollapsed && (
-            <span className="text-[10px] text-fg-faint">
-              {connected ? "Live" : "Offline"}
-            </span>
+            <span className="text-[10px] text-fg-faint">{connected ? "Live" : "Offline"}</span>
           )}
         </div>
         <div className={`flex items-center ${isCollapsed ? "flex-col gap-1" : "gap-1"}`}>
@@ -184,7 +202,6 @@ export function Shell({ children }: { children: ReactNode }) {
               </svg>
             )}
           </button>
-          {/* Collapse toggle — desktop only */}
           <button
             onClick={() => setCollapsed((c) => !c)}
             title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -193,7 +210,10 @@ export function Shell({ children }: { children: ReactNode }) {
           >
             <svg
               className={`w-3.5 h-3.5 transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.8}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
             </svg>
@@ -214,7 +234,10 @@ export function Shell({ children }: { children: ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-fg/20 drawer-overlay" onClick={closeMobile} />
-          <nav className="absolute left-0 top-0 bottom-0 w-64 bg-surface-raised border-r border-border flex flex-col drawer-panel" style={{ animationName: "drawerSlideLeft" }}>
+          <nav
+            className="absolute left-0 top-0 bottom-0 w-64 bg-surface-raised border-r border-border flex flex-col drawer-panel"
+            style={{ animationName: "drawerSlideLeft" }}
+          >
             {sidebarContent(false)}
           </nav>
         </div>
@@ -222,7 +245,19 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border-subtle bg-surface">
-          <HamburgerButton open={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)} />
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-raised transition-colors"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              {mobileOpen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              )}
+            </svg>
+          </button>
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-6 h-6 rounded-md bg-accent flex items-center justify-center shrink-0">
               <span className="text-accent-fg text-[9px] font-bold">R</span>

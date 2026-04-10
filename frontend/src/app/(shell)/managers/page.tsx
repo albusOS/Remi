@@ -1,7 +1,7 @@
 "use client";
 
-import { ManagersView } from "@/components/managers/ManagersView";
+import { ManagersListView } from "@/components/managers/ManagersListView";
 
 export default function ManagersPage() {
-  return <ManagersView />;
+  return <ManagersListView />;
 }
